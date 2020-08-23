@@ -1,7 +1,7 @@
 ### Hi there 👋
 
 - 🔭 I’m currently working on [Clause](www.github.com/clausehq) and [Accord Project](www.github.com/accordproject)
-- 📫 How to reach me: peter@peterhunn.com | @peterhunn 
+- 📫 How to reach me: peter@peterhunn.com | [@peterhunn](www.twitter.com/peterhunn) 
 - 😄 Pronouns: He/Him
 <!---- 🌱 I’m currently learning ...
 - 👯 I’m looking to collaborate on ...
