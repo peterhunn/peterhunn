@@ -1,6 +1,6 @@
 ### Hi there 👋
 
-- 🔭 I’m currently working on [Clause](http://github.com/clausehq) and [Accord Project](http://github.com/accordproject)
+- 🔭 I’m currently working on bsmart agreements at DocuSign and [Accord Project](http://github.com/accordproject). Previously founded [Clause](http://github.com/clausehq) (acquired). 
 - 📫 How to reach me: peter@peterhunn.com | [@peterhunn](http://twitter.com/peterhunn) 
 - 😄 Pronouns: He/Him
 <!---- 🌱 I’m currently learning ...
