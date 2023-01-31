@@ -1,4 +1,4 @@
-### 👋
+### Hi! 👋
 
 🔭  Smart agreements at [DocuSign](http://github.com/docusign) and founded [Accord Project](http://github.com/accordproject). Previously founded [Clause](http://github.com/clausehq) (acq. by [DocuSign](http://github.com/docusign)) </br>
 📫   peter@peterhunn.com and [@peterhunn](http://twitter.com/peterhunn) </br>
