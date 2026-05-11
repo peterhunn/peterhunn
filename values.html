@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Values — Variant</title>
+  <meta name="description" content="The values and cultural tenets that define how Variant works and what we believe.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="nav">
+  <div class="nav-inner">
+    <a href="index.html" class="nav-logo">Variant</a>
+    <nav class="nav-links" id="nav-links">
+      <a href="about.html">About</a>
+      <a href="team.html">Team</a>
+      <a href="portfolio.html">Portfolio</a>
+      <a href="writing.html">Writing</a>
+      <a href="projects.html">Projects</a>
+      <a href="careers.html">Careers</a>
+    </nav>
+    <button class="nav-burger" id="nav-burger" aria-label="Toggle menu">
+      <span></span><span></span><span></span>
+    </button>
+  </div>
+</header>
+
+<main>
+
+  <div class="page-hero">
+    <div class="wrap">
+      <h1 class="page-title">What we believe and how we work.</h1>
+      <p class="page-desc">These are the cultural tenets that shape how we invest, how we work with founders, and how we show up for each other and the ecosystem.</p>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="wrap">
+      <div class="values-list">
+
+        <div class="value-row">
+          <p class="value-name">Users become owners</p>
+          <p class="value-body">We believe the most important companies of the next decade will be those that turn their users into stakeholders. This isn't just a thesis — it's what we optimize for in every investment decision. We back teams that are building products where users have meaningful ownership of the value they help create.</p>
+        </div>
+
+        <div class="value-row">
+          <p class="value-name">Build in public</p>
+          <p class="value-body">We share what we learn. We publish our research, make our thinking transparent, and contribute to the broader ecosystem's knowledge base — even when that means giving away ideas or insights that competitors might use. We believe that a rising tide lifts all boats, and that the best founders want investors who are genuine, visible participants in the space.</p>
+        </div>
+
+        <div class="value-row">
+          <p class="value-name">Take the long view</p>
+          <p class="value-body">Crypto moves fast, markets are volatile, and it's easy to get caught up in short-term cycles. We try to stay focused on the long-term trajectory of technology and human coordination. We make investment decisions we'd be comfortable defending five years from now, and we support founders through bull markets and bear markets alike.</p>
+        </div>
+
+        <div class="value-row">
+          <p class="value-name">Mission-driven, not just market-driven</p>
+          <p class="value-body">We invest because we believe in the ownership economy — not just because crypto markets are large. This distinction matters. It shapes which founders we back, which companies we help the most, and how we make difficult decisions when financial incentives and mission incentives point in different directions. We try to always choose mission.</p>
+        </div>
+
+        <div class="value-row">
+          <p class="value-name">Genuine crypto-nativeness</p>
+          <p class="value-body">We've been in this ecosystem for years — not because it was a good career move, but because we believe in it. We hold crypto, we use the products we invest in, we participate in the communities we fund, and we engage genuinely with the technical and cultural questions the space raises. We expect the same from our team and try to work with founders who share this orientation.</p>
+        </div>
+
+        <div class="value-row">
+          <p class="value-name">Founders first</p>
+          <p class="value-body">Our job is to help founders succeed — not the other way around. We try to be the investors we'd want to have: honest, responsive, available in a crisis, willing to help with the hard stuff, and deferential to founders on decisions that are theirs to make. We succeed when our founders succeed, and we never lose sight of that.</p>
+        </div>
+
+        <div class="value-row">
+          <p class="value-name">Intellectual rigor</p>
+          <p class="value-body">We do the work. We read the code, understand the mechanism design, stress-test the thesis, and engage deeply with complexity rather than papering over it with narrative. We believe that the best investment decisions come from genuinely understanding what you're investing in — and we hold ourselves to a high standard on this.</p>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<footer class="footer">
+  <div class="footer-inner">
+    <div class="footer-left">
+      <span class="footer-logo">Variant</span>
+      <p class="footer-copy">© 2025 Variant Fund Management, LLC</p>
+    </div>
+    <div class="footer-links">
+      <a href="https://twitter.com/variantfund" target="_blank" rel="noopener">Twitter</a>
+      <a href="https://linkedin.com/company/variantfund" target="_blank" rel="noopener">LinkedIn</a>
+      <a href="https://blog.variant.fund" target="_blank" rel="noopener">Blog</a>
+      <a href="values.html">Values</a>
+      <a href="disclosures.html">Disclosures</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+  const burger = document.getElementById('nav-burger');
+  const links  = document.getElementById('nav-links');
+  burger.addEventListener('click', () => links.classList.toggle('open'));
+</script>
+</body>
+</html>
