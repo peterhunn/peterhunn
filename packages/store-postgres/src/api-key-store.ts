@@ -22,9 +22,9 @@ function rowToKey(r: ApiKeyRow): ApiKey {
     name: r.name,
     keyHash: r.key_hash,
     mode: r.mode as ApiKey["mode"],
-    partyId: r.party_id ?? undefined,
+    ...(r.party_id !== null ? { partyId: r.party_id } : {}),
     createdAt: r.created_at,
-    revokedAt: r.revoked_at ?? undefined,
+    ...(r.revoked_at !== null ? { revokedAt: r.revoked_at } : {}),
   };
 }
 

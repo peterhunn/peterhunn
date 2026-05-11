@@ -171,7 +171,7 @@ function handleBreach(
         $class: "org.accordproject.nda.BreachEvent",
         eventId: crypto.randomUUID(),
         timestamp: new Date().toISOString(),
-        party: event.party,
+        ...(event.party !== undefined ? { party: event.party } : {}),
         payload: { description: event.payload.description },
       },
     ],

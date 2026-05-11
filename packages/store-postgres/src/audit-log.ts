@@ -21,7 +21,7 @@ function rowToEntry(r: AuditRow): AuditEntry {
     id: r.id,
     orgId: r.org_id,
     keyId: r.key_id,
-    contractId: r.contract_id ?? undefined,
+    ...(r.contract_id !== null ? { contractId: r.contract_id } : {}),
     action: r.action,
     payload: r.payload as AuditEntry["payload"],
     parentHashes: r.parent_hashes,
@@ -76,7 +76,7 @@ export class PostgresAuditLog implements AuditLog {
           ${entry.keyId},
           ${entry.contractId ?? null},
           ${entry.action},
-          ${tx.json(entry.payload)},
+          ${tx.json(entry.payload as never)},
           ${tx.array(entry.parentHashes)},
           ${entry.hash},
           ${entry.createdAt}

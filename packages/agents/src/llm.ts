@@ -51,7 +51,7 @@ export class AnthropicClient implements LLMClient {
             name?: string;
             input?: unknown;
           }>;
-          stop_reason: string;
+          stop_reason: string | null;
         }>;
       };
     },
@@ -79,18 +79,18 @@ export class AnthropicClient implements LLMClient {
     const textBlock = response.content.find((b) => b.type === "text");
     const toolBlocks = response.content.filter((b) => b.type === "tool_use");
 
-    return {
+    const result: CompletionResult = {
       content: textBlock?.text ?? "",
-      stopReason: response.stop_reason,
-      toolCalls:
-        toolBlocks.length > 0
-          ? toolBlocks.map((b) => ({
-              id: b.id ?? "",
-              name: b.name ?? "",
-              input: (b.input as Record<string, unknown>) ?? {},
-            }))
-          : undefined,
+      stopReason: response.stop_reason ?? "end_turn",
     };
+    if (toolBlocks.length > 0) {
+      result.toolCalls = toolBlocks.map((b) => ({
+        id: b.id ?? "",
+        name: b.name ?? "",
+        input: (b.input as Record<string, unknown>) ?? {},
+      }));
+    }
+    return result;
   }
 }
 

@@ -28,7 +28,7 @@ export const SYSTEM_KEY_ID = "00000000-0000-0000-0000-000000000000";
  * once activated, a contract advances itself as time passes.
  */
 export class ObligationExecutor {
-  private timer?: ReturnType<typeof setInterval>;
+  private timer: ReturnType<typeof setInterval> | undefined = undefined;
 
   constructor(
     private readonly registry: ContractRegistry,
@@ -102,18 +102,17 @@ export class ObligationExecutor {
         reg.logic.onObligationDue
           ? reg.logic.onObligationDue(obligation, ctx)
           : reg.logic.execute(
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
               {
                 $class: `${stored.contractType}.OBLIGATION_DUE`,
                 eventId: crypto.randomUUID(),
                 timestamp: now.toISOString(),
                 party: obligation.party,
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                type: "OBLIGATION_DUE" as any,
                 payload: {
                   obligationId: obligation.obligationId,
                   action: obligation.action,
                 },
-              },
+              } as any,
               ctx,
             );
 

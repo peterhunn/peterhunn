@@ -68,7 +68,8 @@ export class InMemoryApiKeyStore implements ApiKeyStore {
       name,
       keyHash: hash,
       mode,
-      partyId,
+      // exactOptionalPropertyTypes: only spread partyId when it has a value
+      ...(partyId !== undefined ? { partyId } : {}),
       createdAt: new Date(),
     };
     this.keys.set(key.id, key);

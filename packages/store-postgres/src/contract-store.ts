@@ -48,8 +48,8 @@ export class PostgresContractStore implements ContractStore {
         ${contractId},
         ${contract.orgId},
         ${contract.contractType},
-        ${this.sql.json(contract.data as object)},
-        ${this.sql.json(contract.state as object)},
+        ${this.sql.json(contract.data as never)},
+        ${this.sql.json(contract.state as never)},
         now(),
         now()
       )
