@@ -31,6 +31,24 @@
 
 <main>
 
+  <!-- CYCLING PORTFOLIO HERO -->
+  <section class="cycle-hero">
+    <div class="wrap cycle-inner">
+      <div class="cycle-text" id="cycle-text">
+        <p class="cycle-name" id="cycle-name">Phantom</p>
+        <p class="cycle-meta" id="cycle-meta">Seed, 2021</p>
+      </div>
+      <div class="cycle-vis" aria-hidden="true">
+        <div class="geo-shape">
+          <div class="geo-block geo-a"></div>
+          <div class="geo-block geo-b"></div>
+          <div class="geo-block geo-c"></div>
+          <div class="geo-logo" id="cycle-init">PH</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- HERO -->
   <section class="hero">
     <div class="wrap">
@@ -126,9 +144,50 @@
 </footer>
 
 <script>
+  // Nav burger
   const burger = document.getElementById('nav-burger');
   const links  = document.getElementById('nav-links');
   burger.addEventListener('click', () => links.classList.toggle('open'));
+
+  // Cycling portfolio hero
+  const companies = [
+    { name: 'Phantom',    meta: 'Seed, 2021',      init: 'PH'  },
+    { name: 'Uniswap',    meta: 'Seed, 2020',      init: 'UNI' },
+    { name: 'Farcaster',  meta: 'Pre-seed, 2020',  init: 'FC'  },
+    { name: 'Morpho',     meta: 'Seed, 2021',      init: 'MO'  },
+    { name: 'Flashbots',  meta: 'Pre-seed, 2020',  init: 'FB'  },
+    { name: 'Blackbird',  meta: 'Pre-seed, 2022',  init: 'BB'  },
+    { name: 'Aptos',      meta: 'Seed, 2022',      init: 'APT' },
+    { name: 'Zora',       meta: 'Seed, 2020',      init: 'ZO'  },
+    { name: 'Braintrust', meta: 'Seed, 2020',      init: 'BT'  },
+    { name: 'Mirror',     meta: 'Pre-seed, 2021',  init: 'MR'  },
+    { name: 'World',      meta: 'Seed, 2021',      init: 'WO'  },
+    { name: 'Aztec',      meta: 'Seed, 2021',      init: 'AZ'  },
+    { name: 'Euler',      meta: 'Seed, 2021',      init: 'EU'  },
+    { name: 'Blockaid',   meta: 'Pre-seed, 2022',  init: 'BK'  },
+  ];
+
+  let cidx = 0;
+  const cycleText = document.getElementById('cycle-text');
+  const cycleName = document.getElementById('cycle-name');
+  const cycleMeta = document.getElementById('cycle-meta');
+  const cycleInit = document.getElementById('cycle-init');
+
+  function nextCompany() {
+    cidx = (cidx + 1) % companies.length;
+    const c = companies[cidx];
+    cycleText.classList.add('fading');
+    cycleInit.style.opacity = '0';
+    setTimeout(() => {
+      cycleName.textContent = c.name;
+      cycleMeta.textContent = c.meta;
+      cycleInit.textContent = c.init;
+      cycleText.classList.remove('fading');
+      cycleInit.style.opacity = '1';
+    }, 320);
+  }
+
+  setInterval(nextCompany, 3600);
 </script>
 </body>
 </html>
