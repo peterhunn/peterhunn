@@ -10,6 +10,7 @@ interface ApiKeyRow {
   name: string;
   key_hash: string;
   mode: string;
+  party_id: string | null;
   created_at: Date;
   revoked_at: Date | null;
 }
@@ -21,6 +22,7 @@ function rowToKey(r: ApiKeyRow): ApiKey {
     name: r.name,
     keyHash: r.key_hash,
     mode: r.mode as ApiKey["mode"],
+    partyId: r.party_id ?? undefined,
     createdAt: r.created_at,
     revokedAt: r.revoked_at ?? undefined,
   };
@@ -33,11 +35,12 @@ export class PostgresApiKeyStore implements ApiKeyStore {
     orgId: string,
     name: string,
     mode: "live" | "test",
+    partyId?: string,
   ): Promise<{ key: ApiKey; raw: string }> {
     const { raw, hash } = await generateApiKey(mode);
     const rows = await this.sql<ApiKeyRow[]>`
-      INSERT INTO api_keys (org_id, name, key_hash, mode)
-      VALUES (${orgId}, ${name}, ${hash}, ${mode})
+      INSERT INTO api_keys (org_id, name, key_hash, mode, party_id)
+      VALUES (${orgId}, ${name}, ${hash}, ${mode}, ${partyId ?? null})
       RETURNING *
     `;
     return { key: rowToKey(rows[0]!), raw };

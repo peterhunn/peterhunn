@@ -3,6 +3,7 @@ import type {
   ContractEvent,
   ContractResponse,
   ContractState,
+  Obligation,
 } from "./types.js";
 
 /**
@@ -49,6 +50,18 @@ export interface ContractLogic<
    */
   execute(
     event: TEvent,
+    ctx: ContractLogicContext<TData>,
+  ): ContractResponse<TResult>;
+
+  /**
+   * Called by the ObligationExecutor when an obligation's deadline passes.
+   *
+   * If omitted, the executor fires a generic OBLIGATION_DUE event via execute().
+   * Implement this to handle deadline expiry without needing a named event type —
+   * e.g. auto-fulfil a confidentiality period, auto-breach a payment obligation.
+   */
+  onObligationDue?(
+    obligation: Obligation,
     ctx: ContractLogicContext<TData>,
   ): ContractResponse<TResult>;
 }

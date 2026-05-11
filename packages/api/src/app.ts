@@ -22,6 +22,8 @@ type AppVariables = {
   orgId: string;
   keyId: string;
   mode: "live" | "test";
+  /** partyId bound to this key, or "" if the key is not party-specific. */
+  partyId: string;
 };
 
 /**
@@ -81,17 +83,21 @@ export function createApp(options: AppOptions): Hono<{ Variables: AppVariables }
     c.set("orgId", key.orgId);
     c.set("keyId", key.id);
     c.set("mode", key.mode);
+    c.set("partyId", key.partyId ?? "");
     await next();
   });
 
   // ── API key management ───────────────────────────────────────────────────
 
   app.post("/keys", async (c) => {
-    const { name, mode = "live" } = await c.req.json<{
+    const { name, mode = "live", partyId } = await c.req.json<{
       name: string;
       mode?: "live" | "test";
+      /** Bind this key to a contract party. Events submitted with this key are
+       *  automatically signed as that party — no need to pass `party` in the body. */
+      partyId?: string;
     }>();
-    const { key, raw } = await apiKeys.create(c.get("orgId"), name, mode);
+    const { key, raw } = await apiKeys.create(c.get("orgId"), name, mode, partyId);
     // Strip hash — never expose it in responses
     const { keyHash: _h, ...safeKey } = key;
     return c.json({ key: safeKey, raw }, 201);
@@ -247,6 +253,10 @@ export function createApp(options: AppOptions): Hono<{ Variables: AppVariables }
     const contractId = c.req.param("contractId");
     const orgId = c.get("orgId");
     const keyId = c.get("keyId");
+    // Party identity: use the key's bound partyId if present, otherwise fall back
+    // to an explicit `party` field in the request body. This is how AI agents
+    // sign their contract actions — the key proves who they are.
+    const keyPartyId = c.get("partyId");
 
     const stored = await store.get(contractId, orgId);
     if (!stored) return c.json({ error: `Contract not found: ${contractId}` }, 404);
@@ -262,12 +272,14 @@ export function createApp(options: AppOptions): Hono<{ Variables: AppVariables }
       payload?: Record<string, unknown>;
     }>();
 
+    const party = keyPartyId !== "" ? keyPartyId : body.party;
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const event: any = {
       $class: `${stored.contractType}.${body.eventType}`,
       eventId: crypto.randomUUID(),
       timestamp: new Date().toISOString(),
-      party: body.party,
+      party,
       type: body.eventType,
       payload: body.payload ?? {},
     };
@@ -284,7 +296,7 @@ export function createApp(options: AppOptions): Hono<{ Variables: AppVariables }
         keyId,
         contractId,
         action: "contract.event.processed",
-        payload: { eventType: body.eventType, party: body.party },
+        payload: { eventType: body.eventType, party },
       }),
       fanOut(webhooks, orgId, "contract.event.processed", {
         contractId,

@@ -83,6 +83,43 @@ export const ndaLogic: ContractLogic<NDAData, NDAEvent, NDAResponse> = {
         };
     }
   },
+
+  /**
+   * Called by ObligationExecutor when an obligation's deadline passes.
+   * NDA obligations are confidentiality periods — when they expire, mark
+   * the obligation fulfilled. If all obligations are now settled, close
+   * the contract.
+   */
+  onObligationDue(obligation, ctx) {
+    const updatedObligations = ctx.state.obligations.map((o) =>
+      o.obligationId === obligation.obligationId
+        ? { ...o, status: "fulfilled" as const }
+        : o,
+    );
+    const allSettled = updatedObligations.every(
+      (o) => o.status === "fulfilled" || o.status === "excused",
+    );
+    return {
+      state: {
+        ...ctx.state,
+        status: allSettled ? ("completed" as const) : ctx.state.status,
+        obligations: updatedObligations,
+        history: [
+          ...ctx.state.history,
+          {
+            $class: "org.accordproject.nda.OBLIGATION_DUE",
+            eventId: crypto.randomUUID(),
+            timestamp: ctx.now.toISOString(),
+            party: obligation.party,
+            payload: { obligationId: obligation.obligationId },
+          },
+        ],
+      },
+      result: {
+        message: `Confidentiality obligation for ${obligation.party} expired and fulfilled.`,
+      },
+    };
+  },
 };
 
 function handleDisclosure(

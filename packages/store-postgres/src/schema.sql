@@ -14,6 +14,9 @@ CREATE TABLE IF NOT EXISTS api_keys (
   name        TEXT        NOT NULL,
   key_hash    TEXT        NOT NULL UNIQUE,
   mode        TEXT        NOT NULL CHECK (mode IN ('live', 'test')),
+  -- When set, events submitted with this key are automatically attributed to
+  -- this party — the key is the agent's identity in the contract.
+  party_id    TEXT,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   revoked_at  TIMESTAMPTZ
 );

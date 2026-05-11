@@ -1,20 +1,17 @@
 /**
- * Example server — NDA registered, auth enabled, audit + webhooks wired.
+ * Example server — NDA registered, auth + party signing + obligation executor enabled.
  *
  * Run:  ANTHROPIC_API_KEY=sk-... npm run run:server
  *
- * On first start, an API key is created and printed. Use it in all requests:
- *   Authorization: Bearer sk_live_xxx
+ * On startup, three keys are printed:
+ *   ADMIN_KEY   — full access, no party binding
+ *   ACME_KEY    — bound to the disclosing party (partyId: "acme")
+ *   BETA_KEY    — bound to the receiving party  (partyId: "beta")
  *
- * Quick start:
- *
- *   # List contract types
- *   curl -H "Authorization: Bearer $KEY" http://localhost:3000/contracts
- *
- *   # Draft an NDA
- *   curl -X POST http://localhost:3000/contracts/nda/draft \
- *     -H "Authorization: Bearer $KEY" \
- *     -H "Content-Type: application/json" \
+ * Agent-style usage:
+ *   # Acme's agent activates the NDA (admin key, or any key)
+ *   curl -X POST http://localhost:3000/contracts/nda/activate \
+ *     -H "Authorization: Bearer $ADMIN_KEY" -H "Content-Type: application/json" \
  *     -d '{ "data": { "$class": "org.accordproject.nda.NDAContract",
  *       "disclosingParty": { "$class": "org.accordproject.party.Party", "partyId": "acme", "name": "Acme Corp" },
  *       "receivingParty": { "$class": "org.accordproject.party.Party", "partyId": "beta", "name": "Beta Inc" },
@@ -22,27 +19,19 @@
  *       "jurisdiction": "San Francisco, CA", "governingLaw": "laws of the State of California",
  *       "confidentialInfo": "technical specs and financials", "mutual": false } }'
  *
- *   # Activate (sign) the NDA — returns contractId
- *   curl -X POST http://localhost:3000/contracts/nda/activate \
- *     -H "Authorization: Bearer $KEY" \
- *     -H "Content-Type: application/json" \
- *     -d '{ "data": { ...same as above... } }'
- *
- *   # Submit a disclosure event
+ *   # Acme's agent discloses — party is inferred from the key, no "party" field needed
  *   curl -X POST "http://localhost:3000/contracts/$CONTRACT_ID/events" \
- *     -H "Authorization: Bearer $KEY" \
- *     -H "Content-Type: application/json" \
- *     -d '{ "eventType": "DISCLOSURE_MADE", "party": "acme", "payload": { "description": "Q1 roadmap" } }'
+ *     -H "Authorization: Bearer $ACME_KEY" -H "Content-Type: application/json" \
+ *     -d '{ "eventType": "DISCLOSURE_MADE", "payload": { "description": "Q1 roadmap" } }'
  *
- *   # View audit log for a contract
- *   curl -H "Authorization: Bearer $KEY" \
- *     "http://localhost:3000/contracts/$CONTRACT_ID/audit"
+ *   # Beta's agent acknowledges — again, party comes from the key
+ *   curl -X POST "http://localhost:3000/contracts/$CONTRACT_ID/events" \
+ *     -H "Authorization: Bearer $BETA_KEY" -H "Content-Type: application/json" \
+ *     -d '{ "eventType": "DISCLOSURE_MADE", "payload": { "description": "acknowledged" } }'
  *
- *   # Register a webhook
- *   curl -X POST http://localhost:3000/webhooks \
- *     -H "Authorization: Bearer $KEY" \
- *     -H "Content-Type: application/json" \
- *     -d '{ "url": "https://example.com/hook", "events": ["contract.activated", "contract.event.processed"] }'
+ *   # Verify the Merkle DAG audit log
+ *   curl -H "Authorization: Bearer $ADMIN_KEY" \
+ *     "http://localhost:3000/contracts/$CONTRACT_ID/audit/verify"
  */
 
 import Anthropic from "@anthropic-ai/sdk";
@@ -56,10 +45,13 @@ import { ndaModel } from "./nda/model.js";
 import { ndaTemplate } from "./nda/template.js";
 import { ndaLogic } from "./nda/logic.js";
 
-const apiKey = process.env["ANTHROPIC_API_KEY"];
-if (!apiKey) throw new Error("ANTHROPIC_API_KEY environment variable is required");
+const anthropicApiKey = process.env["ANTHROPIC_API_KEY"];
+if (!anthropicApiKey) throw new Error("ANTHROPIC_API_KEY is required");
 
-const llm = new AnthropicClient(new Anthropic({ apiKey }), "claude-opus-4-7");
+const llm = new AnthropicClient(
+  new Anthropic({ apiKey: anthropicApiKey }),
+  "claude-opus-4-7",
+);
 
 const registry = new ContractRegistry().register("nda", {
   model: ndaModel,
@@ -67,15 +59,25 @@ const registry = new ContractRegistry().register("nda", {
   logic: ndaLogic,
 });
 
-// Bootstrap: create a default org and print its API key on first start.
-// In production, replace with your ApiKeyStore.create() call in an onboarding flow.
+// Bootstrap: create three keys for this session.
+// In production: persist these in Postgres via PostgresApiKeyStore.
 const apiKeys = new InMemoryApiKeyStore();
-const { raw } = await apiKeys.create("org-default", "default", "live");
-console.log(`\n  API Key (save this — shown once): ${raw}\n`);
+const [{ raw: adminKey }, { raw: acmeKey }, { raw: betaKey }] =
+  await Promise.all([
+    apiKeys.create("org-default", "admin",       "live"),
+    apiKeys.create("org-default", "acme-agent",  "live", "acme"),
+    apiKeys.create("org-default", "beta-agent",  "live", "beta"),
+  ]);
+
+console.log("\n  Keys (shown once):");
+console.log(`  ADMIN_KEY=${adminKey}`);
+console.log(`  ACME_KEY=${acmeKey}   # party: acme (disclosing)`);
+console.log(`  BETA_KEY=${betaKey}   # party: beta (receiving)\n`);
 
 startServer({
   registry,
   llm,
   apiKeys,
   port: Number(process.env["PORT"] ?? 3000),
+  executorIntervalMs: 30_000,   // check every 30 s in this demo
 });

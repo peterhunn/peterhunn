@@ -4,6 +4,7 @@ import { InMemoryStore } from "./store.js";
 import { InMemoryApiKeyStore } from "./auth.js";
 import { InMemoryAuditLog } from "./audit.js";
 import { InMemoryWebhookStore } from "./webhooks.js";
+import { ObligationExecutor } from "./executor.js";
 import type { ContractRegistry } from "./registry.js";
 import type { ContractStore } from "./store.js";
 import type { ApiKeyStore } from "./auth.js";
@@ -20,11 +21,16 @@ export interface ServerOptions {
   webhooks?: WebhookStore;
   port?: number;
   host?: string;
+  /** How often the obligation executor polls for due obligations (ms). Default 60 000. */
+  executorIntervalMs?: number;
+  /** Set false to disable the obligation executor entirely. Default true. */
+  executor?: boolean;
 }
 
 /**
- * Start a Node.js HTTP server with auth, audit, webhooks, and all contract routes.
- * All stores default to in-memory implementations — swap any for Postgres equivalents.
+ * Start a Node.js HTTP server with auth, audit, webhooks, obligation executor,
+ * and all contract routes. All stores default to in-memory implementations —
+ * swap any for Postgres equivalents by passing them in options.
  */
 export function startServer(options: ServerOptions): void {
   const {
@@ -36,9 +42,16 @@ export function startServer(options: ServerOptions): void {
     webhooks = new InMemoryWebhookStore(),
     port = 3000,
     host = "0.0.0.0",
+    executorIntervalMs = 60_000,
+    executor: runExecutor = true,
   } = options;
 
   const app = createApp({ registry, store, llm, apiKeys, audit, webhooks });
+
+  if (runExecutor) {
+    const executor = new ObligationExecutor(registry, store, audit, webhooks);
+    executor.start(executorIntervalMs);
+  }
 
   serve({ fetch: app.fetch, port, hostname: host }, (info) => {
     const base = `http://${info.address === "0.0.0.0" ? "localhost" : info.address}:${info.port}`;
@@ -51,7 +64,8 @@ export function startServer(options: ServerOptions): void {
         );
       }
     }
-    console.log(`\n  Keys      →  POST/GET ${base}/keys`);
-    console.log(`  Webhooks  →  POST/GET ${base}/webhooks`);
+    console.log(`\n  Keys       →  POST/GET ${base}/keys`);
+    console.log(`  Webhooks   →  POST/GET ${base}/webhooks`);
+    console.log(`  Executor   →  polling every ${executorIntervalMs / 1000}s`);
   });
 }

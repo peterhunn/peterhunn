@@ -4,6 +4,13 @@ export interface ApiKey {
   name: string;
   keyHash: string;    // sha256 of raw key — never stored in plaintext
   mode: "live" | "test";
+  /**
+   * When set, this key represents a specific contract party.
+   * Events submitted with this key are automatically attributed to partyId
+   * without the caller having to pass `party` in the request body.
+   * This is how AI agents sign their contract actions.
+   */
+  partyId?: string;
   createdAt: Date;
   revokedAt?: Date;
 }
@@ -13,6 +20,7 @@ export interface ApiKeyStore {
     orgId: string,
     name: string,
     mode: "live" | "test",
+    partyId?: string,
   ): Promise<{ key: ApiKey; raw: string }>;
   findByRawKey(raw: string): Promise<ApiKey | undefined>;
   list(orgId: string): Promise<ApiKey[]>;
@@ -51,6 +59,7 @@ export class InMemoryApiKeyStore implements ApiKeyStore {
     orgId: string,
     name: string,
     mode: "live" | "test",
+    partyId?: string,
   ): Promise<{ key: ApiKey; raw: string }> {
     const { raw, hash } = await generateApiKey(mode);
     const key: ApiKey = {
@@ -59,6 +68,7 @@ export class InMemoryApiKeyStore implements ApiKeyStore {
       name,
       keyHash: hash,
       mode,
+      partyId,
       createdAt: new Date(),
     };
     this.keys.set(key.id, key);
