@@ -1,0 +1,27 @@
+{
+  "name": "@legal-agents/store-postgres",
+  "version": "0.1.0",
+  "description": "Postgres-backed implementations of ContractStore, AuditLog, ApiKeyStore, and WebhookStore",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "migrate": "tsx src/migrate.ts"
+  },
+  "dependencies": {
+    "@legal-agents/api": "*",
+    "postgres": "^3.4.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "tsx": "^4.7.0"
+  }
+}
