@@ -5,11 +5,13 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "run:nda": "tsx src/nda/agent.ts"
+    "run:nda": "tsx src/nda/agent.ts",
+    "run:server": "tsx src/server.ts"
   },
   "dependencies": {
     "@legal-agents/core": "*",
-    "@legal-agents/agents": "*"
+    "@legal-agents/agents": "*",
+    "@legal-agents/api": "*"
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.26.0",
