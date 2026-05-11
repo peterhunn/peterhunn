@@ -1,0 +1,31 @@
+{
+  "name": "@legal-agents/agents",
+  "version": "0.1.0",
+  "description": "AI agent primitives for legal contracts: tool definitions, LLM adapters, and ContractAgent",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@legal-agents/core": "*"
+  },
+  "peerDependencies": {
+    "@anthropic-ai/sdk": "^0.26.0"
+  },
+  "peerDependenciesMeta": {
+    "@anthropic-ai/sdk": { "optional": true }
+  },
+  "devDependencies": {
+    "@anthropic-ai/sdk": "^0.26.0",
+    "typescript": "^5.4.0"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "@legal-agents/examples",
+  "version": "0.1.0",
+  "description": "Reference implementations: NDA and other contracts using the legal-agents SDK",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "run:nda": "tsx src/nda/agent.ts"
+  },
+  "dependencies": {
+    "@legal-agents/core": "*",
+    "@legal-agents/agents": "*"
+  },
+  "devDependencies": {
+    "@anthropic-ai/sdk": "^0.26.0",
+    "typescript": "^5.4.0",
+    "tsx": "^4.7.0"
+  }
+}
