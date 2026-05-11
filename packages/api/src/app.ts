@@ -319,6 +319,17 @@ export function createApp(options: AppOptions): Hono<{ Variables: AppVariables }
     return c.json({ contractId, entries });
   });
 
+  app.get("/contracts/:contractId/audit/verify", async (c) => {
+    const contractId = c.req.param("contractId");
+    const orgId = c.get("orgId");
+
+    const stored = await store.get(contractId, orgId);
+    if (!stored) return c.json({ error: `Contract not found: ${contractId}` }, 404);
+
+    const result = await audit.verify(orgId, contractId);
+    return c.json(result, result.valid ? 200 : 409);
+  });
+
   return app;
 }
 
