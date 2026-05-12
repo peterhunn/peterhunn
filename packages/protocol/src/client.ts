@@ -1,0 +1,162 @@
+import type {
+  ContractRequirements,
+  AcceptRequest,
+  AcceptResponse,
+  X402Response,
+} from "./types.js";
+import { decodeToken } from "./token.js";
+import { b64decode } from "./codec.js";
+
+export interface ContractClientOptions {
+  /** Static party data sent in AcceptRequest.partyData */
+  partyData: Record<string, string>;
+  /**
+   * Called when a server counter-offers. Return modified terms to propose back,
+   * or undefined to accept the counter-offer as-is.
+   */
+  onNegotiation?: (
+    requirements: ContractRequirements,
+  ) => Promise<Record<string, unknown> | undefined>;
+  /**
+   * Called before accepting — lets the caller inspect and reject terms.
+   * Throw to abort; return to accept.
+   */
+  onRequirements?: (requirements: ContractRequirements) => Promise<void>;
+  /** External token cache — useful for sharing across ContractClient instances */
+  cache?: Map<string, string>;
+  /** Max negotiation round-trips before giving up (default: 3) */
+  maxNegotiationRounds?: number;
+}
+
+/**
+ * A fetch-compatible client that automatically traverses the LAP/1.0 protocol.
+ *
+ * On a 403 with X-Contract-Requirements, it establishes the agreement and
+ * retries. On a 402 with contractRequired in the body, it handles the LAP
+ * gate before the caller handles x402 payment.
+ *
+ * Usage:
+ *   const client = new ContractClient({ partyData: { name: "Acme Corp", ... } });
+ *   const res = await client.fetch("https://api.example.com/data");
+ */
+export class ContractClient {
+  private readonly cache: Map<string, string>;
+  private readonly maxRounds: number;
+
+  constructor(private readonly opts: ContractClientOptions) {
+    this.cache = opts.cache ?? new Map();
+    this.maxRounds = opts.maxNegotiationRounds ?? 3;
+  }
+
+  async fetch(url: string, init?: RequestInit): Promise<Response> {
+    const headers = new Headers(init?.headers);
+
+    // Pre-attach a cached valid token if available for this origin
+    const cached = this.findCachedToken(new URL(url).pathname);
+    if (cached) headers.set("X-Contract-Agreement", cached);
+
+    const response = await fetch(url, { ...init, headers });
+
+    // LAP gate on 403
+    if (response.status === 403) {
+      const reqHeader = response.headers.get("X-Contract-Requirements");
+      if (!reqHeader) return response;
+
+      const requirements = JSON.parse(b64decode(reqHeader)) as ContractRequirements;
+      const token = await this.establishAgreement(requirements);
+
+      const retryHeaders = new Headers(init?.headers);
+      retryHeaders.set("X-Contract-Agreement", token);
+      return fetch(url, { ...init, headers: retryHeaders });
+    }
+
+    // x402 + LAP combined gate on 402
+    if (response.status === 402) {
+      const body = (await response.clone().json()) as X402Response;
+      if (body.contractRequired) {
+        await this.establishAgreement(body.contractRequired);
+        // Return the 402 with the LAP requirement satisfied — the caller
+        // handles x402 payment on top. The token is now cached for the retry.
+      }
+    }
+
+    return response;
+  }
+
+  /** Establish a contract agreement, handling negotiation round-trips. */
+  async establishAgreement(requirements: ContractRequirements): Promise<string> {
+    const cached = this.cache.get(requirements.templateHash);
+    if (cached && !this.isExpired(cached)) return cached;
+
+    await this.opts.onRequirements?.(requirements);
+
+    let current = requirements;
+    let round = 0;
+
+    while (round < this.maxRounds) {
+      const negotiationTerms =
+        current.negotiable ? await this.opts.onNegotiation?.(current) : undefined;
+
+      const body: AcceptRequest = {
+        templateId: current.templateId,
+        templateHash: current.templateHash,
+        partyData: this.opts.partyData,
+        ...(negotiationTerms !== undefined ? { negotiationTerms } : {}),
+      };
+
+      const res = await fetch(current.acceptEndpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        throw new Error(`LAP accept failed: ${res.status} ${await res.text()}`);
+      }
+
+      const result = (await res.json()) as AcceptResponse;
+
+      if (result.status === "accepted") {
+        this.cache.set(requirements.templateHash, result.token);
+        if (result.counterOffer) {
+          this.cache.set(result.counterOffer.templateHash, result.token);
+        }
+        return result.token;
+      }
+
+      if (result.status === "counter_offer" && result.counterOffer) {
+        current = result.counterOffer;
+        round++;
+        continue;
+      }
+
+      throw new Error("Unexpected accept response status");
+    }
+
+    throw new Error(`LAP negotiation exceeded ${this.maxRounds} rounds`);
+  }
+
+  /** Attach a cached agreement token to an existing Headers object if available. */
+  attachToken(resource: string, headers: Headers): void {
+    const token = this.findCachedToken(resource);
+    if (token) headers.set("X-Contract-Agreement", token);
+  }
+
+  private findCachedToken(resource: string): string | undefined {
+    for (const token of this.cache.values()) {
+      if (this.isExpired(token)) continue;
+      const decoded = decodeToken(token);
+      if (!decoded) continue;
+      if (decoded.payload.resource === "*" || decoded.payload.resource === resource) {
+        return token;
+      }
+    }
+    return undefined;
+  }
+
+  private isExpired(raw: string): boolean {
+    const decoded = decodeToken(raw);
+    if (!decoded) return true;
+    return decoded.payload.exp < Math.floor(Date.now() / 1000);
+  }
+}

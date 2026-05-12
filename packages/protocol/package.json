@@ -1,0 +1,28 @@
+{
+  "name": "@legal-agents/protocol",
+  "version": "0.1.0",
+  "description": "LAP/1.0 — machine-readable contracting protocol for HTTP, extending x402 and agentic commerce stacks",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "hono": ">=4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "hono": { "optional": true }
+  },
+  "devDependencies": {
+    "hono": "^4.4.0",
+    "typescript": "^5.4.0"
+  }
+}
