@@ -1,19 +1,20 @@
-# Legal Agents Protocol (LAP/1.0)
+# x451 — Machine-Readable Contracting Protocol for HTTP
 
-A machine-readable contracting protocol for HTTP, designed as a legal layer
-in the agentic commerce stack — complementing x402 (payment) and broader
-agent coordination protocols such as UCP.
+A legal agreement layer for the agentic commerce stack, named after HTTP 451
+("Unavailable For Legal Reasons"). Extends x402 (payment) so that AI agents
+can autonomously satisfy both legal and financial gates before accessing a
+resource.
 
 ---
 
 ## Abstract
 
-LAP defines how an HTTP server advertises that a resource requires a legal
-agreement, how a client (human-driven or agentic) establishes that agreement,
-and how subsequent requests prove it. The protocol is:
+x451 defines how an HTTP server advertises that a resource requires a legal
+agreement, how a client (human or agent) establishes that agreement, and how
+subsequent requests prove it. The protocol is:
 
 - **Stateless at the wire level** — agreement proof is a self-contained signed
-  token carried in a request header, no session required.
+  token carried in `X-451-Contract`, no session required.
 - **Negotiable** — servers may accept or counter-offer, enabling agents to
   agree on modified terms before committing.
 - **x402-composable** — servers that require both payment and a legal agreement
@@ -26,20 +27,18 @@ and how subsequent requests prove it. The protocol is:
 
 ## Motivation
 
-x402 solves machine-readable payment: a server returns a 402 with payment
-requirements, a client pays and retries with proof. The result is that AI
-agents can autonomously acquire access to paid resources.
+x402 solves machine-readable payment: a server returns 402, a client pays and
+retries with proof. Agents can autonomously acquire access to paid resources.
 
-The missing layer is *legal agreement*. Many resources require not just
-payment but a binding agreement: a terms-of-service, an NDA, a data-use
-policy, a liability waiver. Today these are HTML click-wraps — invisible to
-agents.
+The missing layer is *legal agreement*. Many resources require not just payment
+but a binding agreement — terms of service, an NDA, a data-use policy, a
+liability waiver. Today these are HTML click-wraps invisible to agents.
 
-LAP closes that gap. An agent that can traverse x402 can traverse LAP with
-the same agentic loop:
+x451 closes that gap. An agent that can traverse x402 can traverse x451 with
+the same loop:
 
 ```
-while response.status in (402, 403):
+while response.status in (402, 451):
     satisfy_requirements(response)
     response = retry(request)
 ```
@@ -47,7 +46,7 @@ while response.status in (402, 403):
 Within a UCP-style commerce lifecycle the layers map as:
 
 ```
-Discovery → [LAP: Contract Agreement] → [x402: Payment] → Fulfillment → Dispute
+Discovery → [x451: Contract Agreement] → [x402: Payment] → Fulfillment → Dispute
 ```
 
 ---
@@ -61,8 +60,8 @@ Client                                    Server
   |                                          |
   |── GET /resource ──────────────────────→  |
   |                                          |
-  |← 403 Contract Required ─────────────────|
-  |  X-Contract-Requirements: <base64>       |
+  |← 451 Contract Required ─────────────────|
+  |  X-451-Requirements: <base64>            |
   |  Body: { error, contractRequired: {...} }|
   |                                          |
   |── GET <templateUrl> ────────────────────→ (fetch contract template)
@@ -73,10 +72,10 @@ Client                                    Server
   |           partyData, negotiationTerms? } |
   |                                          |
   |← 200 { status: "accepted",              |
-  |         contractId, token }             |
+  |         contractId, token }              |
   |                                          |
   |── GET /resource ──────────────────────→  |
-  |   X-Contract-Agreement: <token>          |
+  |   X-451-Contract: <token>                |
   |← 200 OK ─────────────────────────────── |
 ```
 
@@ -90,14 +89,14 @@ Client                                    Server
   |  Body: {                                 |
   |    x402Version: 1,                       |
   |    accepts: [...],           ← standard x402
-  |    contractRequired: {...},  ← LAP extension
+  |    contractRequired: {...},  ← x451 extension
   |  }                                       |
   |                                          |
-  |  (establish contract → get LAP token)    |
+  |  (establish agreement → get x451 token)  |
   |  (pay via x402 facilitator → get X-PAYMENT proof)
   |                                          |
   |── GET /resource ──────────────────────→  |
-  |   X-Contract-Agreement: <lap-token>      |
+  |   X-451-Contract: <token>                |
   |   X-PAYMENT: <x402-proof>               |
   |← 200 OK ─────────────────────────────── |
 ```
@@ -111,8 +110,6 @@ Client                                    Server
   |← 200 { status: "counter_offer",         |
   |         counterOffer: ContractRequirements }
   |                                          |
-  |  (client reviews counter-offer,          |
-  |   optionally adjusts terms, retries)     |
   |── POST <acceptEndpoint> ───────────────→ |
   |← 200 { status: "accepted", token }      |
 ```
@@ -123,8 +120,8 @@ Client                                    Server
 
 | Header | Direction | Description |
 |---|---|---|
-| `X-Contract-Requirements` | Server → Client | base64(JSON(ContractRequirements)) on 403 |
-| `X-Contract-Agreement` | Client → Server | Signed agreement token on subsequent requests |
+| `X-451-Requirements` | Server → Client | base64(JSON(ContractRequirements)) on 451 |
+| `X-451-Contract` | Client → Server | Signed agreement token on subsequent requests |
 
 ---
 
@@ -132,63 +129,37 @@ Client                                    Server
 
 ### ContractRequirements
 
-Returned by the server to describe what agreement is needed.
-
 ```typescript
 interface ContractRequirements {
-  scheme: "legal-agents/v1";
+  scheme: "x451";
   version: 1;
   templateId: string;           // e.g. "org.accordproject.saas-msa"
   templateUrl: string;          // fetch the human+machine-readable template
   templateHash: string;         // hex SHA-256 of template content (integrity)
   requiredPartyFields: string[]; // fields the client must supply in partyData
-  jurisdiction?: string;        // e.g. "California, USA"
-  governingLaw?: string;        // e.g. "laws of the State of California"
+  jurisdiction?: string;
+  governingLaw?: string;
   acceptEndpoint: string;       // POST here to accept or propose terms
   verifyEndpoint?: string;      // GET here to verify a token (facilitator)
   expiresIn: number;            // offer validity in seconds
-  resource: string;             // resource path being gated
-  description: string;          // human-readable description
-  negotiable: boolean;          // whether negotiationTerms are accepted
-}
-```
-
-### AcceptRequest
-
-Posted by the client to the `acceptEndpoint`.
-
-```typescript
-interface AcceptRequest {
-  templateId: string;
-  templateHash: string;           // must match ContractRequirements.templateHash
-  partyData: Record<string, string>; // values for requiredPartyFields
-  negotiationTerms?: Record<string, unknown>; // proposed modifications (if negotiable)
-}
-```
-
-### AcceptResponse
-
-```typescript
-interface AcceptResponse {
-  status: "accepted" | "counter_offer";
-  contractId: string;
-  token: string;                  // base64(JSON(AgreementToken)) — present when accepted
-  counterOffer?: ContractRequirements; // present when status === "counter_offer"
+  resource: string;             // resource path being gated, or "*"
+  description: string;
+  negotiable: boolean;
 }
 ```
 
 ### AgreementToken
 
-Carried in `X-Contract-Agreement`. Self-contained and verifiable offline.
+Carried in `X-451-Contract`. Self-contained and verifiable offline.
 
 ```typescript
 interface AgreementToken {
-  scheme: "legal-agents/v1";
+  scheme: "x451";
   payload: {
     contractId: string;
     templateHash: string;
     partyId: string;
-    resource: string;   // "*" for wildcard (all resources on this server)
+    resource: string;   // "*" for wildcard
     iat: number;        // issued-at (Unix seconds)
     exp: number;        // expires-at (Unix seconds)
   };
@@ -196,21 +167,40 @@ interface AgreementToken {
 }
 ```
 
+### AcceptRequest / AcceptResponse
+
+```typescript
+interface AcceptRequest {
+  templateId: string;
+  templateHash: string;
+  partyData: Record<string, string>;
+  negotiationTerms?: Record<string, unknown>; // only when negotiable: true
+}
+
+interface AcceptResponse {
+  status: "accepted" | "counter_offer";
+  contractId: string;
+  token: string;                  // base64(JSON(AgreementToken))
+  counterOffer?: ContractRequirements;
+}
+```
+
 ---
 
 ## Token Verification
 
-Servers verify `X-Contract-Agreement` offline without calling out:
+Servers verify `X-451-Contract` offline:
 
 1. base64-decode and JSON-parse the token.
-2. Check `scheme === "legal-agents/v1"`.
+2. Check `scheme === "x451"`.
 3. Check `payload.exp > now`.
 4. Check `payload.resource === requestPath || payload.resource === "*"`.
-5. Recompute `HMAC-SHA256(secret, JSON.stringify(payload))` and compare to `signature` in constant time.
+5. Recompute `HMAC-SHA256(secret, JSON.stringify(payload))` and compare to
+   `signature` in constant time.
 
-Facilitator mode: if `ContractRequirements.verifyEndpoint` is set, servers may
-delegate step 5 to `GET <verifyEndpoint>?token=<raw>` and trust the
-facilitator's response instead of holding the signing secret themselves.
+**Facilitator mode**: if `verifyEndpoint` is set, servers may delegate step 5
+to `GET <verifyEndpoint>?token=<raw>&resource=<path>` and trust the
+facilitator's response, holding no key material themselves.
 
 ---
 
@@ -223,50 +213,46 @@ Servers that require both legal agreement and payment extend the standard x402
 {
   "x402Version": 1,
   "accepts": [{ "scheme": "exact", "network": "base", ... }],
-  "contractRequired": { "scheme": "legal-agents/v1", ... }
+  "contractRequired": { "scheme": "x451", ... }
 }
 ```
 
-Clients that support LAP check for this field. If present, they establish the
-contract agreement (obtaining a LAP token) before or in parallel with payment,
-then send both `X-Contract-Agreement` and `X-PAYMENT` on the retry.
+Clients that support x451 check for `contractRequired`. If present, they
+establish the agreement (obtaining an x451 token) before or in parallel with
+payment, then send both `X-451-Contract` and `X-PAYMENT` on the retry.
 
-Clients that do not support LAP see a standard x402 402 and retry with only
-`X-PAYMENT`; the server may choose to reject with a 403 and
-`X-Contract-Requirements` at that point.
+x402-only clients ignore the unknown field and retry with only `X-PAYMENT`;
+the server may then respond with 451.
 
 ---
 
 ## Security Considerations
 
-**Replay attacks**: tokens carry `exp`; servers should also keep a short-lived
-nonce cache (or use `contractId` as a single-use token in high-value flows).
+**Replay**: tokens carry `exp`. High-value flows may also track `contractId`
+as a single-use nonce server-side.
 
-**Template integrity**: clients must verify that the fetched template's SHA-256
-matches `templateHash` before signing. A server that swaps the template after
-issuing requirements would be detected.
+**Template integrity**: clients must verify the fetched template's SHA-256
+matches `templateHash` before signing. A server swapping the template after
+advertising requirements would be detected.
 
-**Secret management**: the HMAC secret must be server-side only. In
-facilitator mode the facilitator holds the secret; servers receive no key
-material.
+**Secret management**: the HMAC secret is server-side only. In facilitator
+mode the facilitator holds the secret; servers receive no key material.
 
-**Negotiation abuse**: servers should rate-limit and audit negotiation round
-trips. Accepting `negotiationTerms` is strictly opt-in (`negotiable: true`).
-
-**Jurisdiction and enforceability**: LAP establishes cryptographic proof of
-agreement, not legal enforceability. Parties must ensure the underlying
-contract complies with applicable law.
+**Negotiation abuse**: servers should rate-limit negotiation round-trips.
+Accepting `negotiationTerms` is strictly opt-in (`negotiable: true`).
 
 ---
 
 ## Reference Implementation
 
-`@legal-agents/protocol` — TypeScript package providing:
+`@legal-agents/protocol` — TypeScript package:
 
-- `requireContract(opts)` — Hono middleware for server-side contract gates
-- `ContractClient` — `fetch`-wrapping client that auto-traverses LAP + x402
-- `signToken` / `verifyToken` — token primitives for custom integrations
-- `buildX402WithContract` — helper to construct combined x402+LAP responses
-- Type definitions for all protocol objects
+- `requireContract(opts)` — Hono middleware: 451 gate, sets `c.var.x451ContractId` / `c.var.x451PartyId`
+- `acceptHandler(opts)` — accept endpoint with negotiation support
+- `verifyHandler(opts)` — facilitator verify endpoint
+- `ContractClient` — fetch-wrapping agent client that auto-traverses x451 + x402
+- `signToken` / `verifyToken` — HMAC-SHA256 primitives
+- `buildX402WithContract` — construct combined x402+x451 402 responses
+- `x451ExtensionHeaders` — add `X-451-Requirements` alongside x402 402 body
 
-See `packages/protocol/` in the legal-agents monorepo.
+See `packages/protocol/` and `packages/examples/src/x451-demo.ts`.

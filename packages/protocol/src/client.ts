@@ -29,11 +29,11 @@ export interface ContractClientOptions {
 }
 
 /**
- * A fetch-compatible client that automatically traverses the LAP/1.0 protocol.
+ * A fetch-compatible client that automatically traverses the x451 protocol.
  *
- * On a 403 with X-Contract-Requirements, it establishes the agreement and
- * retries. On a 402 with contractRequired in the body, it handles the LAP
- * gate before the caller handles x402 payment.
+ * On a 451 with X-451-Requirements, it establishes the agreement and retries
+ * with X-451-Contract. On a 402 with contractRequired in the body, it handles
+ * the x451 gate before the caller handles x402 payment.
  *
  * Usage:
  *   const client = new ContractClient({ partyData: { name: "Acme Corp", ... } });
@@ -51,31 +51,31 @@ export class ContractClient {
   async fetch(url: string, init?: RequestInit): Promise<Response> {
     const headers = new Headers(init?.headers);
 
-    // Pre-attach a cached valid token if available for this origin
+    // Pre-attach a cached valid token if available for this resource
     const cached = this.findCachedToken(new URL(url).pathname);
-    if (cached) headers.set("X-Contract-Agreement", cached);
+    if (cached) headers.set("X-451-Contract", cached);
 
     const response = await fetch(url, { ...init, headers });
 
-    // LAP gate on 403
-    if (response.status === 403) {
-      const reqHeader = response.headers.get("X-Contract-Requirements");
+    // x451 gate on 451
+    if (response.status === 451) {
+      const reqHeader = response.headers.get("X-451-Requirements");
       if (!reqHeader) return response;
 
       const requirements = JSON.parse(b64decode(reqHeader)) as ContractRequirements;
       const token = await this.establishAgreement(requirements);
 
       const retryHeaders = new Headers(init?.headers);
-      retryHeaders.set("X-Contract-Agreement", token);
+      retryHeaders.set("X-451-Contract", token);
       return fetch(url, { ...init, headers: retryHeaders });
     }
 
-    // x402 + LAP combined gate on 402
+    // x402 + x451 combined gate on 402
     if (response.status === 402) {
       const body = (await response.clone().json()) as X402Response;
       if (body.contractRequired) {
         await this.establishAgreement(body.contractRequired);
-        // Return the 402 with the LAP requirement satisfied — the caller
+        // Return the 402 with the x451 requirement satisfied — the caller
         // handles x402 payment on top. The token is now cached for the retry.
       }
     }
@@ -111,7 +111,7 @@ export class ContractClient {
       });
 
       if (!res.ok) {
-        throw new Error(`LAP accept failed: ${res.status} ${await res.text()}`);
+        throw new Error(`x451 accept failed: ${res.status} ${await res.text()}`);
       }
 
       const result = (await res.json()) as AcceptResponse;
@@ -133,13 +133,13 @@ export class ContractClient {
       throw new Error("Unexpected accept response status");
     }
 
-    throw new Error(`LAP negotiation exceeded ${this.maxRounds} rounds`);
+    throw new Error(`x451 negotiation exceeded ${this.maxRounds} rounds`);
   }
 
   /** Attach a cached agreement token to an existing Headers object if available. */
   attachToken(resource: string, headers: Headers): void {
     const token = this.findCachedToken(resource);
-    if (token) headers.set("X-Contract-Agreement", token);
+    if (token) headers.set("X-451-Contract", token);
   }
 
   private findCachedToken(resource: string): string | undefined {

@@ -1,12 +1,12 @@
 import type { MiddlewareHandler } from "hono";
 import type { ContractRequirements, AcceptRequest, AcceptResponse } from "./types.js";
 import { signToken, verifyToken } from "./token.js";
-import { b64encode, b64decode } from "./codec.js";
+import { b64encode } from "./codec.js";
 
 declare module "hono" {
   interface ContextVariableMap {
-    lapContractId: string;
-    lapPartyId: string;
+    x451ContractId: string;
+    x451PartyId: string;
   }
 }
 
@@ -17,20 +17,20 @@ export interface ContractGateOptions {
 }
 
 /**
- * Hono middleware that gates a route behind a LAP contract agreement.
+ * Hono middleware that gates a route behind an x451 contract agreement.
  *
- * Returns 403 with X-Contract-Requirements when the header is absent or invalid.
- * On success, sets c.var.lapContractId and c.var.lapPartyId.
+ * Returns 451 with X-451-Requirements when the header is absent or invalid.
+ * On success, sets c.var.x451ContractId and c.var.x451PartyId.
  */
 export function requireContract(opts: ContractGateOptions): MiddlewareHandler {
   return async (c, next) => {
-    const raw = c.req.header("X-Contract-Agreement");
+    const raw = c.req.header("X-451-Contract");
 
     if (!raw) {
       return c.json(
         { error: "Contract agreement required", contractRequired: opts.requirements },
-        403,
-        { "X-Contract-Requirements": b64encode(JSON.stringify(opts.requirements)) },
+        451,
+        { "X-451-Requirements": b64encode(JSON.stringify(opts.requirements)) },
       );
     }
 
@@ -38,13 +38,13 @@ export function requireContract(opts: ContractGateOptions): MiddlewareHandler {
     if (!result.valid) {
       return c.json(
         { error: result.reason, contractRequired: opts.requirements },
-        403,
-        { "X-Contract-Requirements": b64encode(JSON.stringify(opts.requirements)) },
+        451,
+        { "X-451-Requirements": b64encode(JSON.stringify(opts.requirements)) },
       );
     }
 
-    c.set("lapContractId", result.payload.contractId);
-    c.set("lapPartyId", result.payload.partyId);
+    c.set("x451ContractId", result.payload.contractId);
+    c.set("x451PartyId", result.payload.partyId);
     await next();
   };
 }

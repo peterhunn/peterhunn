@@ -6,9 +6,9 @@
  * agentic commerce stack: Discovery → [LAP] → [x402] → Fulfillment
  */
 
-/** Sent by the server in a 403 body and X-Contract-Requirements header. */
+/** Sent by the server in a 451 body and X-451-Requirements header. */
 export interface ContractRequirements {
-  scheme: "legal-agents/v1";
+  scheme: "x451";
   version: 1;
   /** Accord Project-style class name, e.g. "org.accordproject.saas-msa" */
   templateId: string;
@@ -46,9 +46,9 @@ export interface AgreementPayload {
   exp: number;
 }
 
-/** Self-contained signed token. Carried in X-Contract-Agreement header. */
+/** Self-contained signed token. Carried in X-451-Contract header. */
 export interface AgreementToken {
-  scheme: "legal-agents/v1";
+  scheme: "x451";
   payload: AgreementPayload;
   /** Hex HMAC-SHA256(secret, JSON.stringify(payload)) */
   signature: string;

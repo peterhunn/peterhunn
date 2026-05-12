@@ -1,17 +1,17 @@
 /**
- * LAP/1.0 end-to-end demo — Legal Agents Protocol as an extension of x402.
+ * x451 end-to-end demo — Legal contracting protocol extending x402.
  *
  * Demonstrates the full agentic commerce stack:
- *   Discovery → [LAP: Contract Agreement] → [x402: Payment] → Fulfillment
+ *   Discovery → [x451: Contract Agreement] → [x402: Payment] → Fulfillment
  *
- * Run:  npm run run:lap-demo
+ * Run:  npm run run:x451-demo
  *
  * What this shows:
- *   1. A Hono server exposes /data behind a LAP contract gate (data-use NDA)
- *   2. An AI agent (ContractClient) hits the endpoint, gets a 403 + requirements
- *   3. Agent fetches template, posts partyData to accept endpoint, gets a token
- *   4. Agent retries with X-Contract-Agreement → 200 OK
- *   5. The combined x402 + LAP flow (requires BOTH agreement AND payment proof)
+ *   1. A Hono server exposes /data behind an x451 contract gate (data-use NDA)
+ *   2. An AI agent (ContractClient) hits the endpoint, gets 451 + X-451-Requirements
+ *   3. Agent fetches template, posts partyData to accept endpoint, gets X-451-Contract token
+ *   4. Agent retries with X-451-Contract → 200 OK
+ *   5. The combined x402 + x451 flow (requires BOTH agreement AND payment proof)
  *   6. Negotiation round-trip (server counter-offers jurisdiction, agent accepts)
  */
 
@@ -22,19 +22,18 @@ import {
   requireContract,
   acceptHandler,
   buildX402WithContract,
-  lapExtensionHeaders,
+  x451ExtensionHeaders,
 } from "@legal-agents/protocol";
 import type { ContractRequirements } from "@legal-agents/protocol";
 
 // ── Shared config ──────────────────────────────────────────────────────────────
 
-const PORT = 4200;
+const PORT = 4510;
 const BASE = `http://localhost:${PORT}`;
 const HMAC_SECRET = crypto.randomUUID(); // ephemeral per demo run
 
-// Contract requirements the server advertises
 const dataUseRequirements: ContractRequirements = {
-  scheme: "legal-agents/v1",
+  scheme: "x451",
   version: 1,
   templateId: "org.accordproject.data-use-nda",
   templateUrl: `${BASE}/.well-known/contracts/data-use-nda`,
@@ -46,11 +45,10 @@ const dataUseRequirements: ContractRequirements = {
   verifyEndpoint: `${BASE}/contracts/verify`,
   expiresIn: 3600,
   resource: "/data",
-  description: "Data Use Non-Disclosure Agreement — required before accessing the dataset",
+  description: "Data Use NDA — required before accessing the dataset",
   negotiable: true,
 };
 
-// Alternative requirements the server counter-offers during negotiation demo
 const counterOfferRequirements: ContractRequirements = {
   ...dataUseRequirements,
   jurisdiction: "Delaware, USA",
@@ -61,24 +59,15 @@ const counterOfferRequirements: ContractRequirements = {
 
 const app = new Hono();
 
-// Serve the contract template (human + machine readable)
 app.get("/.well-known/contracts/data-use-nda", (c) =>
   c.json({
     templateId: "org.accordproject.data-use-nda",
     title: "Data Use Non-Disclosure Agreement",
-    text: "This Data Use NDA governs access to the dataset provided by {{discloser}} to {{name}} under the laws of {{jurisdiction}}. The receiving party agrees to use the data solely for the agreed purpose and not to disclose it to third parties.",
-    model: {
-      $class: "org.accordproject.data-use-nda.DataUseNDA",
-      properties: [
-        { name: "name", type: "String", description: "Legal name of the receiving party" },
-        { name: "jurisdiction", type: "String", description: "Governing jurisdiction" },
-      ],
-    },
+    text: "This Data Use NDA governs access to the dataset provided by {{discloser}} to {{name}} under the laws of {{jurisdiction}}.",
     hash: dataUseRequirements.templateHash,
   }),
 );
 
-// Accept endpoint — signs tokens, handles negotiation
 app.post(
   "/contracts/accept",
   acceptHandler({
@@ -86,13 +75,12 @@ app.post(
     secret: HMAC_SECRET,
     ttl: 3600,
     onNegotiation: async (terms, _partyData) => {
-      // Accept any jurisdiction the client proposes by counter-offering Delaware
       const proposed = terms["jurisdiction"];
       if (typeof proposed === "string" && proposed !== "California, USA") {
         console.log(`  [server] Client proposed jurisdiction="${proposed}", counter-offering Delaware`);
         return counterOfferRequirements;
       }
-      return undefined; // accept as-is
+      return undefined;
     },
     onAccepted: async (contractId, partyData) => {
       console.log(`  [server] Agreement signed — contractId=${contractId} party="${partyData["name"]}"`);
@@ -100,12 +88,10 @@ app.post(
   }),
 );
 
-// Verify endpoint (facilitator pattern)
 app.get("/contracts/verify", async (c) => {
   const token = c.req.query("token");
   const resource = c.req.query("resource") ?? "*";
   if (!token) return c.json({ error: "token required" }, 400);
-
   const { verifyToken } = await import("@legal-agents/protocol");
   const result = await verifyToken(token, HMAC_SECRET, resource);
   return result.valid
@@ -113,7 +99,7 @@ app.get("/contracts/verify", async (c) => {
     : c.json({ valid: false, reason: result.reason });
 });
 
-// LAP-only gated endpoint
+// x451-gated endpoint — returns 451 until agreement token is present
 app.get(
   "/data",
   requireContract({ requirements: dataUseRequirements, secret: HMAC_SECRET }),
@@ -121,14 +107,14 @@ app.get(
     c.json({
       dataset: "Q1-2026",
       rows: 42_000,
-      accessedBy: c.var.lapPartyId,
-      contractId: c.var.lapContractId,
+      accessedBy: c.var.x451PartyId,
+      contractId: c.var.x451ContractId,
     }),
 );
 
-// Combined x402 + LAP gated endpoint (requires both agreement AND payment)
+// Combined x402 + x451 endpoint — requires both agreement AND payment
 app.get("/premium-data", async (c) => {
-  const agreementToken = c.req.header("X-Contract-Agreement");
+  const agreementToken = c.req.header("X-451-Contract");
   const paymentProof = c.req.header("X-PAYMENT");
 
   if (!agreementToken) {
@@ -139,7 +125,7 @@ app.get("/premium-data", async (c) => {
           network: "base",
           maxAmountRequired: "1000000",
           resource: "/premium-data",
-          description: "Premium dataset access — $1 USDC per request",
+          description: "Premium dataset — $1 USDC per request",
           payTo: "0x0000000000000000000000000000000000000000",
           maxTimeoutSeconds: 300,
           asset: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
@@ -147,70 +133,64 @@ app.get("/premium-data", async (c) => {
       ],
       dataUseRequirements,
     );
-    return c.json(body, 402, lapExtensionHeaders(dataUseRequirements));
+    return c.json(body, 402, x451ExtensionHeaders(dataUseRequirements));
   }
 
   if (!paymentProof) {
-    return c.json({ error: "X-PAYMENT required", hint: "pay via x402 facilitator" }, 402);
+    return c.json({ error: "X-PAYMENT required" }, 402);
   }
 
   return c.json({
     dataset: "premium-Q1-2026",
     rows: 420_000,
-    accessedBy: "verified",
-    note: "Both LAP contract + x402 payment verified",
+    note: "Both x451 contract + x402 payment verified",
   });
 });
 
 // ── Run the demo ───────────────────────────────────────────────────────────────
 
 const server = serve({ fetch: app.fetch, port: PORT }, () => {
-  console.log(`\nLAP/1.0 demo server listening on ${BASE}`);
+  console.log(`\nx451 demo server listening on ${BASE}`);
 });
 
-async function sleep(ms: number) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-await sleep(100); // let server bind
+await new Promise((r) => setTimeout(r, 100));
 
 console.log("\n══════════════════════════════════════════════════════");
-console.log("  Demo 1: Basic LAP gate (contract agreement required)");
+console.log("  Demo 1: x451 gate (451 Contract Required)");
 console.log("══════════════════════════════════════════════════════");
 
 {
   const client = new ContractClient({
     partyData: { name: "Acme AI Agent", jurisdiction: "California, USA" },
     onRequirements: async (req) => {
-      console.log(`  [agent] Received contract requirements: "${req.description}"`);
+      console.log(`  [agent] 451 received: "${req.description}"`);
       console.log(`          Template: ${req.templateUrl}`);
     },
   });
 
-  console.log("\n  → GET /data (no agreement yet)");
+  console.log("\n  → GET /data (no X-451-Contract)");
   const res = await client.fetch(`${BASE}/data`);
   const body = await res.json();
   console.log(`  ← ${res.status}`, JSON.stringify(body));
 }
 
-await sleep(50);
+await new Promise((r) => setTimeout(r, 50));
 
 console.log("\n══════════════════════════════════════════════════════");
-console.log("  Demo 2: Negotiation — agent proposes different jurisdiction");
+console.log("  Demo 2: Negotiation round-trip");
 console.log("══════════════════════════════════════════════════════");
 
 {
-  let roundCount = 0;
+  let round = 0;
   const client = new ContractClient({
     partyData: { name: "Beta AI Corp", jurisdiction: "New York, USA" },
     onNegotiation: async (req) => {
-      roundCount++;
-      if (roundCount === 1) {
-        console.log(`  [agent] Proposing jurisdiction: "New York, USA" (round ${roundCount})`);
+      round++;
+      if (round === 1) {
+        console.log(`  [agent] Proposing jurisdiction: "New York, USA" (round ${round})`);
         return { jurisdiction: "New York, USA" };
       }
-      // On counter-offer, accept Delaware without further negotiation
-      console.log(`  [agent] Accepting server counter-offer: "${req.jurisdiction}" (round ${roundCount})`);
+      console.log(`  [agent] Accepting counter-offer: "${req.jurisdiction}" (round ${round})`);
       return undefined;
     },
   });
@@ -220,10 +200,10 @@ console.log("══════════════════════�
   console.log(`  ← ${res.status}`, JSON.stringify(body));
 }
 
-await sleep(50);
+await new Promise((r) => setTimeout(r, 50));
 
 console.log("\n══════════════════════════════════════════════════════");
-console.log("  Demo 3: x402 + LAP combined gate");
+console.log("  Demo 3: x402 + x451 combined gate");
 console.log("══════════════════════════════════════════════════════");
 
 {
@@ -235,14 +215,13 @@ console.log("══════════════════════�
   const res1 = await client.fetch(`${BASE}/premium-data`);
   const body1 = await res1.json() as { x402Version?: number; contractRequired?: unknown };
   console.log(`  ← ${res1.status} x402Version=${body1.x402Version ?? "n/a"} contractRequired=${body1.contractRequired ? "present" : "absent"}`);
-  console.log("  [agent] LAP contract agreement now cached from x402 body");
+  console.log("  [agent] x451 token cached from 402 body; caller now handles x402 payment");
 
-  // Simulate x402 payment proof (in real usage, the agent calls the x402 facilitator)
   const cachedToken = await client.establishAgreement(dataUseRequirements);
-  console.log("\n  → GET /premium-data (with agreement token + mock payment proof)");
+  console.log("\n  → GET /premium-data (X-451-Contract + mock X-PAYMENT)");
   const res2 = await fetch(`${BASE}/premium-data`, {
     headers: {
-      "X-Contract-Agreement": cachedToken,
+      "X-451-Contract": cachedToken,
       "X-PAYMENT": "mock-payment-proof",
     },
   });
