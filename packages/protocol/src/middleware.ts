@@ -93,6 +93,42 @@ export function acceptHandler(opts: AcceptHandlerOptions): MiddlewareHandler {
 
     // Negotiation round-trip
     if (body.negotiationTerms && opts.requirements.negotiable) {
+      const { negotiableFields } = opts.requirements;
+
+      // Validate proposed fields against the declared negotiableFields list
+      if (negotiableFields && negotiableFields.length > 0) {
+        const allowedFieldNames = new Set(negotiableFields.map((nf) => nf.field));
+        const invalidFields = Object.keys(body.negotiationTerms).filter(
+          (f) => !allowedFieldNames.has(f),
+        );
+        if (invalidFields.length > 0) {
+          return c.json(
+            {
+              error: "proposed fields are not negotiable",
+              invalidFields,
+              negotiableFields: negotiableFields.map((nf) => nf.field),
+            },
+            400,
+          );
+        }
+
+        // Validate allowedValues constraints
+        for (const [field, value] of Object.entries(body.negotiationTerms)) {
+          const spec = negotiableFields.find((nf) => nf.field === field);
+          if (spec?.allowedValues && !spec.allowedValues.includes(value as string)) {
+            return c.json(
+              {
+                error: "proposed value not in allowedValues",
+                field,
+                proposed: value,
+                allowedValues: spec.allowedValues,
+              },
+              400,
+            );
+          }
+        }
+      }
+
       const counter = await opts.onNegotiation?.(body.negotiationTerms, body.partyData);
       if (counter) {
         const contractId = crypto.randomUUID();

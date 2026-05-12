@@ -1,4 +1,5 @@
 export type {
+  NegotiableField,
   ContractRequirements,
   AgreementPayload,
   AgreementToken,

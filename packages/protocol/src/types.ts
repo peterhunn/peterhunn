@@ -1,10 +1,29 @@
 /**
- * LAP/1.0 — Legal Agents Protocol
+ * x451 — HTTP Contracting Protocol
  *
- * Wire types for the HTTP contracting protocol.
+ * Wire types for the x451 protocol.
  * Extends x402 (payment) to add a legal agreement layer in the
- * agentic commerce stack: Discovery → [LAP] → [x402] → Fulfillment
+ * agentic commerce stack: Discovery → [x451] → [x402] → Fulfillment
  */
+
+/**
+ * A single term the server is willing to negotiate.
+ *
+ * Servers enumerate negotiableFields inside ContractRequirements so that
+ * clients — including AI agents — can discover exactly what is on the table
+ * and what values are acceptable before making a proposal.
+ */
+export interface NegotiableField {
+  /** Dot-path key that maps to a field in ContractRequirements or the contract data model */
+  field: string;
+  /**
+   * Constrained set of values the server will accept for this field.
+   * If absent, any value may be proposed (server decides at negotiation time).
+   */
+  allowedValues?: string[];
+  /** Human/agent-readable explanation of what is negotiable and why */
+  description: string;
+}
 
 /** Sent by the server in a 451 body and X-451-Requirements header. */
 export interface ContractRequirements {
@@ -31,6 +50,14 @@ export interface ContractRequirements {
   description: string;
   /** Whether the server accepts negotiationTerms in AcceptRequest */
   negotiable: boolean;
+  /**
+   * Structured description of which fields may be negotiated and what values
+   * are acceptable. Only meaningful when negotiable is true.
+   *
+   * Agents read this to construct informed proposals rather than guessing.
+   * Servers use it to validate incoming negotiationTerms automatically.
+   */
+  negotiableFields?: NegotiableField[];
 }
 
 /** Payload embedded inside an AgreementToken. */
@@ -110,12 +137,12 @@ export interface X402PaymentRequirement {
  *
  * Servers that require both payment and a legal agreement embed
  * contractRequired alongside the standard x402 fields. x402-only clients
- * ignore the unknown field; LAP-aware clients process both gates.
+ * ignore the unknown field; x451-aware clients process both gates.
  */
 export interface X402Response {
   x402Version: 1;
   accepts: X402PaymentRequirement[];
-  /** LAP extension: present when a contract agreement is also required */
+  /** x451 extension: present when a contract agreement is also required */
   contractRequired?: ContractRequirements;
   error: string | null;
 }
