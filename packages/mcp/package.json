@@ -1,0 +1,30 @@
+{
+  "name": "@x490/mcp",
+  "version": "0.1.0",
+  "description": "MCP server for x490 — lets Claude reason over, negotiate, and accept legal contracts",
+  "type": "module",
+  "bin": {
+    "x490-mcp": "./dist/index.js"
+  },
+  "main": "./dist/server.js",
+  "types": "./dist/server.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/server.js",
+      "types": "./dist/server.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@x490/protocol": "*",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}
