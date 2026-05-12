@@ -1,6 +1,6 @@
 # Legal Agents Infrastructure — Technical Overview
 
-A TypeScript-first SDK for building, executing, and trading AI-driven legal contracts — and the x430 open protocol that makes contracts machine-readable across the internet.
+A TypeScript-first SDK for building, executing, and trading AI-driven legal contracts — and the x480 open protocol that makes contracts machine-readable across the internet.
 
 ---
 
@@ -20,7 +20,7 @@ The stack is a TypeScript monorepo with five packages:
 @legal-agents/core          — contract primitives (model, template, logic)
 @legal-agents/agents        — LLM agent layer (tools, reasoning, drafting)
 @legal-agents/api           — HTTP API + agentic runtime (executor, webhooks, audit)
-@legal-agents/protocol      — x430 HTTP contracting protocol
+@legal-agents/protocol      — x480 HTTP contracting protocol
 @legal-agents/store-postgres — Postgres implementations of all stores
 ```
 
@@ -286,19 +286,19 @@ On each tick:
 
 ---
 
-## x430 — HTTP Contracting Protocol
+## x480 — HTTP Contracting Protocol
 
-x430 is an open HTTP protocol that makes legal agreements machine-readable and agent-traversable, extending x402 (payment) to add a legal layer to the agentic commerce stack.
+x480 is an open HTTP protocol that makes legal agreements machine-readable and agent-traversable, extending x402 (payment) to add a legal layer to the agentic commerce stack.
 
 ```
-Discovery → [x430: Contract Agreement] → [x402: Payment] → Fulfillment → Dispute
+Discovery → [x480: Contract Agreement] → [x402: Payment] → Fulfillment → Dispute
 ```
 
 ### Status Codes
 
-| Code | Meaning in x430 |
+| Code | Meaning in x480 |
 |---|---|
-| `430` | Contract required — server returns `X-430-Requirements` |
+| `480` | Contract required — server returns `X-480-Requirements` |
 | `402` | Payment required — may embed `contractRequired` for combined gate |
 | `200` | Request accepted — both gates satisfied |
 
@@ -306,14 +306,14 @@ Discovery → [x430: Contract Agreement] → [x402: Payment] → Fulfillment →
 
 | Header | Direction | Content |
 |---|---|---|
-| `X-430-Requirements` | Server → Client | base64(JSON(ContractRequirements)) |
-| `X-430-Contract` | Client → Server | Signed agreement token |
+| `X-480-Requirements` | Server → Client | base64(JSON(ContractRequirements)) |
+| `X-480-Contract` | Client → Server | Signed agreement token |
 
 ### Flow: Contract Gate
 
 ```
 →  GET /resource
-←  430  X-430-Requirements: <base64>
+←  480  X-480-Requirements: <base64>
 
 →  GET <templateUrl>          (fetch + verify SHA-256)
 ←  200  { template, model }
@@ -323,21 +323,21 @@ Discovery → [x430: Contract Agreement] → [x402: Payment] → Fulfillment →
 ←  200  { status: "accepted", contractId, token }
 
 →  GET /resource
-   X-430-Contract: <token>
+   X-480-Contract: <token>
 ←  200  OK
 ```
 
-### Flow: Combined x402 + x430
+### Flow: Combined x402 + x480
 
 ```
 →  GET /resource
 ←  402  { x402Version: 1, accepts: [...], contractRequired: {...} }
 
-   (establish x430 agreement → token)
+   (establish x480 agreement → token)
    (pay via x402 facilitator → X-PAYMENT proof)
 
 →  GET /resource
-   X-430-Contract: <token>
+   X-480-Contract: <token>
    X-PAYMENT: <proof>
 ←  200  OK
 ```
@@ -346,7 +346,7 @@ Discovery → [x430: Contract Agreement] → [x402: Payment] → Fulfillment →
 
 ```typescript
 interface ContractRequirements {
-  scheme: "x430";
+  scheme: "x480";
   version: 1;
   templateId: string;           // "org.accordproject.saas-msa"
   templateUrl: string;          // fetch the template here
@@ -435,11 +435,11 @@ The `acceptHandler` middleware validates proposals automatically:
 
 ### AgreementToken
 
-Self-contained signed token carried in `X-430-Contract`. Verifiable offline without calling the server.
+Self-contained signed token carried in `X-480-Contract`. Verifiable offline without calling the server.
 
 ```typescript
 interface AgreementToken {
-  scheme: "x430";
+  scheme: "x480";
   payload: {
     contractId: string;
     templateHash: string;   // binds token to a specific contract template
@@ -454,7 +454,7 @@ interface AgreementToken {
 
 Offline verification steps:
 1. base64-decode and JSON-parse
-2. Check `scheme === "x430"`
+2. Check `scheme === "x480"`
 3. Check `payload.exp > now`
 4. Check `payload.resource === requestPath || payload.resource === "*"`
 5. Recompute HMAC-SHA256 and compare in constant time
@@ -471,7 +471,7 @@ Like x402 facilitators, servers may delegate token signing and verification to a
 | Template substitution | Client verifies `templateHash` (SHA-256) before signing |
 | HMAC secret exposure | Server-side only; facilitator pattern keeps secrets off application servers |
 | Negotiation abuse | Rate-limit round-trips; `negotiable: false` by default |
-| Enforceability | x430 proves cryptographic agreement, not legal enforceability — jurisdiction and applicable law are the parties' responsibility |
+| Enforceability | x480 proves cryptographic agreement, not legal enforceability — jurisdiction and applicable law are the parties' responsibility |
 
 ---
 
@@ -560,7 +560,7 @@ const { raw: adminKey } = await apiKeys.create("my-org", "admin", "live");
 startServer({ registry, apiKeys, port: 3000, executorIntervalMs: 30_000 });
 ```
 
-### 4. Gate a resource with x430
+### 4. Gate a resource with x480
 
 ```typescript
 import { requireContract, acceptHandler, ContractClient } from "@legal-agents/protocol";
@@ -576,16 +576,16 @@ const res = await client.fetch("https://api.example.com/data");
 
 ---
 
-## Reference: x430 at a Glance
+## Reference: x480 at a Glance
 
 ```
                     ┌─────────────────────────────────────┐
-                    │           x430 Protocol              │
+                    │           x480 Protocol              │
                     │                                      │
   Agent             │  Server                              │
     │               │    │                                 │
     │── GET /data ──┼──→ │                                 │
-    │               │    │ ← 430 X-430-Requirements        │
+    │               │    │ ← 480 X-480-Requirements        │
     │               │    │                                 │
     │── GET template┼──→ │                                 │
     │               │    │ ← 200 { text, model, hash }    │
@@ -594,10 +594,10 @@ const res = await client.fetch("https://api.example.com/data");
     │               │    │ ← 200 { token }                │
     │               │    │                                 │
     │── GET /data   │    │                                 │
-    │   X-430-Contract ──┼──→ verify HMAC offline         │
+    │   X-480-Contract ──┼──→ verify HMAC offline         │
     │               │    │ ← 200 OK                       │
     └───────────────┴────┴─────────────────────────────────┘
 
-  Token:  base64({ scheme:"x430", payload:{contractId,partyId,exp,...}, signature:HMAC })
+  Token:  base64({ scheme:"x480", payload:{contractId,partyId,exp,...}, signature:HMAC })
   Verify: HMAC-SHA256(secret, JSON.stringify(payload)) — constant-time compare
 ```

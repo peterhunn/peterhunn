@@ -1,7 +1,7 @@
 {
   "name": "@legal-agents/protocol",
   "version": "0.1.0",
-  "description": "x430 — machine-readable contracting protocol for HTTP, extending x402 and agentic commerce stacks",
+  "description": "x480 — machine-readable contracting protocol for HTTP, extending x402 and agentic commerce stacks",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

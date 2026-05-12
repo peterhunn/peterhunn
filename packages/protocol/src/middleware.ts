@@ -3,21 +3,21 @@ import type { ContractRequirements, AcceptRequest, AcceptResponse } from "./type
 import { signToken, verifyToken } from "./token.js";
 import { b64encode } from "./codec.js";
 
-/** Build a 430 response. Native Response bypasses Hono's ContentfulStatusCode union. */
-function x430Response(body: unknown, requirements: ContractRequirements): Response {
+/** Build a 480 response. Native Response bypasses Hono's ContentfulStatusCode union. */
+function x480Response(body: unknown, requirements: ContractRequirements): Response {
   return new Response(JSON.stringify(body), {
-    status: 430,
+    status: 480,
     headers: {
       "Content-Type": "application/json",
-      "X-430-Requirements": b64encode(JSON.stringify(requirements)),
+      "X-480-Requirements": b64encode(JSON.stringify(requirements)),
     },
   });
 }
 
 declare module "hono" {
   interface ContextVariableMap {
-    x430ContractId: string;
-    x430PartyId: string;
+    x480ContractId: string;
+    x480PartyId: string;
   }
 }
 
@@ -28,17 +28,17 @@ export interface ContractGateOptions {
 }
 
 /**
- * Hono middleware that gates a route behind an x430 contract agreement.
+ * Hono middleware that gates a route behind an x480 contract agreement.
  *
- * Returns 430 with X-430-Requirements when the header is absent or invalid.
- * On success, sets c.var.x430ContractId and c.var.x430PartyId.
+ * Returns 480 with X-480-Requirements when the header is absent or invalid.
+ * On success, sets c.var.x480ContractId and c.var.x480PartyId.
  */
 export function requireContract(opts: ContractGateOptions): MiddlewareHandler {
   return async (c, next) => {
-    const raw = c.req.header("X-430-Contract");
+    const raw = c.req.header("X-480-Contract");
 
     if (!raw) {
-      return x430Response(
+      return x480Response(
         { error: "Contract agreement required", contractRequired: opts.requirements },
         opts.requirements,
       );
@@ -46,14 +46,14 @@ export function requireContract(opts: ContractGateOptions): MiddlewareHandler {
 
     const result = await verifyToken(raw, opts.secret, c.req.path);
     if (!result.valid) {
-      return x430Response(
+      return x480Response(
         { error: result.reason, contractRequired: opts.requirements },
         opts.requirements,
       );
     }
 
-    c.set("x430ContractId", result.payload.contractId);
-    c.set("x430PartyId", result.payload.partyId);
+    c.set("x480ContractId", result.payload.contractId);
+    c.set("x480PartyId", result.payload.partyId);
     await next();
   };
 }
