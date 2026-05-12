@@ -1,17 +1,17 @@
 /**
- * x451 end-to-end demo — Legal contracting protocol extending x402.
+ * x430 end-to-end demo — Legal contracting protocol extending x402.
  *
  * Demonstrates the full agentic commerce stack:
- *   Discovery → [x451: Contract Agreement] → [x402: Payment] → Fulfillment
+ *   Discovery → [x430: Contract Agreement] → [x402: Payment] → Fulfillment
  *
- * Run:  npm run run:x451-demo
+ * Run:  npm run run:x430-demo
  *
  * What this shows:
- *   1. A Hono server exposes /data behind an x451 contract gate (data-use NDA)
- *   2. An AI agent (ContractClient) hits the endpoint, gets 451 + X-451-Requirements
- *   3. Agent fetches template, posts partyData to accept endpoint, gets X-451-Contract token
- *   4. Agent retries with X-451-Contract → 200 OK
- *   5. The combined x402 + x451 flow (requires BOTH agreement AND payment proof)
+ *   1. A Hono server exposes /data behind an x430 contract gate (data-use NDA)
+ *   2. An AI agent (ContractClient) hits the endpoint, gets 430 + X-430-Requirements
+ *   3. Agent fetches template, posts partyData to accept endpoint, gets X-430-Contract token
+ *   4. Agent retries with X-430-Contract → 200 OK
+ *   5. The combined x402 + x430 flow (requires BOTH agreement AND payment proof)
  *   6. Negotiation round-trip (server counter-offers jurisdiction, agent accepts)
  */
 
@@ -22,18 +22,18 @@ import {
   requireContract,
   acceptHandler,
   buildX402WithContract,
-  x451ExtensionHeaders,
+  x430ExtensionHeaders,
 } from "@legal-agents/protocol";
 import type { ContractRequirements } from "@legal-agents/protocol";
 
 // ── Shared config ──────────────────────────────────────────────────────────────
 
-const PORT = 4510;
+const PORT = 4300;
 const BASE = `http://localhost:${PORT}`;
 const HMAC_SECRET = crypto.randomUUID(); // ephemeral per demo run
 
 const dataUseRequirements: ContractRequirements = {
-  scheme: "x451",
+  scheme: "x430",
   version: 1,
   templateId: "org.accordproject.data-use-nda",
   templateUrl: `${BASE}/.well-known/contracts/data-use-nda`,
@@ -111,7 +111,7 @@ app.get("/contracts/verify", async (c) => {
     : c.json({ valid: false, reason: result.reason });
 });
 
-// x451-gated endpoint — returns 451 until agreement token is present
+// x430-gated endpoint — returns 430 until agreement token is present
 app.get(
   "/data",
   requireContract({ requirements: dataUseRequirements, secret: HMAC_SECRET }),
@@ -119,14 +119,14 @@ app.get(
     c.json({
       dataset: "Q1-2026",
       rows: 42_000,
-      accessedBy: c.var.x451PartyId,
-      contractId: c.var.x451ContractId,
+      accessedBy: c.var.x430PartyId,
+      contractId: c.var.x430ContractId,
     }),
 );
 
-// Combined x402 + x451 endpoint — requires both agreement AND payment
+// Combined x402 + x430 endpoint — requires both agreement AND payment
 app.get("/premium-data", async (c) => {
-  const agreementToken = c.req.header("X-451-Contract");
+  const agreementToken = c.req.header("X-430-Contract");
   const paymentProof = c.req.header("X-PAYMENT");
 
   if (!agreementToken) {
@@ -145,7 +145,7 @@ app.get("/premium-data", async (c) => {
       ],
       dataUseRequirements,
     );
-    return c.json(body, 402, x451ExtensionHeaders(dataUseRequirements));
+    return c.json(body, 402, x430ExtensionHeaders(dataUseRequirements));
   }
 
   if (!paymentProof) {
@@ -155,32 +155,32 @@ app.get("/premium-data", async (c) => {
   return c.json({
     dataset: "premium-Q1-2026",
     rows: 420_000,
-    note: "Both x451 contract + x402 payment verified",
+    note: "Both x430 contract + x402 payment verified",
   });
 });
 
 // ── Run the demo ───────────────────────────────────────────────────────────────
 
 const server = serve({ fetch: app.fetch, port: PORT }, () => {
-  console.log(`\nx451 demo server listening on ${BASE}`);
+  console.log(`\nx430 demo server listening on ${BASE}`);
 });
 
 await new Promise((r) => setTimeout(r, 100));
 
 console.log("\n══════════════════════════════════════════════════════");
-console.log("  Demo 1: x451 gate (451 Contract Required)");
+console.log("  Demo 1: x430 gate (430 Contract Required)");
 console.log("══════════════════════════════════════════════════════");
 
 {
   const client = new ContractClient({
     partyData: { name: "Acme AI Agent", jurisdiction: "California, USA" },
     onRequirements: async (req) => {
-      console.log(`  [agent] 451 received: "${req.description}"`);
+      console.log(`  [agent] 430 received: "${req.description}"`);
       console.log(`          Template: ${req.templateUrl}`);
     },
   });
 
-  console.log("\n  → GET /data (no X-451-Contract)");
+  console.log("\n  → GET /data (no X-430-Contract)");
   const res = await client.fetch(`${BASE}/data`);
   const body = await res.json();
   console.log(`  ← ${res.status}`, JSON.stringify(body));
@@ -255,7 +255,7 @@ console.log("══════════════════════�
 await new Promise((r) => setTimeout(r, 50));
 
 console.log("\n══════════════════════════════════════════════════════");
-console.log("  Demo 3: x402 + x451 combined gate");
+console.log("  Demo 3: x402 + x430 combined gate");
 console.log("══════════════════════════════════════════════════════");
 
 {
@@ -267,13 +267,13 @@ console.log("══════════════════════�
   const res1 = await client.fetch(`${BASE}/premium-data`);
   const body1 = await res1.json() as { x402Version?: number; contractRequired?: unknown };
   console.log(`  ← ${res1.status} x402Version=${body1.x402Version ?? "n/a"} contractRequired=${body1.contractRequired ? "present" : "absent"}`);
-  console.log("  [agent] x451 token cached from 402 body; caller now handles x402 payment");
+  console.log("  [agent] x430 token cached from 402 body; caller now handles x402 payment");
 
   const cachedToken = await client.establishAgreement(dataUseRequirements);
-  console.log("\n  → GET /premium-data (X-451-Contract + mock X-PAYMENT)");
+  console.log("\n  → GET /premium-data (X-430-Contract + mock X-PAYMENT)");
   const res2 = await fetch(`${BASE}/premium-data`, {
     headers: {
-      "X-451-Contract": cachedToken,
+      "X-430-Contract": cachedToken,
       "X-PAYMENT": "mock-payment-proof",
     },
   });

@@ -1,6 +1,6 @@
-# x451 — Machine-Readable Contracting Protocol for HTTP
+# x430 — Machine-Readable Contracting Protocol for HTTP
 
-A legal agreement layer for the agentic commerce stack, named after HTTP 451
+A legal agreement layer for the agentic commerce stack, named after HTTP 430
 ("Unavailable For Legal Reasons"). Extends x402 (payment) so that AI agents
 can autonomously satisfy both legal and financial gates before accessing a
 resource.
@@ -9,12 +9,12 @@ resource.
 
 ## Abstract
 
-x451 defines how an HTTP server advertises that a resource requires a legal
+x430 defines how an HTTP server advertises that a resource requires a legal
 agreement, how a client (human or agent) establishes that agreement, and how
 subsequent requests prove it. The protocol is:
 
 - **Stateless at the wire level** — agreement proof is a self-contained signed
-  token carried in `X-451-Contract`, no session required.
+  token carried in `X-430-Contract`, no session required.
 - **Negotiable** — servers may accept or counter-offer, enabling agents to
   agree on modified terms before committing.
 - **x402-composable** — servers that require both payment and a legal agreement
@@ -34,11 +34,11 @@ The missing layer is *legal agreement*. Many resources require not just payment
 but a binding agreement — terms of service, an NDA, a data-use policy, a
 liability waiver. Today these are HTML click-wraps invisible to agents.
 
-x451 closes that gap. An agent that can traverse x402 can traverse x451 with
+x430 closes that gap. An agent that can traverse x402 can traverse x430 with
 the same loop:
 
 ```
-while response.status in (402, 451):
+while response.status in (402, 430):
     satisfy_requirements(response)
     response = retry(request)
 ```
@@ -46,7 +46,7 @@ while response.status in (402, 451):
 Within a UCP-style commerce lifecycle the layers map as:
 
 ```
-Discovery → [x451: Contract Agreement] → [x402: Payment] → Fulfillment → Dispute
+Discovery → [x430: Contract Agreement] → [x402: Payment] → Fulfillment → Dispute
 ```
 
 ---
@@ -60,8 +60,8 @@ Client                                    Server
   |                                          |
   |── GET /resource ──────────────────────→  |
   |                                          |
-  |← 451 Contract Required ─────────────────|
-  |  X-451-Requirements: <base64>            |
+  |← 430 Contract Required ─────────────────|
+  |  X-430-Requirements: <base64>            |
   |  Body: { error, contractRequired: {...} }|
   |                                          |
   |── GET <templateUrl> ────────────────────→ (fetch contract template)
@@ -75,7 +75,7 @@ Client                                    Server
   |         contractId, token }              |
   |                                          |
   |── GET /resource ──────────────────────→  |
-  |   X-451-Contract: <token>                |
+  |   X-430-Contract: <token>                |
   |← 200 OK ─────────────────────────────── |
 ```
 
@@ -89,14 +89,14 @@ Client                                    Server
   |  Body: {                                 |
   |    x402Version: 1,                       |
   |    accepts: [...],           ← standard x402
-  |    contractRequired: {...},  ← x451 extension
+  |    contractRequired: {...},  ← x430 extension
   |  }                                       |
   |                                          |
-  |  (establish agreement → get x451 token)  |
+  |  (establish agreement → get x430 token)  |
   |  (pay via x402 facilitator → get X-PAYMENT proof)
   |                                          |
   |── GET /resource ──────────────────────→  |
-  |   X-451-Contract: <token>                |
+  |   X-430-Contract: <token>                |
   |   X-PAYMENT: <x402-proof>               |
   |← 200 OK ─────────────────────────────── |
 ```
@@ -120,8 +120,8 @@ Client                                    Server
 
 | Header | Direction | Description |
 |---|---|---|
-| `X-451-Requirements` | Server → Client | base64(JSON(ContractRequirements)) on 451 |
-| `X-451-Contract` | Client → Server | Signed agreement token on subsequent requests |
+| `X-430-Requirements` | Server → Client | base64(JSON(ContractRequirements)) on 430 |
+| `X-430-Contract` | Client → Server | Signed agreement token on subsequent requests |
 
 ---
 
@@ -131,7 +131,7 @@ Client                                    Server
 
 ```typescript
 interface ContractRequirements {
-  scheme: "x451";
+  scheme: "x430";
   version: 1;
   templateId: string;           // e.g. "org.accordproject.saas-msa"
   templateUrl: string;          // fetch the human+machine-readable template
@@ -150,11 +150,11 @@ interface ContractRequirements {
 
 ### AgreementToken
 
-Carried in `X-451-Contract`. Self-contained and verifiable offline.
+Carried in `X-430-Contract`. Self-contained and verifiable offline.
 
 ```typescript
 interface AgreementToken {
-  scheme: "x451";
+  scheme: "x430";
   payload: {
     contractId: string;
     templateHash: string;
@@ -189,10 +189,10 @@ interface AcceptResponse {
 
 ## Token Verification
 
-Servers verify `X-451-Contract` offline:
+Servers verify `X-430-Contract` offline:
 
 1. base64-decode and JSON-parse the token.
-2. Check `scheme === "x451"`.
+2. Check `scheme === "x430"`.
 3. Check `payload.exp > now`.
 4. Check `payload.resource === requestPath || payload.resource === "*"`.
 5. Recompute `HMAC-SHA256(secret, JSON.stringify(payload))` and compare to
@@ -213,16 +213,16 @@ Servers that require both legal agreement and payment extend the standard x402
 {
   "x402Version": 1,
   "accepts": [{ "scheme": "exact", "network": "base", ... }],
-  "contractRequired": { "scheme": "x451", ... }
+  "contractRequired": { "scheme": "x430", ... }
 }
 ```
 
-Clients that support x451 check for `contractRequired`. If present, they
-establish the agreement (obtaining an x451 token) before or in parallel with
-payment, then send both `X-451-Contract` and `X-PAYMENT` on the retry.
+Clients that support x430 check for `contractRequired`. If present, they
+establish the agreement (obtaining an x430 token) before or in parallel with
+payment, then send both `X-430-Contract` and `X-PAYMENT` on the retry.
 
 x402-only clients ignore the unknown field and retry with only `X-PAYMENT`;
-the server may then respond with 451.
+the server may then respond with 430.
 
 ---
 
@@ -247,12 +247,12 @@ Accepting `negotiationTerms` is strictly opt-in (`negotiable: true`).
 
 `@legal-agents/protocol` — TypeScript package:
 
-- `requireContract(opts)` — Hono middleware: 451 gate, sets `c.var.x451ContractId` / `c.var.x451PartyId`
+- `requireContract(opts)` — Hono middleware: 430 gate, sets `c.var.x430ContractId` / `c.var.x430PartyId`
 - `acceptHandler(opts)` — accept endpoint with negotiation support
 - `verifyHandler(opts)` — facilitator verify endpoint
-- `ContractClient` — fetch-wrapping agent client that auto-traverses x451 + x402
+- `ContractClient` — fetch-wrapping agent client that auto-traverses x430 + x402
 - `signToken` / `verifyToken` — HMAC-SHA256 primitives
-- `buildX402WithContract` — construct combined x402+x451 402 responses
-- `x451ExtensionHeaders` — add `X-451-Requirements` alongside x402 402 body
+- `buildX402WithContract` — construct combined x402+x430 402 responses
+- `x430ExtensionHeaders` — add `X-430-Requirements` alongside x402 402 body
 
-See `packages/protocol/` and `packages/examples/src/x451-demo.ts`.
+See `packages/protocol/` and `packages/examples/src/x430-demo.ts`.

@@ -1,9 +1,9 @@
 /**
- * x451 — HTTP Contracting Protocol
+ * x430 — HTTP Contracting Protocol
  *
- * Wire types for the x451 protocol.
+ * Wire types for the x430 protocol.
  * Extends x402 (payment) to add a legal agreement layer in the
- * agentic commerce stack: Discovery → [x451] → [x402] → Fulfillment
+ * agentic commerce stack: Discovery → [x430] → [x402] → Fulfillment
  */
 
 /**
@@ -25,9 +25,9 @@ export interface NegotiableField {
   description: string;
 }
 
-/** Sent by the server in a 451 body and X-451-Requirements header. */
+/** Sent by the server in a 430 body and X-430-Requirements header. */
 export interface ContractRequirements {
-  scheme: "x451";
+  scheme: "x430";
   version: 1;
   /** Accord Project-style class name, e.g. "org.accordproject.saas-msa" */
   templateId: string;
@@ -73,9 +73,9 @@ export interface AgreementPayload {
   exp: number;
 }
 
-/** Self-contained signed token. Carried in X-451-Contract header. */
+/** Self-contained signed token. Carried in X-430-Contract header. */
 export interface AgreementToken {
-  scheme: "x451";
+  scheme: "x430";
   payload: AgreementPayload;
   /** Hex HMAC-SHA256(secret, JSON.stringify(payload)) */
   signature: string;
@@ -137,12 +137,12 @@ export interface X402PaymentRequirement {
  *
  * Servers that require both payment and a legal agreement embed
  * contractRequired alongside the standard x402 fields. x402-only clients
- * ignore the unknown field; x451-aware clients process both gates.
+ * ignore the unknown field; x430-aware clients process both gates.
  */
 export interface X402Response {
   x402Version: 1;
   accepts: X402PaymentRequirement[];
-  /** x451 extension: present when a contract agreement is also required */
+  /** x430 extension: present when a contract agreement is also required */
   contractRequired?: ContractRequirements;
   error: string | null;
 }

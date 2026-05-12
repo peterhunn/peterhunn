@@ -3,10 +3,21 @@ import type { ContractRequirements, AcceptRequest, AcceptResponse } from "./type
 import { signToken, verifyToken } from "./token.js";
 import { b64encode } from "./codec.js";
 
+/** Build a 430 response. Native Response bypasses Hono's ContentfulStatusCode union. */
+function x430Response(body: unknown, requirements: ContractRequirements): Response {
+  return new Response(JSON.stringify(body), {
+    status: 430,
+    headers: {
+      "Content-Type": "application/json",
+      "X-430-Requirements": b64encode(JSON.stringify(requirements)),
+    },
+  });
+}
+
 declare module "hono" {
   interface ContextVariableMap {
-    x451ContractId: string;
-    x451PartyId: string;
+    x430ContractId: string;
+    x430PartyId: string;
   }
 }
 
@@ -17,34 +28,32 @@ export interface ContractGateOptions {
 }
 
 /**
- * Hono middleware that gates a route behind an x451 contract agreement.
+ * Hono middleware that gates a route behind an x430 contract agreement.
  *
- * Returns 451 with X-451-Requirements when the header is absent or invalid.
- * On success, sets c.var.x451ContractId and c.var.x451PartyId.
+ * Returns 430 with X-430-Requirements when the header is absent or invalid.
+ * On success, sets c.var.x430ContractId and c.var.x430PartyId.
  */
 export function requireContract(opts: ContractGateOptions): MiddlewareHandler {
   return async (c, next) => {
-    const raw = c.req.header("X-451-Contract");
+    const raw = c.req.header("X-430-Contract");
 
     if (!raw) {
-      return c.json(
+      return x430Response(
         { error: "Contract agreement required", contractRequired: opts.requirements },
-        451,
-        { "X-451-Requirements": b64encode(JSON.stringify(opts.requirements)) },
+        opts.requirements,
       );
     }
 
     const result = await verifyToken(raw, opts.secret, c.req.path);
     if (!result.valid) {
-      return c.json(
+      return x430Response(
         { error: result.reason, contractRequired: opts.requirements },
-        451,
-        { "X-451-Requirements": b64encode(JSON.stringify(opts.requirements)) },
+        opts.requirements,
       );
     }
 
-    c.set("x451ContractId", result.payload.contractId);
-    c.set("x451PartyId", result.payload.partyId);
+    c.set("x430ContractId", result.payload.contractId);
+    c.set("x430PartyId", result.payload.partyId);
     await next();
   };
 }

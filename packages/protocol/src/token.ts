@@ -30,7 +30,7 @@ async function verifyHmacHex(secret: string, data: string, hex: string): Promise
 export async function signToken(payload: AgreementPayload, secret: string): Promise<string> {
   const body = JSON.stringify(payload);
   const signature = await hmacHex(secret, body);
-  const token: AgreementToken = { scheme: "x451", payload, signature };
+  const token: AgreementToken = { scheme: "x430", payload, signature };
   return b64encode(JSON.stringify(token));
 }
 
@@ -55,7 +55,7 @@ export async function verifyToken(
     return { valid: false, reason: "malformed token" };
   }
 
-  if (token.scheme !== "x451") {
+  if (token.scheme !== "x430") {
     return { valid: false, reason: "unknown scheme" };
   }
 
