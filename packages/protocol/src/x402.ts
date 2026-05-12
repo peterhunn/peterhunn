@@ -6,11 +6,11 @@ import type {
 import { b64encode, b64decode } from "./codec.js";
 
 /**
- * Build a combined x402 + x480 402 response body.
+ * Build a combined x402 + x490 402 response body.
  *
  * Servers that require both payment and a legal agreement call this instead
  * of returning a bare x402 body. x402-only clients ignore the unknown
- * contractRequired field; x480-aware clients process both gates.
+ * contractRequired field; x490-aware clients process both gates.
  */
 export function buildX402WithContract(
   paymentRequirements: X402PaymentRequirement[],
@@ -26,7 +26,7 @@ export function buildX402WithContract(
 
 /**
  * Parse a raw 402 response body, returning the x402 fields and any
- * embedded x480 ContractRequirements.
+ * embedded x490 ContractRequirements.
  */
 export function parseX402Response(body: unknown): X402Response {
   const r = body as Record<string, unknown>;
@@ -41,28 +41,28 @@ export function parseX402Response(body: unknown): X402Response {
 }
 
 /**
- * Additional response headers to include alongside a 402 that carries x480 requirements.
+ * Additional response headers to include alongside a 402 that carries x490 requirements.
  *
  * Allows clients that check headers (not the body) to discover the contract gate.
  */
-export function x480ExtensionHeaders(
+export function x490ExtensionHeaders(
   contractRequired: ContractRequirements,
 ): Record<string, string> {
   return {
-    "X-480-Requirements": b64encode(JSON.stringify(contractRequired)),
+    "X-490-Requirements": b64encode(JSON.stringify(contractRequired)),
   };
 }
 
 /**
- * Given a fetch Response that returned 402, extract any embedded x480
- * ContractRequirements from the body or X-480-Requirements header.
+ * Given a fetch Response that returned 402, extract any embedded x490
+ * ContractRequirements from the body or X-490-Requirements header.
  *
- * Returns undefined if this is a plain x402 response with no x480 layer.
+ * Returns undefined if this is a plain x402 response with no x490 layer.
  */
 export async function extractContractRequirements(
   response: Response,
 ): Promise<ContractRequirements | undefined> {
-  const header = response.headers.get("X-480-Requirements");
+  const header = response.headers.get("X-490-Requirements");
   if (header) {
     try {
       return JSON.parse(b64decode(header)) as ContractRequirements;

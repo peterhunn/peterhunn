@@ -27,6 +27,6 @@ export type { ContractClientOptions } from "./client.js";
 export {
   buildX402WithContract,
   parseX402Response,
-  x480ExtensionHeaders,
+  x490ExtensionHeaders,
   extractContractRequirements,
 } from "./x402.js";

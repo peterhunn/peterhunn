@@ -1,9 +1,9 @@
 /**
- * x480 — HTTP Contracting Protocol
+ * x490 — HTTP Contracting Protocol
  *
- * Wire types for the x480 protocol.
+ * Wire types for the x490 protocol.
  * Extends x402 (payment) to add a legal agreement layer in the
- * agentic commerce stack: Discovery → [x480] → [x402] → Fulfillment
+ * agentic commerce stack: Discovery → [x490] → [x402] → Fulfillment
  */
 
 /**
@@ -25,9 +25,9 @@ export interface NegotiableField {
   description: string;
 }
 
-/** Sent by the server in a 480 body and X-480-Requirements header. */
+/** Sent by the server in a 490 body and X-490-Requirements header. */
 export interface ContractRequirements {
-  scheme: "x480";
+  scheme: "x490";
   version: 1;
   /** Accord Project-style class name, e.g. "org.accordproject.saas-msa" */
   templateId: string;
@@ -73,9 +73,9 @@ export interface AgreementPayload {
   exp: number;
 }
 
-/** Self-contained signed token. Carried in X-480-Contract header. */
+/** Self-contained signed token. Carried in X-490-Contract header. */
 export interface AgreementToken {
-  scheme: "x480";
+  scheme: "x490";
   payload: AgreementPayload;
   /** Hex HMAC-SHA256(secret, JSON.stringify(payload)) */
   signature: string;
@@ -137,12 +137,12 @@ export interface X402PaymentRequirement {
  *
  * Servers that require both payment and a legal agreement embed
  * contractRequired alongside the standard x402 fields. x402-only clients
- * ignore the unknown field; x480-aware clients process both gates.
+ * ignore the unknown field; x490-aware clients process both gates.
  */
 export interface X402Response {
   x402Version: 1;
   accepts: X402PaymentRequirement[];
-  /** x480 extension: present when a contract agreement is also required */
+  /** x490 extension: present when a contract agreement is also required */
   contractRequired?: ContractRequirements;
   error: string | null;
 }

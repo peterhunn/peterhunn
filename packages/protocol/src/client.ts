@@ -29,11 +29,11 @@ export interface ContractClientOptions {
 }
 
 /**
- * A fetch-compatible client that automatically traverses the x480 protocol.
+ * A fetch-compatible client that automatically traverses the x490 protocol.
  *
- * On a 480 with X-480-Requirements, it establishes the agreement and retries
- * with X-480-Contract. On a 402 with contractRequired in the body, it handles
- * the x480 gate before the caller handles x402 payment.
+ * On a 490 with X-490-Requirements, it establishes the agreement and retries
+ * with X-490-Contract. On a 402 with contractRequired in the body, it handles
+ * the x490 gate before the caller handles x402 payment.
  *
  * Usage:
  *   const client = new ContractClient({ partyData: { name: "Acme Corp", ... } });
@@ -53,29 +53,29 @@ export class ContractClient {
 
     // Pre-attach a cached valid token if available for this resource
     const cached = this.findCachedToken(new URL(url).pathname);
-    if (cached) headers.set("X-480-Contract", cached);
+    if (cached) headers.set("X-490-Contract", cached);
 
     const response = await fetch(url, { ...init, headers });
 
-    // x480 gate on 480
-    if (response.status === 480) {
-      const reqHeader = response.headers.get("X-480-Requirements");
+    // x490 gate on 490
+    if (response.status === 490) {
+      const reqHeader = response.headers.get("X-490-Requirements");
       if (!reqHeader) return response;
 
       const requirements = JSON.parse(b64decode(reqHeader)) as ContractRequirements;
       const token = await this.establishAgreement(requirements);
 
       const retryHeaders = new Headers(init?.headers);
-      retryHeaders.set("X-480-Contract", token);
+      retryHeaders.set("X-490-Contract", token);
       return fetch(url, { ...init, headers: retryHeaders });
     }
 
-    // x402 + x480 combined gate on 402
+    // x402 + x490 combined gate on 402
     if (response.status === 402) {
       const body = (await response.clone().json()) as X402Response;
       if (body.contractRequired) {
         await this.establishAgreement(body.contractRequired);
-        // Return the 402 with the x480 requirement satisfied — the caller
+        // Return the 402 with the x490 requirement satisfied — the caller
         // handles x402 payment on top. The token is now cached for the retry.
       }
     }
@@ -111,7 +111,7 @@ export class ContractClient {
       });
 
       if (!res.ok) {
-        throw new Error(`x480 accept failed: ${res.status} ${await res.text()}`);
+        throw new Error(`x490 accept failed: ${res.status} ${await res.text()}`);
       }
 
       const result = (await res.json()) as AcceptResponse;
@@ -133,13 +133,13 @@ export class ContractClient {
       throw new Error("Unexpected accept response status");
     }
 
-    throw new Error(`x480 negotiation exceeded ${this.maxRounds} rounds`);
+    throw new Error(`x490 negotiation exceeded ${this.maxRounds} rounds`);
   }
 
   /** Attach a cached agreement token to an existing Headers object if available. */
   attachToken(resource: string, headers: Headers): void {
     const token = this.findCachedToken(resource);
-    if (token) headers.set("X-480-Contract", token);
+    if (token) headers.set("X-490-Contract", token);
   }
 
   private findCachedToken(resource: string): string | undefined {

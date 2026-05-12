@@ -7,7 +7,7 @@
     "typecheck": "tsc --noEmit",
     "run:nda": "tsx src/nda/agent.ts",
     "run:server": "tsx src/server.ts",
-    "run:x480-demo": "tsx src/x480-demo.ts"
+    "run:x490-demo": "tsx src/x490-demo.ts"
   },
   "dependencies": {
     "@legal-agents/core": "*",

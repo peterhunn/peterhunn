@@ -1,6 +1,6 @@
-# x480 — Machine-Readable Contracting Protocol for HTTP
+# x490 — Machine-Readable Contracting Protocol for HTTP
 
-A legal agreement layer for the agentic commerce stack, named after HTTP 480
+A legal agreement layer for the agentic commerce stack, named after HTTP 490
 ("Unavailable For Legal Reasons"). Extends x402 (payment) so that AI agents
 can autonomously satisfy both legal and financial gates before accessing a
 resource.
@@ -9,12 +9,12 @@ resource.
 
 ## Abstract
 
-x480 defines how an HTTP server advertises that a resource requires a legal
+x490 defines how an HTTP server advertises that a resource requires a legal
 agreement, how a client (human or agent) establishes that agreement, and how
 subsequent requests prove it. The protocol is:
 
 - **Stateless at the wire level** — agreement proof is a self-contained signed
-  token carried in `X-480-Contract`, no session required.
+  token carried in `X-490-Contract`, no session required.
 - **Negotiable** — servers may accept or counter-offer, enabling agents to
   agree on modified terms before committing.
 - **x402-composable** — servers that require both payment and a legal agreement
@@ -34,11 +34,11 @@ The missing layer is *legal agreement*. Many resources require not just payment
 but a binding agreement — terms of service, an NDA, a data-use policy, a
 liability waiver. Today these are HTML click-wraps invisible to agents.
 
-x480 closes that gap. An agent that can traverse x402 can traverse x480 with
+x490 closes that gap. An agent that can traverse x402 can traverse x490 with
 the same loop:
 
 ```
-while response.status in (402, 480):
+while response.status in (402, 490):
     satisfy_requirements(response)
     response = retry(request)
 ```
@@ -46,7 +46,7 @@ while response.status in (402, 480):
 Within a UCP-style commerce lifecycle the layers map as:
 
 ```
-Discovery → [x480: Contract Agreement] → [x402: Payment] → Fulfillment → Dispute
+Discovery → [x490: Contract Agreement] → [x402: Payment] → Fulfillment → Dispute
 ```
 
 ---
@@ -60,8 +60,8 @@ Client                                    Server
   |                                          |
   |── GET /resource ──────────────────────→  |
   |                                          |
-  |← 480 Contract Required ─────────────────|
-  |  X-480-Requirements: <base64>            |
+  |← 490 Contract Required ─────────────────|
+  |  X-490-Requirements: <base64>            |
   |  Body: { error, contractRequired: {...} }|
   |                                          |
   |── GET <templateUrl> ────────────────────→ (fetch contract template)
@@ -75,7 +75,7 @@ Client                                    Server
   |         contractId, token }              |
   |                                          |
   |── GET /resource ──────────────────────→  |
-  |   X-480-Contract: <token>                |
+  |   X-490-Contract: <token>                |
   |← 200 OK ─────────────────────────────── |
 ```
 
@@ -89,14 +89,14 @@ Client                                    Server
   |  Body: {                                 |
   |    x402Version: 1,                       |
   |    accepts: [...],           ← standard x402
-  |    contractRequired: {...},  ← x480 extension
+  |    contractRequired: {...},  ← x490 extension
   |  }                                       |
   |                                          |
-  |  (establish agreement → get x480 token)  |
+  |  (establish agreement → get x490 token)  |
   |  (pay via x402 facilitator → get X-PAYMENT proof)
   |                                          |
   |── GET /resource ──────────────────────→  |
-  |   X-480-Contract: <token>                |
+  |   X-490-Contract: <token>                |
   |   X-PAYMENT: <x402-proof>               |
   |← 200 OK ─────────────────────────────── |
 ```
@@ -120,8 +120,8 @@ Client                                    Server
 
 | Header | Direction | Description |
 |---|---|---|
-| `X-480-Requirements` | Server → Client | base64(JSON(ContractRequirements)) on 480 |
-| `X-480-Contract` | Client → Server | Signed agreement token on subsequent requests |
+| `X-490-Requirements` | Server → Client | base64(JSON(ContractRequirements)) on 490 |
+| `X-490-Contract` | Client → Server | Signed agreement token on subsequent requests |
 
 ---
 
@@ -131,7 +131,7 @@ Client                                    Server
 
 ```typescript
 interface ContractRequirements {
-  scheme: "x480";
+  scheme: "x490";
   version: 1;
   templateId: string;           // e.g. "org.accordproject.saas-msa"
   templateUrl: string;          // fetch the human+machine-readable template
@@ -150,11 +150,11 @@ interface ContractRequirements {
 
 ### AgreementToken
 
-Carried in `X-480-Contract`. Self-contained and verifiable offline.
+Carried in `X-490-Contract`. Self-contained and verifiable offline.
 
 ```typescript
 interface AgreementToken {
-  scheme: "x480";
+  scheme: "x490";
   payload: {
     contractId: string;
     templateHash: string;
@@ -189,10 +189,10 @@ interface AcceptResponse {
 
 ## Token Verification
 
-Servers verify `X-480-Contract` offline:
+Servers verify `X-490-Contract` offline:
 
 1. base64-decode and JSON-parse the token.
-2. Check `scheme === "x480"`.
+2. Check `scheme === "x490"`.
 3. Check `payload.exp > now`.
 4. Check `payload.resource === requestPath || payload.resource === "*"`.
 5. Recompute `HMAC-SHA256(secret, JSON.stringify(payload))` and compare to
@@ -213,16 +213,16 @@ Servers that require both legal agreement and payment extend the standard x402
 {
   "x402Version": 1,
   "accepts": [{ "scheme": "exact", "network": "base", ... }],
-  "contractRequired": { "scheme": "x480", ... }
+  "contractRequired": { "scheme": "x490", ... }
 }
 ```
 
-Clients that support x480 check for `contractRequired`. If present, they
-establish the agreement (obtaining an x480 token) before or in parallel with
-payment, then send both `X-480-Contract` and `X-PAYMENT` on the retry.
+Clients that support x490 check for `contractRequired`. If present, they
+establish the agreement (obtaining an x490 token) before or in parallel with
+payment, then send both `X-490-Contract` and `X-PAYMENT` on the retry.
 
 x402-only clients ignore the unknown field and retry with only `X-PAYMENT`;
-the server may then respond with 480.
+the server may then respond with 490.
 
 ---
 
@@ -247,12 +247,12 @@ Accepting `negotiationTerms` is strictly opt-in (`negotiable: true`).
 
 `@legal-agents/protocol` — TypeScript package:
 
-- `requireContract(opts)` — Hono middleware: 480 gate, sets `c.var.x480ContractId` / `c.var.x480PartyId`
+- `requireContract(opts)` — Hono middleware: 490 gate, sets `c.var.x490ContractId` / `c.var.x490PartyId`
 - `acceptHandler(opts)` — accept endpoint with negotiation support
 - `verifyHandler(opts)` — facilitator verify endpoint
-- `ContractClient` — fetch-wrapping agent client that auto-traverses x480 + x402
+- `ContractClient` — fetch-wrapping agent client that auto-traverses x490 + x402
 - `signToken` / `verifyToken` — HMAC-SHA256 primitives
-- `buildX402WithContract` — construct combined x402+x480 402 responses
-- `x480ExtensionHeaders` — add `X-480-Requirements` alongside x402 402 body
+- `buildX402WithContract` — construct combined x402+x490 402 responses
+- `x490ExtensionHeaders` — add `X-490-Requirements` alongside x402 402 body
 
-See `packages/protocol/` and `packages/examples/src/x480-demo.ts`.
+See `packages/protocol/` and `packages/examples/src/x490-demo.ts`.
