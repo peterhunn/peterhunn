@@ -13,7 +13,8 @@
   },
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx/esm --test 'src/__tests__/*.test.ts'"
   },
   "peerDependencies": {
     "hono": ">=4.0.0"
@@ -23,6 +24,7 @@
   },
   "devDependencies": {
     "hono": "^4.4.0",
+    "tsx": "*",
     "typescript": "^5.4.0"
   }
 }

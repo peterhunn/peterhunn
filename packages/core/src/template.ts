@@ -106,12 +106,16 @@ function buildExtractionPattern(tmpl: string, varPath: string): RegExp | null {
   const before = tmpl.slice(Math.max(0, idx - 40), idx);
   const after = tmpl.slice(idx + placeholder.length, idx + placeholder.length + 40);
 
-  const anchor = before.split(/\s+/).slice(-3).join("\\s+");
-  const tail = after.split(/\s+/).slice(0, 3).join("\\s+");
+  const anchor = before.split(/\s+/).slice(-3).map(escapeRegex).join("\\s+");
+  const tail = after.split(/\s+/).slice(0, 3).map(escapeRegex).join("\\s+");
 
   try {
     return new RegExp(`${anchor}\\s*([^\\n]+?)\\s*${tail}`);
   } catch {
     return null;
   }
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
