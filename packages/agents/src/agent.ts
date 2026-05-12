@@ -4,9 +4,9 @@ import type {
   ContractResponse,
   ContractState,
   Obligation,
-} from "@legal-agents/core";
-import { initialState } from "@legal-agents/core";
-import type { ContractLogic, ContractTemplate } from "@legal-agents/core";
+} from "@x490/core";
+import { initialState } from "@x490/core";
+import type { ContractLogic, ContractTemplate } from "@x490/core";
 import type { LLMClient, Message } from "./llm.js";
 import { LEGAL_AGENT_SYSTEM_PROMPT } from "./llm.js";
 import { contractTools } from "./tools.js";

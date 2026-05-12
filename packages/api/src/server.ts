@@ -10,7 +10,7 @@ import type { ContractStore } from "./store.js";
 import type { ApiKeyStore } from "./auth.js";
 import type { AuditLog } from "./audit.js";
 import type { WebhookStore } from "./webhooks.js";
-import type { LLMClient } from "@legal-agents/agents";
+import type { LLMClient } from "@x490/agents";
 
 export interface ServerOptions {
   registry: ContractRegistry;

@@ -1,4 +1,4 @@
-import type { ContractResponse, Obligation } from "@legal-agents/core";
+import type { ContractResponse, Obligation } from "@x490/core";
 import type { ContractRegistry } from "./registry.js";
 import type { ContractStore, StoredContract } from "./store.js";
 import type { AuditLog } from "./audit.js";

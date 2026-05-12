@@ -1,6 +1,6 @@
 import { Hono } from "hono";
-import { ContractAgent } from "@legal-agents/agents";
-import type { LLMClient } from "@legal-agents/agents";
+import { ContractAgent } from "@x490/agents";
+import type { LLMClient } from "@x490/agents";
 import type { ContractRegistry } from "./registry.js";
 import type { ContractStore } from "./store.js";
 import type { ApiKeyStore } from "./auth.js";

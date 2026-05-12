@@ -35,12 +35,12 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
-import { AnthropicClient } from "@legal-agents/agents";
+import { AnthropicClient } from "@x490/agents";
 import {
   ContractRegistry,
   InMemoryApiKeyStore,
   startServer,
-} from "@legal-agents/api";
+} from "@x490/api";
 import { ndaModel } from "./nda/model.js";
 import { ndaTemplate } from "./nda/template.js";
 import { ndaLogic } from "./nda/logic.js";

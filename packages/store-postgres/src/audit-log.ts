@@ -1,6 +1,6 @@
 import type postgres from "postgres";
-import type { AuditLog, AuditEntry, VerifyResult } from "@legal-agents/api";
-import { computeEntryHash, verifyEntries } from "@legal-agents/api";
+import type { AuditLog, AuditEntry, VerifyResult } from "@x490/api";
+import { computeEntryHash, verifyEntries } from "@x490/api";
 
 type Sql = ReturnType<typeof postgres>;
 

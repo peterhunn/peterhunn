@@ -1,5 +1,5 @@
-import type { ContractData, Party } from "@legal-agents/core";
-import { defineModel } from "@legal-agents/core";
+import type { ContractData, Party } from "@x490/core";
+import { defineModel } from "@x490/core";
 
 /**
  * NDA data model — TypeScript equivalent of a Concerto .cto file.

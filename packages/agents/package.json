@@ -1,5 +1,5 @@
 {
-  "name": "@legal-agents/agents",
+  "name": "@x490/agents",
   "version": "0.1.0",
   "description": "AI agent primitives for legal contracts: tool definitions, LLM adapters, and ContractAgent",
   "type": "module",
@@ -16,7 +16,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@legal-agents/core": "*"
+    "@x490/core": "*"
   },
   "peerDependencies": {
     "@anthropic-ai/sdk": "^0.26.0"

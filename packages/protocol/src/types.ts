@@ -43,6 +43,8 @@ export interface ContractRequirements {
   acceptEndpoint: string;
   /** Optional facilitator endpoint for offline-capable servers to delegate verification */
   verifyEndpoint?: string;
+  /** POST here to revoke an agreement (e.g. on termination or breach) */
+  revokeEndpoint?: string;
   /** Offer validity in seconds */
   expiresIn: number;
   /** Resource path being gated, or "*" for all paths on this origin */
@@ -58,6 +60,13 @@ export interface ContractRequirements {
    * Servers use it to validate incoming negotiationTerms automatically.
    */
   negotiableFields?: NegotiableField[];
+  /**
+   * Number of distinct parties that must accept before a token is issued.
+   * Defaults to 1 (single-party). When > 1, the first acceptor receives
+   * status "pending" and a pendingContractId; subsequent parties co-sign
+   * by including pendingContractId in their AcceptRequest.
+   */
+  requiredParties?: number;
 }
 
 /** Payload embedded inside an AgreementToken. */
@@ -90,16 +99,26 @@ export interface AcceptRequest {
   partyData: Record<string, string>;
   /** Proposed modifications — only sent when ContractRequirements.negotiable is true */
   negotiationTerms?: Record<string, unknown>;
+  /**
+   * For multi-party flows: the contractId returned by the first acceptor.
+   * Subsequent parties include this to co-sign the same pending contract.
+   */
+  pendingContractId?: string;
 }
 
 /** Returned by the server from the acceptEndpoint. */
 export interface AcceptResponse {
-  status: "accepted" | "counter_offer";
+  /** "accepted" = token issued; "pending" = more parties needed; "counter_offer" = modified terms */
+  status: "accepted" | "pending" | "counter_offer";
   contractId: string;
   /** base64(JSON(AgreementToken)) — present when status === "accepted" */
   token: string;
   /** Present when status === "counter_offer" */
   counterOffer?: ContractRequirements;
+  /** How many parties have accepted so far (present when status === "pending") */
+  pendingAcceptances?: number;
+  /** Total parties required (present when status === "pending") */
+  requiredAcceptances?: number;
 }
 
 /** Posted to verifyEndpoint by servers using the facilitator pattern. */
@@ -115,6 +134,46 @@ export interface VerifyResponse {
   partyId?: string;
   expiresAt?: number;
   reason?: string;
+}
+
+/** Posted to revokeEndpoint to invalidate an active agreement token. */
+export interface RevokeRequest {
+  contractId: string;
+  /** Reason string for audit log */
+  reason?: string;
+}
+
+/** Returned by revokeEndpoint. */
+export interface RevokeResponse {
+  revoked: boolean;
+  contractId: string;
+}
+
+// ── Discovery ─────────────────────────────────────────────────────────────────
+
+/** A single contract resource advertised in a discovery document. */
+export interface DiscoveryResource {
+  /** Resource path being gated, or "*" for all paths */
+  resource: string;
+  /** Short human-readable label */
+  description: string;
+  /** Full ContractRequirements — agents can immediately start the flow */
+  requirements: ContractRequirements;
+}
+
+/**
+ * Served at GET /.well-known/x490.
+ *
+ * Enables agents to discover all contract gates on a server without
+ * probing individual paths first. Analogue of /.well-known/oauth-authorization-server.
+ */
+export interface DiscoveryDocument {
+  scheme: "x490";
+  version: 1;
+  /** Server origin, e.g. "https://api.example.com" */
+  origin: string;
+  /** All resources that may require an x490 contract agreement */
+  resources: DiscoveryResource[];
 }
 
 // ── x402 integration ──────────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 {
-  "name": "@legal-agents/examples",
+  "name": "@x490/examples",
   "version": "0.1.0",
-  "description": "Reference implementations: NDA and other contracts using the legal-agents SDK",
+  "description": "Reference implementations: NDA and other contracts using the x490 SDK",
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -10,10 +10,10 @@
     "run:x490-demo": "tsx src/x490-demo.ts"
   },
   "dependencies": {
-    "@legal-agents/core": "*",
-    "@legal-agents/agents": "*",
-    "@legal-agents/api": "*",
-    "@legal-agents/protocol": "*"
+    "@x490/core": "*",
+    "@x490/agents": "*",
+    "@x490/api": "*",
+    "@x490/protocol": "*"
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.26.0",

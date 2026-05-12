@@ -1,6 +1,6 @@
-import type { ContractEvent, ContractResponse, ContractState, Obligation } from "@legal-agents/core";
-import { initialState } from "@legal-agents/core";
-import type { ContractLogic, ContractLogicContext } from "@legal-agents/core";
+import type { ContractEvent, ContractResponse, ContractState, Obligation } from "@x490/core";
+import { initialState } from "@x490/core";
+import type { ContractLogic, ContractLogicContext } from "@x490/core";
 import type { NDAData } from "./model.js";
 
 /**

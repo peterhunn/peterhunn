@@ -1,4 +1,4 @@
-# Legal Agents Infrastructure — Technical Overview
+# x490 — Technical Overview
 
 A TypeScript-first SDK for building, executing, and trading AI-driven legal contracts — and the x490 open protocol that makes contracts machine-readable across the internet.
 
@@ -17,11 +17,11 @@ This infrastructure solves that. It gives contracts the same machine-readable, a
 The stack is a TypeScript monorepo with five packages:
 
 ```
-@legal-agents/core          — contract primitives (model, template, logic)
-@legal-agents/agents        — LLM agent layer (tools, reasoning, drafting)
-@legal-agents/api           — HTTP API + agentic runtime (executor, webhooks, audit)
-@legal-agents/protocol      — x490 HTTP contracting protocol
-@legal-agents/store-postgres — Postgres implementations of all stores
+@x490/core          — contract primitives (model, template, logic)
+@x490/agents        — LLM agent layer (tools, reasoning, drafting)
+@x490/api           — HTTP API + agentic runtime (executor, webhooks, audit)
+@x490/protocol      — x490 HTTP contracting protocol
+@x490/store-postgres — Postgres implementations of all stores
 ```
 
 Each layer is independently useful. A team building a smart contract platform might use only `core` and `protocol`. A legal tech company building a SaaS product would use all five.
@@ -107,7 +107,7 @@ const ndaLogic: ContractLogic<NDAData, NDAEvent, NDAResponse> = {
 
 ---
 
-## `@legal-agents/core`
+## `@x490/core`
 
 The foundation. No dependencies beyond TypeScript.
 
@@ -132,7 +132,7 @@ The foundation. No dependencies beyond TypeScript.
 
 ---
 
-## `@legal-agents/agents`
+## `@x490/agents`
 
 LLM-powered contract reasoning layer. Provider-agnostic via `LLMClient` interface.
 
@@ -188,7 +188,7 @@ const llm = new AnthropicClient(new Anthropic(), "claude-opus-4-7");
 
 ---
 
-## `@legal-agents/api`
+## `@x490/api`
 
 The HTTP API layer. Built on Hono (runs on Node.js, Cloudflare Workers, Bun).
 
@@ -475,7 +475,7 @@ Like x402 facilitators, servers may delegate token signing and verification to a
 
 ---
 
-## `@legal-agents/store-postgres`
+## `@x490/store-postgres`
 
 Production-grade Postgres implementations of all four stores.
 
@@ -534,14 +534,14 @@ DATABASE_URL=postgresql://user:pass@localhost/legal_agents npm run migrate
 ### 1. Install
 
 ```bash
-npm install @legal-agents/core @legal-agents/agents @legal-agents/api @legal-agents/protocol
+npm install @x490/core @x490/agents @x490/api @x490/protocol
 ```
 
 ### 2. Define a contract
 
 ```typescript
-import { defineModel, defineTemplate, initialState } from "@legal-agents/core";
-import type { ContractLogic } from "@legal-agents/core";
+import { defineModel, defineTemplate, initialState } from "@x490/core";
+import type { ContractLogic } from "@x490/core";
 
 const myModel = defineModel<MyData>({ $class: "com.example.MyContract", validate: () => {} });
 const myTemplate = defineTemplate<MyData>({ templateId: "com.example.MyContract", text: "...", draft: ..., parse: ... });
@@ -551,7 +551,7 @@ const myLogic: ContractLogic<MyData> = { execute: (event, ctx) => ({ state: ctx.
 ### 3. Start the server
 
 ```typescript
-import { ContractRegistry, startServer, InMemoryApiKeyStore } from "@legal-agents/api";
+import { ContractRegistry, startServer, InMemoryApiKeyStore } from "@x490/api";
 
 const registry = new ContractRegistry().register("my-contract", { model: myModel, template: myTemplate, logic: myLogic });
 const apiKeys = new InMemoryApiKeyStore();
@@ -563,7 +563,7 @@ startServer({ registry, apiKeys, port: 3000, executorIntervalMs: 30_000 });
 ### 4. Gate a resource with x490
 
 ```typescript
-import { requireContract, acceptHandler, ContractClient } from "@legal-agents/protocol";
+import { requireContract, acceptHandler, ContractClient } from "@x490/protocol";
 
 // Server
 app.get("/data", requireContract({ requirements, secret }), handler);

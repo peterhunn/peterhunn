@@ -1,5 +1,5 @@
 {
-  "name": "@legal-agents/core",
+  "name": "@x490/core",
   "version": "0.1.0",
   "description": "TypeScript-first contract stack: models, templates, and logic for legal AI agents",
   "type": "module",

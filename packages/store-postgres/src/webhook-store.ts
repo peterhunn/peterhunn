@@ -1,5 +1,5 @@
 import type postgres from "postgres";
-import type { WebhookStore, Webhook, WebhookEventType } from "@legal-agents/api";
+import type { WebhookStore, Webhook, WebhookEventType } from "@x490/api";
 
 type Sql = ReturnType<typeof postgres>;
 

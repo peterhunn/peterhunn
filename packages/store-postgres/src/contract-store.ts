@@ -1,5 +1,5 @@
 import type postgres from "postgres";
-import type { ContractStore, StoredContract, DueContract } from "@legal-agents/api";
+import type { ContractStore, StoredContract, DueContract } from "@x490/api";
 
 type Sql = ReturnType<typeof postgres>;
 

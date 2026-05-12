@@ -226,6 +226,105 @@ the server may then respond with 490.
 
 ---
 
+## Discovery
+
+Agents may pre-discover all contract gates on a server without probing
+individual paths by fetching the well-known document:
+
+```
+GET /.well-known/x490
+```
+
+Response body (`DiscoveryDocument`):
+
+```json
+{
+  "scheme": "x490",
+  "version": 1,
+  "origin": "https://api.example.com",
+  "resources": [
+    {
+      "resource": "/data",
+      "description": "Data Use NDA",
+      "requirements": { ... }
+    }
+  ]
+}
+```
+
+This is the x490 analogue of `/.well-known/oauth-authorization-server`. An
+agent may fetch it once on startup, pre-establish agreements for all resources
+it intends to use, and then proceed without any 490 interruptions.
+
+Mount with `discoveryHandler({ origin, resources })` from `@x490/protocol`.
+
+---
+
+## Token Revocation
+
+Servers that need to invalidate active agreements expose a `revokeEndpoint`
+in `ContractRequirements`. Clients (or server-side logic) POST to it:
+
+```
+POST <revokeEndpoint>
+Content-Type: application/json
+
+{ "contractId": "...", "reason": "Terms violation" }
+```
+
+Response:
+
+```json
+{ "revoked": true, "contractId": "..." }
+```
+
+After revocation, `requireContract` middleware (when wired with a
+`RevocationStore`) rejects the token even if it has not yet expired:
+
+```
+← 490 { "error": "Contract has been revoked" }
+```
+
+`@x490/protocol` exports `InMemoryRevocationStore` for development and
+testing. Production deployments should implement `RevocationStore` backed
+by a database or distributed cache.
+
+---
+
+## Multi-Party Acceptance
+
+When a contract requires sign-off from more than one party, set
+`requiredParties` in `ContractRequirements`. The protocol flow becomes:
+
+```
+Party A                               Server
+  |── POST acceptEndpoint ──────────→ |
+  |   { partyData: {...} }            |
+  |← 200 { status: "pending",        |
+  |         contractId, 1/2 }        |
+  |                                   |
+Party B                               Server
+  |── POST acceptEndpoint ──────────→ |
+  |   { partyData: {...},             |
+  |     pendingContractId: "..." }    |
+  |← 200 { status: "accepted",       |
+  |         token }                  |
+```
+
+1. The **first** acceptor receives `status: "pending"` and a `contractId` (the
+   pending contract ID) alongside `pendingAcceptances`/`requiredAcceptances`
+   counters. No token is issued yet.
+2. **Subsequent** parties include `pendingContractId` in their `AcceptRequest`
+   to co-sign the same pending contract.
+3. When the final required party signs, the server issues a single
+   `AgreementToken` whose `partyId` concatenates all signers. Status becomes
+   `"accepted"`.
+
+Wire up `acceptHandler` with a `PendingContractStore` to enable this flow.
+`InMemoryPendingContractStore` is provided for development.
+
+---
+
 ## Security Considerations
 
 **Replay**: tokens carry `exp`. High-value flows may also track `contractId`
@@ -241,18 +340,25 @@ mode the facilitator holds the secret; servers receive no key material.
 **Negotiation abuse**: servers should rate-limit negotiation round-trips.
 Accepting `negotiationTerms` is strictly opt-in (`negotiable: true`).
 
+**Revocation latency**: `InMemoryRevocationStore` is local to one process.
+Distributed deployments must use a shared store to ensure revocations propagate
+across all server instances.
+
 ---
 
 ## Reference Implementation
 
-`@legal-agents/protocol` — TypeScript package:
+`@x490/protocol` — TypeScript package:
 
-- `requireContract(opts)` — Hono middleware: 490 gate, sets `c.var.x490ContractId` / `c.var.x490PartyId`
-- `acceptHandler(opts)` — accept endpoint with negotiation support
-- `verifyHandler(opts)` — facilitator verify endpoint
+- `requireContract(opts)` — Hono middleware: 490 gate, sets `c.var.x490ContractId` / `c.var.x490PartyId`. Accepts optional `RevocationStore`.
+- `acceptHandler(opts)` — accept endpoint with negotiation, multi-party co-signing, and token issuance. Accepts optional `PendingContractStore`.
+- `verifyHandler(opts)` — facilitator verify endpoint. Accepts optional `RevocationStore`.
+- `revokeHandler(opts)` — revoke endpoint: marks a contractId invalid in the `RevocationStore`.
+- `discoveryHandler(opts)` — serves `DiscoveryDocument` at `/.well-known/x490`.
 - `ContractClient` — fetch-wrapping agent client that auto-traverses x490 + x402
 - `signToken` / `verifyToken` — HMAC-SHA256 primitives
 - `buildX402WithContract` — construct combined x402+x490 402 responses
 - `x490ExtensionHeaders` — add `X-490-Requirements` alongside x402 402 body
+- `InMemoryRevocationStore` / `InMemoryPendingContractStore` — zero-dependency stores for development
 
 See `packages/protocol/` and `packages/examples/src/x490-demo.ts`.

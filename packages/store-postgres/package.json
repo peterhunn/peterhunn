@@ -1,5 +1,5 @@
 {
-  "name": "@legal-agents/store-postgres",
+  "name": "@x490/store-postgres",
   "version": "0.1.0",
   "description": "Postgres-backed implementations of ContractStore, AuditLog, ApiKeyStore, and WebhookStore",
   "type": "module",
@@ -17,7 +17,7 @@
     "migrate": "tsx src/migrate.ts"
   },
   "dependencies": {
-    "@legal-agents/api": "*",
+    "@x490/api": "*",
     "postgres": "^3.4.0"
   },
   "devDependencies": {

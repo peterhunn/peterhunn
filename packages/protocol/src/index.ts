@@ -7,6 +7,10 @@ export type {
   AcceptResponse,
   VerifyRequest,
   VerifyResponse,
+  RevokeRequest,
+  RevokeResponse,
+  DiscoveryResource,
+  DiscoveryDocument,
   X402PaymentRequirement,
   X402Response,
 } from "./types.js";
@@ -14,12 +18,26 @@ export type {
 export { signToken, verifyToken, decodeToken } from "./token.js";
 export type { VerifyOk, VerifyFail } from "./token.js";
 
-export { requireContract, acceptHandler, verifyHandler } from "./middleware.js";
+export {
+  requireContract,
+  acceptHandler,
+  verifyHandler,
+  revokeHandler,
+  discoveryHandler,
+} from "./middleware.js";
 export type {
   ContractGateOptions,
   AcceptHandlerOptions,
   VerifyHandlerOptions,
+  RevokeHandlerOptions,
+  DiscoveryHandlerOptions,
 } from "./middleware.js";
+
+export { InMemoryRevocationStore } from "./revocation.js";
+export type { RevocationStore } from "./revocation.js";
+
+export { InMemoryPendingContractStore } from "./pending.js";
+export type { PendingContractStore, PendingEntry } from "./pending.js";
 
 export { ContractClient } from "./client.js";
 export type { ContractClientOptions } from "./client.js";

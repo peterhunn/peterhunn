@@ -5,8 +5,8 @@
  * Run:  npm run run:nda  (requires ANTHROPIC_API_KEY env var)
  */
 import Anthropic from "@anthropic-ai/sdk";
-import { AnthropicClient } from "@legal-agents/agents";
-import { ContractAgent } from "@legal-agents/agents";
+import { AnthropicClient } from "@x490/agents";
+import { ContractAgent } from "@x490/agents";
 import { ndaTemplate } from "./template.js";
 import { ndaLogic } from "./logic.js";
 import type { NDAData } from "./model.js";

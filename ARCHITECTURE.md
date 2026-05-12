@@ -14,7 +14,7 @@ AI agents already understand all three layers: LLMs are trained on Markdown, JSO
 
 ## What We Build
 
-`@legal-agents/core` and `@legal-agents/agents` — a TypeScript-first SDK for:
+`@x490/core` and `@x490/agents` — a TypeScript-first SDK for:
 
 - **Defining** contract models as typed TypeScript interfaces (compatible with Concerto namespaces)
 - **Drafting and parsing** contracts via Cicero-compatible Markdown templates
@@ -25,20 +25,20 @@ AI agents already understand all three layers: LLMs are trained on Markdown, JSO
 
 ```
 packages/
-├── core/        @legal-agents/core
+├── core/        @x490/core
 │   └── src/
 │       ├── types.ts      ContractData, Party, Obligation, ContractState, ContractEvent
 │       ├── model.ts      ContractModel<T> — typed contract data definition
 │       ├── template.ts   ContractTemplate<T> — draft/parse via Markdown
 │       └── logic.ts      ContractLogic<T> — TypeScript contract execution
 │
-├── agents/      @legal-agents/agents
+├── agents/      @x490/agents
 │   └── src/
 │       ├── tools.ts      Tool definitions for LLM function calling
 │       ├── llm.ts        Provider-agnostic LLM client interface + Anthropic adapter
 │       └── agent.ts      ContractAgent<T> — orchestrates model, template, logic, LLM
 │
-└── examples/    @legal-agents/examples
+└── examples/    @x490/examples
     └── src/
         └── nda/
             ├── model.ts      NDA data model

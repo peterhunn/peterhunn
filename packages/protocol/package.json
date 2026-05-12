@@ -1,5 +1,5 @@
 {
-  "name": "@legal-agents/protocol",
+  "name": "@x490/protocol",
   "version": "0.1.0",
   "description": "x490 — machine-readable contracting protocol for HTTP, extending x402 and agentic commerce stacks",
   "type": "module",

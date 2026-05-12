@@ -1,5 +1,5 @@
-import type { ContractData } from "@legal-agents/core";
-import type { ContractModel, ContractTemplate, ContractLogic } from "@legal-agents/core";
+import type { ContractData } from "@x490/core";
+import type { ContractModel, ContractTemplate, ContractLogic } from "@x490/core";
 
 export interface ContractRegistration<T extends ContractData = ContractData> {
   model: ContractModel<T>;

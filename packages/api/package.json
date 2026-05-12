@@ -1,5 +1,5 @@
 {
-  "name": "@legal-agents/api",
+  "name": "@x490/api",
   "version": "0.1.0",
   "description": "HTTP API layer for legal agent infrastructure — expose contract operations as REST endpoints",
   "type": "module",
@@ -16,8 +16,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@legal-agents/agents": "*",
-    "@legal-agents/core": "*",
+    "@x490/agents": "*",
+    "@x490/core": "*",
     "@hono/node-server": "^1.12.0",
     "hono": "^4.4.0"
   },

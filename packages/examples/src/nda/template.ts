@@ -1,4 +1,4 @@
-import { defineTemplate } from "@legal-agents/core";
+import { defineTemplate } from "@x490/core";
 import type { NDAData } from "./model.js";
 import { ndaModel } from "./model.js";
 

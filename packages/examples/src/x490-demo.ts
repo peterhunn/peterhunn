@@ -7,12 +7,13 @@
  * Run:  npm run run:x490-demo
  *
  * What this shows:
- *   1. A Hono server exposes /data behind an x490 contract gate (data-use NDA)
- *   2. An AI agent (ContractClient) hits the endpoint, gets 490 + X-490-Requirements
- *   3. Agent fetches template, posts partyData to accept endpoint, gets X-490-Contract token
- *   4. Agent retries with X-490-Contract → 200 OK
- *   5. The combined x402 + x490 flow (requires BOTH agreement AND payment proof)
- *   6. Negotiation round-trip (server counter-offers jurisdiction, agent accepts)
+ *   1. Basic 490 gate — agent auto-traverses, retries with X-490-Contract token
+ *   2. Structured negotiation using negotiableFields
+ *   2b. Rejected proposal (non-negotiable field)
+ *   3. Combined x402 + x490 gate
+ *   4. /.well-known/x490 discovery document
+ *   5. Token revocation — issued token rejected after revokeEndpoint call
+ *   6. Multi-party acceptance — two parties co-sign before token is issued
  */
 
 import { serve } from "@hono/node-server";
@@ -23,14 +24,21 @@ import {
   acceptHandler,
   buildX402WithContract,
   x490ExtensionHeaders,
-} from "@legal-agents/protocol";
-import type { ContractRequirements } from "@legal-agents/protocol";
+  revokeHandler,
+  discoveryHandler,
+  InMemoryRevocationStore,
+  InMemoryPendingContractStore,
+} from "@x490/protocol";
+import type { ContractRequirements } from "@x490/protocol";
 
 // ── Shared config ──────────────────────────────────────────────────────────────
 
 const PORT = 4900;
 const BASE = `http://localhost:${PORT}`;
 const HMAC_SECRET = crypto.randomUUID(); // ephemeral per demo run
+
+const revocationStore = new InMemoryRevocationStore();
+const pendingStore = new InMemoryPendingContractStore();
 
 const dataUseRequirements: ContractRequirements = {
   scheme: "x490",
@@ -65,6 +73,22 @@ const counterOfferRequirements: ContractRequirements = {
   ...dataUseRequirements,
   jurisdiction: "Delaware, USA",
   governingLaw: "laws of the State of Delaware",
+};
+
+const ndaRequirements: ContractRequirements = {
+  ...dataUseRequirements,
+  resource: "/nda-data",
+  acceptEndpoint: `${BASE}/nda/accept`,
+  revokeEndpoint: `${BASE}/nda/revoke`,
+  description: "Bilateral NDA — revocable by either party",
+};
+
+const multiPartyRequirements: ContractRequirements = {
+  ...dataUseRequirements,
+  resource: "/joint-data",
+  acceptEndpoint: `${BASE}/joint/accept`,
+  requiredParties: 2,
+  description: "Joint venture agreement — requires sign-off from both parties",
 };
 
 // ── Server ─────────────────────────────────────────────────────────────────────
@@ -104,7 +128,7 @@ app.get("/contracts/verify", async (c) => {
   const token = c.req.query("token");
   const resource = c.req.query("resource") ?? "*";
   if (!token) return c.json({ error: "token required" }, 400);
-  const { verifyToken } = await import("@legal-agents/protocol");
+  const { verifyToken } = await import("@x490/protocol");
   const result = await verifyToken(token, HMAC_SECRET, resource);
   return result.valid
     ? c.json({ valid: true, contractId: result.payload.contractId, partyId: result.payload.partyId })
@@ -158,6 +182,70 @@ app.get("/premium-data", async (c) => {
     note: "Both x490 contract + x402 payment verified",
   });
 });
+
+// ── Discovery ─────────────────────────────────────────────────────────────────
+
+app.get(
+  "/.well-known/x490",
+  discoveryHandler({
+    origin: BASE,
+    resources: [
+      { resource: "/data", description: dataUseRequirements.description, requirements: dataUseRequirements },
+      { resource: "/nda-data", description: ndaRequirements.description, requirements: ndaRequirements },
+      { resource: "/joint-data", description: multiPartyRequirements.description, requirements: multiPartyRequirements },
+    ],
+  }),
+);
+
+// ── Revocable NDA endpoint ─────────────────────────────────────────────────────
+
+app.post(
+  "/nda/accept",
+  acceptHandler({
+    requirements: ndaRequirements,
+    secret: HMAC_SECRET,
+    onAccepted: async (contractId, partyData) => {
+      console.log(`  [server] NDA signed — contractId=${contractId} party="${partyData["name"]}"`);
+    },
+  }),
+);
+
+app.post(
+  "/nda/revoke",
+  revokeHandler({
+    revocationStore,
+    onRevoke: async (contractId, reason) => {
+      console.log(`  [server] Revoke requested — contractId=${contractId} reason="${reason ?? "none"}"`);
+      return true; // allow all revocations in this demo
+    },
+  }),
+);
+
+app.get(
+  "/nda-data",
+  requireContract({ requirements: ndaRequirements, secret: HMAC_SECRET, revocationStore }),
+  (c) => c.json({ secret: "NDA-protected data", contractId: c.var.x490ContractId }),
+);
+
+// ── Multi-party joint venture endpoint ────────────────────────────────────────
+
+app.post(
+  "/joint/accept",
+  acceptHandler({
+    requirements: multiPartyRequirements,
+    secret: HMAC_SECRET,
+    pendingStore,
+    onAccepted: async (contractId, partyData) => {
+      console.log(`  [server] Joint contract complete — contractId=${contractId} final party="${partyData["name"]}"`);
+    },
+  }),
+);
+
+app.get(
+  "/joint-data",
+  requireContract({ requirements: multiPartyRequirements, secret: HMAC_SECRET }),
+  (c) => c.json({ joint: "venture data", contractId: c.var.x490ContractId }),
+);
 
 // ── Run the demo ───────────────────────────────────────────────────────────────
 
@@ -279,6 +367,118 @@ console.log("══════════════════════�
   });
   const body2 = await res2.json();
   console.log(`  ← ${res2.status}`, JSON.stringify(body2));
+}
+
+await new Promise((r) => setTimeout(r, 50));
+
+console.log("\n══════════════════════════════════════════════════════");
+console.log("  Demo 4: /.well-known/x490 discovery document");
+console.log("══════════════════════════════════════════════════════");
+
+{
+  console.log("\n  → GET /.well-known/x490");
+  const res = await fetch(`${BASE}/.well-known/x490`);
+  const doc = await res.json() as { scheme: string; version: number; resources: Array<{ resource: string; description: string }> };
+  console.log(`  ← ${res.status} scheme=${doc.scheme} version=${doc.version}`);
+  console.log(`  [agent] Server advertises ${doc.resources.length} contract-gated resource(s):`);
+  for (const r of doc.resources) {
+    console.log(`          • ${r.resource} — "${r.description}"`);
+  }
+}
+
+await new Promise((r) => setTimeout(r, 50));
+
+console.log("\n══════════════════════════════════════════════════════");
+console.log("  Demo 5: Token revocation");
+console.log("══════════════════════════════════════════════════════");
+
+{
+  // Accept the NDA to get a token
+  console.log("\n  → POST /nda/accept (get a token)");
+  const acceptRes = await fetch(`${BASE}/nda/accept`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      templateId: ndaRequirements.templateId,
+      templateHash: ndaRequirements.templateHash,
+      partyData: { name: "Revocable Agent", jurisdiction: "California, USA" },
+    }),
+  });
+  const accepted = await acceptRes.json() as { status: string; contractId: string; token: string };
+  console.log(`  ← ${acceptRes.status} status=${accepted.status} contractId=${accepted.contractId}`);
+
+  // Use the token — should work
+  console.log("\n  → GET /nda-data (with valid token)");
+  const res1 = await fetch(`${BASE}/nda-data`, {
+    headers: { "X-490-Contract": accepted.token },
+  });
+  const body1 = await res1.json();
+  console.log(`  ← ${res1.status}`, JSON.stringify(body1));
+
+  // Revoke the contract
+  console.log("\n  → POST /nda/revoke");
+  const revokeRes = await fetch(`${BASE}/nda/revoke`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ contractId: accepted.contractId, reason: "Terms violation" }),
+  });
+  const revokeBody = await revokeRes.json();
+  console.log(`  ← ${revokeRes.status}`, JSON.stringify(revokeBody));
+
+  // Try again — should now be rejected
+  console.log("\n  → GET /nda-data (same token, now revoked)");
+  const res2 = await fetch(`${BASE}/nda-data`, {
+    headers: { "X-490-Contract": accepted.token },
+  });
+  const body2 = await res2.json() as { error?: string };
+  console.log(`  ← ${res2.status} error="${body2.error}"`);
+}
+
+await new Promise((r) => setTimeout(r, 50));
+
+console.log("\n══════════════════════════════════════════════════════");
+console.log("  Demo 6: Multi-party acceptance (2-of-2 co-signing)");
+console.log("══════════════════════════════════════════════════════");
+
+{
+  // Party A signs first
+  console.log("\n  → POST /joint/accept (Party A — first signer)");
+  const res1 = await fetch(`${BASE}/joint/accept`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      templateId: multiPartyRequirements.templateId,
+      templateHash: multiPartyRequirements.templateHash,
+      partyData: { name: "Party A", jurisdiction: "California, USA" },
+    }),
+  });
+  const body1 = await res1.json() as { status: string; contractId: string; pendingAcceptances: number; requiredAcceptances: number };
+  console.log(`  ← ${res1.status} status=${body1.status} accepted=${body1.pendingAcceptances}/${body1.requiredAcceptances} contractId=${body1.contractId}`);
+
+  // Party B co-signs using pendingContractId
+  console.log("\n  → POST /joint/accept (Party B — co-signer, pendingContractId provided)");
+  const res2 = await fetch(`${BASE}/joint/accept`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      templateId: multiPartyRequirements.templateId,
+      templateHash: multiPartyRequirements.templateHash,
+      partyData: { name: "Party B", jurisdiction: "California, USA" },
+      pendingContractId: body1.contractId,
+    }),
+  });
+  const body2 = await res2.json() as { status: string; contractId: string; token: string };
+  console.log(`  ← ${res2.status} status=${body2.status} contractId=${body2.contractId}`);
+
+  if (body2.status === "accepted" && body2.token) {
+    // Use the jointly-signed token
+    console.log("\n  → GET /joint-data (with jointly-signed token)");
+    const res3 = await fetch(`${BASE}/joint-data`, {
+      headers: { "X-490-Contract": body2.token },
+    });
+    const body3 = await res3.json();
+    console.log(`  ← ${res3.status}`, JSON.stringify(body3));
+  }
 }
 
 console.log("\n══════════════════════════════════════════════════════\n");

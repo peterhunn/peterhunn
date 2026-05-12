@@ -1,4 +1,4 @@
-import type { ContractData, ContractState } from "@legal-agents/core";
+import type { ContractData, ContractState } from "@x490/core";
 
 export interface StoredContract {
   orgId: string;
