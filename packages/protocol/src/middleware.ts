@@ -33,8 +33,16 @@ declare module "hono" {
 
 export interface ContractGateOptions {
   requirements: ContractRequirements;
-  /** HMAC secret used to sign and verify tokens */
-  secret: string;
+  /**
+   * HMAC secret for local token verification (self-hosted mode).
+   * Omit when using facilitated: true.
+   */
+  secret?: string;
+  /**
+   * Delegate token verification to requirements.verifyEndpoint (managed service mode).
+   * When true, secret is not required — the facilitator holds all key material.
+   */
+  facilitated?: boolean;
   /** Optional revocation store — tokens for revoked contractIds are rejected */
   revocationStore?: RevocationStore;
 }
@@ -46,6 +54,16 @@ export interface ContractGateOptions {
  * On success, sets c.var.x490ContractId and c.var.x490PartyId.
  */
 export function requireContract(opts: ContractGateOptions): MiddlewareHandler {
+  const useFacilitator =
+    opts.facilitated === true ||
+    (opts.secret === undefined && opts.requirements.verifyEndpoint !== undefined);
+
+  if (!useFacilitator && !opts.secret) {
+    throw new Error(
+      "requireContract: provide either secret (self-hosted) or facilitated: true (managed service)",
+    );
+  }
+
   return async (c, next) => {
     const raw = c.req.header("X-490-Contract");
 
@@ -56,7 +74,44 @@ export function requireContract(opts: ContractGateOptions): MiddlewareHandler {
       );
     }
 
-    const result = await verifyToken(raw, opts.secret, c.req.path);
+    // ── Facilitated mode: delegate to verifyEndpoint ─────────────────────────
+    if (useFacilitator) {
+      const verifyEndpoint = opts.requirements.verifyEndpoint;
+      if (!verifyEndpoint) {
+        return x490Response(
+          { error: "facilitated mode requires verifyEndpoint in requirements", contractRequired: opts.requirements },
+          opts.requirements,
+        );
+      }
+
+      let verifyRes: Response;
+      try {
+        verifyRes = await fetch(
+          `${verifyEndpoint}?token=${encodeURIComponent(raw)}&resource=${encodeURIComponent(c.req.path)}`,
+        );
+      } catch {
+        return x490Response(
+          { error: "Could not reach facilitator verify endpoint", contractRequired: opts.requirements },
+          opts.requirements,
+        );
+      }
+
+      const verified = await verifyRes.json() as { valid: boolean; contractId?: string; partyId?: string; reason?: string };
+      if (!verified.valid) {
+        return x490Response(
+          { error: verified.reason ?? "Token verification failed", contractRequired: opts.requirements },
+          opts.requirements,
+        );
+      }
+
+      c.set("x490ContractId", verified.contractId ?? "");
+      c.set("x490PartyId", verified.partyId ?? "");
+      await next();
+      return;
+    }
+
+    // ── Self-hosted mode: verify HMAC locally ────────────────────────────────
+    const result = await verifyToken(raw, opts.secret!, c.req.path);
     if (!result.valid) {
       return x490Response(
         { error: result.reason, contractRequired: opts.requirements },

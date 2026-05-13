@@ -7,12 +7,14 @@
     "typecheck": "tsc --noEmit",
     "run:nda": "tsx src/nda/agent.ts",
     "run:server": "tsx src/server.ts",
-    "run:x490-demo": "tsx src/x490-demo.ts"
+    "run:x490-demo": "tsx src/x490-demo.ts",
+    "run:facilitator-demo": "tsx src/facilitator-demo.ts"
   },
   "dependencies": {
     "@x490/core": "*",
     "@x490/agents": "*",
     "@x490/api": "*",
+    "@x490/facilitator": "*",
     "@x490/protocol": "*"
   },
   "devDependencies": {

@@ -1,0 +1,30 @@
+{
+  "name": "@x490/facilitator",
+  "version": "0.1.0",
+  "description": "Hosted x490 facilitator — managed token issuance, template registry, and agreement tracking for the x490 protocol",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "bin": {
+    "x490-facilitator": "./dist/server.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.12.0",
+    "@x490/protocol": "*",
+    "hono": "^4.4.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}
