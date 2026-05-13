@@ -2,6 +2,7 @@
   "name": "@x490/api",
   "version": "0.1.0",
   "description": "HTTP API layer for legal agent infrastructure — expose contract operations as REST endpoints",
+  "private": true,
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -10,6 +11,9 @@
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
     }
+  },
+  "bin": {
+    "x490-api": "./dist/server.js"
   },
   "scripts": {
     "build": "tsc",
