@@ -5,3 +5,6 @@ dist/
 .env
 .env.*
 .claude/
+__pycache__/
+*.egg-info/
+*.pyc
