@@ -6,6 +6,7 @@ import {
   InMemoryTemplateStore,
   InMemoryAgreementStore,
   InMemoryRequirementsStore,
+  InMemoryWebhookStore,
 } from "./store.js";
 
 const PORT = Number(process.env["PORT"] ?? 4901);
@@ -21,6 +22,7 @@ async function buildStores() {
       PostgresTemplateStore,
       PostgresAgreementStore,
       PostgresRequirementsStore,
+      PostgresWebhookStore,
     } = await import("./store-postgres.js");
 
     const sql = postgres(DATABASE_URL, {
@@ -34,6 +36,7 @@ async function buildStores() {
       templates: new PostgresTemplateStore(sql),
       agreements: new PostgresAgreementStore(sql),
       requirements: new PostgresRequirementsStore(sql),
+      webhooks: new PostgresWebhookStore(sql),
     };
   }
 
@@ -44,6 +47,7 @@ async function buildStores() {
     templates: new InMemoryTemplateStore(),
     agreements: new InMemoryAgreementStore(),
     requirements: new InMemoryRequirementsStore(),
+    webhooks: new InMemoryWebhookStore(),
   };
 }
 

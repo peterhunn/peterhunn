@@ -8,6 +8,7 @@ export {
   InMemoryTemplateStore,
   InMemoryAgreementStore,
   InMemoryRequirementsStore,
+  InMemoryWebhookStore,
   sha256hex,
   encodeCursor,
   decodeCursor,
@@ -17,6 +18,7 @@ export type {
   TemplateStore,
   AgreementStore,
   RequirementsStore,
+  WebhookStore,
 } from "./store.js";
 
 // Postgres store implementations
@@ -25,7 +27,11 @@ export {
   PostgresTemplateStore,
   PostgresAgreementStore,
   PostgresRequirementsStore,
+  PostgresWebhookStore,
 } from "./store-postgres.js";
+
+// Webhook delivery helper (for custom integrations)
+export { signWebhookPayload, deliverWebhookEvent } from "./webhook.js";
 
 // Client SDK — for server operators integrating with the managed service
 export { FacilitatorClient, signUp } from "./client.js";
@@ -38,4 +44,7 @@ export type {
   RegisteredTemplate,
   AgreementRecord,
   RequirementsConfig,
+  Webhook,
+  WebhookEventType,
+  WebhookPayload,
 } from "./types.js";

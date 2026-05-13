@@ -18,7 +18,8 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "start": "node dist/server.js",
-    "migrate": "tsx src/migrate.ts"
+    "migrate": "tsx src/migrate.ts",
+    "test": "node --import tsx/esm --test 'src/__tests__/*.test.ts'"
   },
   "dependencies": {
     "@hono/node-server": "^1.12.0",

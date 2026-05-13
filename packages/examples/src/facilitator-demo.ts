@@ -27,6 +27,7 @@ import {
   InMemoryTemplateStore,
   InMemoryAgreementStore,
   InMemoryRequirementsStore,
+  InMemoryWebhookStore,
   FacilitatorClient,
   signUp,
 } from "@x490/facilitator";

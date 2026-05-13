@@ -2,15 +2,17 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { signToken, verifyToken } from "@x490/protocol";
 import type { AcceptRequest, AcceptResponse, VerifyResponse, RevokeRequest, RevokeResponse, NegotiableField } from "@x490/protocol";
-import type { TenantStore, TemplateStore, AgreementStore, RequirementsStore } from "./store.js";
-import type { Tenant, RegisteredTemplate } from "./types.js";
+import type { TenantStore, TemplateStore, AgreementStore, RequirementsStore, WebhookStore } from "./store.js";
+import type { Tenant, RegisteredTemplate, WebhookEventType } from "./types.js";
 import { rateLimit } from "./rate-limit.js";
+import { deliverWebhookEvent } from "./webhook.js";
 
 export interface FacilitatorAppOptions {
   tenants: TenantStore;
   templates: TemplateStore;
   agreements: AgreementStore;
   requirements: RequirementsStore;
+  webhooks: WebhookStore;
   /** Public base URL of this facilitator, e.g. "https://facilitator.x490.dev" */
   baseUrl: string;
 }
@@ -43,7 +45,7 @@ type AuthEnv = { Variables: { tenant: Tenant } };
  *     DELETE /v1/apikeys/:keyId            revoke an API key
  */
 export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
-  const { tenants, templates, agreements, requirements, baseUrl } = opts;
+  const { tenants, templates, agreements, requirements, webhooks, baseUrl } = opts;
 
   const app = new Hono();
   const authed = new Hono<AuthEnv>();
@@ -159,6 +161,12 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
       token,
       issuedAt: now,
       expiresAt: now + expiresIn,
+    });
+
+    // Fire-and-forget — webhook delivery must not block or fail the response.
+    void deliverWebhookEvent(webhooks, tenantId, "agreement.created", {
+      contractId, tenantId, templateHash: body.templateHash, partyId,
+      resource: "*", partyData: body.partyData, token, issuedAt: now, expiresAt: now + expiresIn,
     });
 
     const response: AcceptResponse = { status: "accepted", contractId, token };
@@ -305,6 +313,10 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     }
 
     const ok = await agreements.revoke(contractId, reason);
+    if (ok) {
+      const updated = await agreements.findById(contractId);
+      if (updated) void deliverWebhookEvent(webhooks, tenant.tenantId, "agreement.revoked", updated);
+    }
     const response: RevokeResponse = { revoked: ok, contractId };
     return c.json(response, 200);
   });
@@ -349,6 +361,52 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     if (!key) return c.json({ error: "API key not found" }, 404);
     await tenants.revokeApiKey(keyId);
     return c.json({ revoked: true, keyId });
+  });
+
+  // ── Webhook management (auth required) ────────────────────────────────────
+
+  authed.get("/v1/webhooks", async (c) => {
+    const tenant = c.get("tenant");
+    const hooks = await webhooks.list(tenant.tenantId);
+    return c.json({
+      webhooks: hooks.map(({ secret: _s, ...safe }) => safe),
+    });
+  });
+
+  authed.post("/v1/webhooks", async (c) => {
+    const tenant = c.get("tenant");
+    const body = await c.req.json<{ url: string; events: WebhookEventType[] }>();
+    if (!body.url) return c.json({ error: "url is required" }, 400);
+    if (!Array.isArray(body.events) || body.events.length === 0) {
+      return c.json({ error: "events must be a non-empty array" }, 400);
+    }
+    const validEvents: WebhookEventType[] = ["agreement.created", "agreement.revoked"];
+    const invalid = body.events.filter((e) => !validEvents.includes(e));
+    if (invalid.length > 0) {
+      return c.json({ error: `unknown events: ${invalid.join(", ")}`, validEvents }, 400);
+    }
+    const { webhook, secret } = await webhooks.create(tenant.tenantId, body.url, body.events);
+    return c.json(
+      {
+        webhookId: webhook.webhookId,
+        url: webhook.url,
+        events: webhook.events,
+        secret,
+        note: "Store your signing secret — it will not be shown again.",
+      },
+      201,
+    );
+  });
+
+  authed.delete("/v1/webhooks/:webhookId", async (c) => {
+    const tenant = c.get("tenant");
+    const webhookId = c.req.param("webhookId");
+    const hook = await webhooks.findById(webhookId);
+    if (!hook || hook.tenantId !== tenant.tenantId) {
+      return c.json({ error: "Webhook not found" }, 404);
+    }
+    await webhooks.disable(webhookId);
+    return c.json({ disabled: true, webhookId });
   });
 
   // Mount authenticated routes after public routes.

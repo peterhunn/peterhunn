@@ -72,3 +72,32 @@ export interface AgreementRecord {
   revokedAt?: number;
   revokedReason?: string;
 }
+
+// ── Webhooks ───────────────────────────────────────────────────────────────────
+
+export type WebhookEventType = "agreement.created" | "agreement.revoked";
+
+/**
+ * A webhook endpoint registered by an operator.
+ * The signing secret is shown once at creation and stored for outbound signing.
+ */
+export interface Webhook {
+  webhookId: string;
+  tenantId: string;
+  url: string;
+  /** Plaintext — used server-side to sign outgoing payloads. Never sent in responses. */
+  secret: string;
+  events: WebhookEventType[];
+  active: boolean;
+  createdAt: number;
+}
+
+/** The JSON body POSTed to an operator's webhook URL. */
+export interface WebhookPayload {
+  eventId: string;
+  type: WebhookEventType;
+  createdAt: number;
+  tenantId: string;
+  /** Agreement data without the raw token. */
+  data: Omit<AgreementRecord, "token">;
+}

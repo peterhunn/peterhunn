@@ -1,4 +1,4 @@
-import type { Tenant, TenantApiKey, RegisteredTemplate, AgreementRecord, RequirementsConfig } from "./types.js";
+import type { Tenant, TenantApiKey, RegisteredTemplate, AgreementRecord, RequirementsConfig, Webhook, WebhookEventType } from "./types.js";
 
 // ── Crypto helpers ─────────────────────────────────────────────────────────────
 
@@ -268,4 +268,58 @@ export function decodeCursor(cursor: string): [number, string] {
   const decoded = Buffer.from(cursor, "base64url").toString("utf8");
   const idx = decoded.indexOf(":");
   return [Number(decoded.slice(0, idx)), decoded.slice(idx + 1)];
+}
+
+// ── Webhook store ──────────────────────────────────────────────────────────────
+
+export interface WebhookStore {
+  create(tenantId: string, url: string, events: WebhookEventType[]): Promise<{ webhook: Webhook; secret: string }>;
+  list(tenantId: string): Promise<Webhook[]>;
+  findById(webhookId: string): Promise<Webhook | null>;
+  disable(webhookId: string): Promise<void>;
+  /** Return only active webhooks subscribed to this event type. */
+  listActiveForEvent(tenantId: string, event: WebhookEventType): Promise<Webhook[]>;
+}
+
+function generateWebhookSecret(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(24));
+  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+export class InMemoryWebhookStore implements WebhookStore {
+  private readonly hooks = new Map<string, Webhook>();
+
+  async create(tenantId: string, url: string, events: WebhookEventType[]): Promise<{ webhook: Webhook; secret: string }> {
+    const secret = generateWebhookSecret();
+    const webhook: Webhook = {
+      webhookId: crypto.randomUUID(),
+      tenantId,
+      url,
+      secret,
+      events,
+      active: true,
+      createdAt: Math.floor(Date.now() / 1000),
+    };
+    this.hooks.set(webhook.webhookId, webhook);
+    return { webhook, secret };
+  }
+
+  async list(tenantId: string): Promise<Webhook[]> {
+    return [...this.hooks.values()].filter((h) => h.tenantId === tenantId);
+  }
+
+  async findById(webhookId: string): Promise<Webhook | null> {
+    return this.hooks.get(webhookId) ?? null;
+  }
+
+  async disable(webhookId: string): Promise<void> {
+    const hook = this.hooks.get(webhookId);
+    if (hook) this.hooks.set(webhookId, { ...hook, active: false });
+  }
+
+  async listActiveForEvent(tenantId: string, event: WebhookEventType): Promise<Webhook[]> {
+    return [...this.hooks.values()].filter(
+      (h) => h.tenantId === tenantId && h.active && h.events.includes(event),
+    );
+  }
 }

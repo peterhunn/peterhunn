@@ -82,3 +82,18 @@ CREATE INDEX IF NOT EXISTS idx_x490_agreements_tenant_resource
 CREATE INDEX IF NOT EXISTS idx_x490_agreements_revoked
   ON x490_agreements(contract_id)
   WHERE revoked_at IS NOT NULL;
+
+-- Webhooks: operator-registered endpoints that receive event notifications.
+CREATE TABLE IF NOT EXISTS x490_webhooks (
+  webhook_id  UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id   UUID        NOT NULL REFERENCES x490_tenants(tenant_id) ON DELETE CASCADE,
+  url         TEXT        NOT NULL,
+  secret      TEXT        NOT NULL,
+  events      TEXT[]      NOT NULL,
+  active      BOOLEAN     NOT NULL DEFAULT true,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_x490_webhooks_tenant_active
+  ON x490_webhooks(tenant_id, active)
+  WHERE active = true;

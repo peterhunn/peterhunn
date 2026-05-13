@@ -10,8 +10,8 @@
  */
 
 import type postgres from "postgres";
-import type { Tenant, TenantApiKey, RegisteredTemplate, AgreementRecord, RequirementsConfig } from "./types.js";
-import type { TenantStore, TemplateStore, AgreementStore, RequirementsStore } from "./store.js";
+import type { Tenant, TenantApiKey, RegisteredTemplate, AgreementRecord, RequirementsConfig, Webhook, WebhookEventType } from "./types.js";
+import type { TenantStore, TemplateStore, AgreementStore, RequirementsStore, WebhookStore } from "./store.js";
 import { sha256hex, encodeCursor, decodeCursor } from "./store.js";
 
 type Sql = ReturnType<typeof postgres>;
@@ -388,5 +388,78 @@ export class PostgresAgreementStore implements AgreementStore {
       SELECT revoked_at FROM x490_agreements WHERE contract_id = ${contractId}
     `;
     return rows[0]?.revoked_at !== null && rows[0]?.revoked_at !== undefined;
+  }
+}
+
+// ── Webhook store ──────────────────────────────────────────────────────────────
+
+interface WebhookRow {
+  webhook_id: string;
+  tenant_id: string;
+  url: string;
+  secret: string;
+  events: string[];
+  active: boolean;
+  created_at: Date;
+}
+
+function rowToWebhook(r: WebhookRow): Webhook {
+  return {
+    webhookId: r.webhook_id,
+    tenantId: r.tenant_id,
+    url: r.url,
+    secret: r.secret,
+    events: r.events as WebhookEventType[],
+    active: r.active,
+    createdAt: Math.floor(r.created_at.getTime() / 1000),
+  };
+}
+
+function generateWebhookSecret(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(24));
+  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+export class PostgresWebhookStore implements WebhookStore {
+  constructor(private readonly sql: Sql) {}
+
+  async create(tenantId: string, url: string, events: WebhookEventType[]): Promise<{ webhook: Webhook; secret: string }> {
+    const secret = generateWebhookSecret();
+    const rows = await this.sql<WebhookRow[]>`
+      INSERT INTO x490_webhooks (tenant_id, url, secret, events)
+      VALUES (${tenantId}, ${url}, ${secret}, ${this.sql.array(events)})
+      RETURNING *
+    `;
+    return { webhook: rowToWebhook(rows[0]!), secret };
+  }
+
+  async list(tenantId: string): Promise<Webhook[]> {
+    const rows = await this.sql<WebhookRow[]>`
+      SELECT * FROM x490_webhooks WHERE tenant_id = ${tenantId} ORDER BY created_at DESC
+    `;
+    return rows.map(rowToWebhook);
+  }
+
+  async findById(webhookId: string): Promise<Webhook | null> {
+    const rows = await this.sql<WebhookRow[]>`
+      SELECT * FROM x490_webhooks WHERE webhook_id = ${webhookId}
+    `;
+    return rows[0] ? rowToWebhook(rows[0]) : null;
+  }
+
+  async disable(webhookId: string): Promise<void> {
+    await this.sql`
+      UPDATE x490_webhooks SET active = false WHERE webhook_id = ${webhookId}
+    `;
+  }
+
+  async listActiveForEvent(tenantId: string, event: WebhookEventType): Promise<Webhook[]> {
+    const rows = await this.sql<WebhookRow[]>`
+      SELECT * FROM x490_webhooks
+      WHERE tenant_id = ${tenantId}
+        AND active = true
+        AND ${event} = ANY(events)
+    `;
+    return rows.map(rowToWebhook);
   }
 }

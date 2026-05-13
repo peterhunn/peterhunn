@@ -1,5 +1,5 @@
 import type { ContractRequirements, NegotiableField } from "@x490/protocol";
-import type { AgreementRecord, TenantApiKey } from "./types.js";
+import type { AgreementRecord, TenantApiKey, WebhookEventType } from "./types.js";
 
 export interface FacilitatorClientOptions {
   /** API key from POST /v1/tenants or POST /v1/apikeys */
@@ -145,6 +145,33 @@ export class FacilitatorClient {
   async revokeApiKey(keyId: string): Promise<void> {
     const res = await this.delete(`/v1/apikeys/${keyId}`);
     if (!res.ok) throw new Error(`revokeApiKey failed: ${res.status} ${await res.text()}`);
+  }
+
+  // ── Webhook management ───────────────────────────────────────────────────────
+
+  /** List all registered webhooks (secrets are not included in responses). */
+  async listWebhooks(): Promise<Omit<import("./types.js").Webhook, "secret">[]> {
+    const res = await this.get("/v1/webhooks");
+    if (!res.ok) throw new Error(`listWebhooks failed: ${res.status} ${await res.text()}`);
+    const { webhooks } = await res.json() as { webhooks: Omit<import("./types.js").Webhook, "secret">[] };
+    return webhooks;
+  }
+
+  /**
+   * Register a webhook endpoint.
+   * Returns the signing secret — store it securely, it is shown exactly once.
+   * Use it to verify `X-X490-Signature` on incoming requests.
+   */
+  async createWebhook(url: string, events: WebhookEventType[]): Promise<{ webhookId: string; secret: string }> {
+    const res = await this.post("/v1/webhooks", { url, events });
+    if (!res.ok) throw new Error(`createWebhook failed: ${res.status} ${await res.text()}`);
+    return res.json() as Promise<{ webhookId: string; secret: string }>;
+  }
+
+  /** Disable a webhook. It will no longer receive events. */
+  async deleteWebhook(webhookId: string): Promise<void> {
+    const res = await this.delete(`/v1/webhooks/${webhookId}`);
+    if (!res.ok) throw new Error(`deleteWebhook failed: ${res.status} ${await res.text()}`);
   }
 
   // ── Private helpers ──────────────────────────────────────────────────────────
