@@ -55,6 +55,9 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     return c.json({ error: err.message }, 500);
   });
 
+  // ── Health check ───────────────────────────────────────────────────────────────
+  app.get("/health", (c) => c.json({ ok: true }));
+
   // ── CORS ──────────────────────────────────────────────────────────────────────
   // Allow browsers (operator dashboard) and AI agent runtimes to call the API.
   app.use(
