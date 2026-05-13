@@ -128,7 +128,10 @@ async def test_490_auto_accept_200(monkeypatch):
         httpx.Response(200, json={"data": "secret"}),
     ])
 
-    client = ContractClient(party_data={"name": "Alice", "email": "alice@example.com"})
+    client = ContractClient(
+        party_data={"name": "Alice", "email": "alice@example.com"},
+        skip_template_verification=True,
+    )
 
     with _patch_async_client(transport):
         response = await client.fetch("https://example.com/data")
@@ -192,6 +195,7 @@ async def test_on_requirements_hook_called():
     client = ContractClient(
         party_data={"name": "Alice", "email": "alice@example.com"},
         on_requirements=on_req,
+        skip_template_verification=True,
     )
 
     with _patch_async_client(transport):
@@ -200,6 +204,49 @@ async def test_on_requirements_hook_called():
     assert len(hook_calls) == 1
     assert isinstance(hook_calls[0], ContractRequirements)
     assert hook_calls[0].templateId == "tmpl-1"
+
+
+@pytest.mark.asyncio
+async def test_template_hash_verified_on_accept():
+    """Client fetches template and verifies SHA-256 before accepting."""
+    import hashlib
+
+    template_content = b"This is the contract template."
+    correct_hash = hashlib.sha256(template_content).hexdigest()
+    requirements = _make_requirements(templateHash=correct_hash)
+    req_header = _requirements_header(requirements)
+
+    transport = SequentialTransport([
+        httpx.Response(490, headers={"X-490-Requirements": req_header}, json={"error": "required"}),
+        httpx.Response(200, content=template_content),          # template fetch
+        httpx.Response(200, json=_accept_response_body()),      # accept POST
+        httpx.Response(200, json={"data": "ok"}),               # retry
+    ])
+
+    client = ContractClient(party_data={"name": "Alice", "email": "alice@example.com"})
+
+    with _patch_async_client(transport):
+        response = await client.fetch("https://example.com/data")
+
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_template_hash_mismatch_raises():
+    """Client raises ValueError when template content does not match the declared hash."""
+    requirements = _make_requirements(templateHash="a" * 64)
+    req_header = _requirements_header(requirements)
+
+    transport = SequentialTransport([
+        httpx.Response(490, headers={"X-490-Requirements": req_header}, json={"error": "required"}),
+        httpx.Response(200, content=b"tampered content"),
+    ])
+
+    client = ContractClient(party_data={"name": "Alice", "email": "alice@example.com"})
+
+    with _patch_async_client(transport):
+        with pytest.raises(ValueError, match="hash mismatch"):
+            await client.fetch("https://example.com/data")
 
 
 # ---------------------------------------------------------------------------

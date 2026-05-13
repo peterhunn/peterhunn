@@ -26,6 +26,11 @@ export interface ContractClientOptions {
   cache?: Map<string, string>;
   /** Max negotiation round-trips before giving up (default: 3) */
   maxNegotiationRounds?: number;
+  /**
+   * Skip fetching and verifying the template hash before accepting (default: false).
+   * Set to true only in tests or environments where the template server is unavailable.
+   */
+  skipTemplateVerification?: boolean;
 }
 
 /**
@@ -42,6 +47,7 @@ export interface ContractClientOptions {
 export class ContractClient {
   private readonly cache: Map<string, string>;
   private readonly maxRounds: number;
+  private readonly verifiedHashes = new Set<string>();
 
   constructor(private readonly opts: ContractClientOptions) {
     this.cache = opts.cache ?? new Map();
@@ -90,6 +96,10 @@ export class ContractClient {
 
     await this.opts.onRequirements?.(requirements);
 
+    if (!this.opts.skipTemplateVerification) {
+      await this.verifyTemplateHash(requirements);
+    }
+
     let current = requirements;
     let round = 0;
 
@@ -134,6 +144,24 @@ export class ContractClient {
     }
 
     throw new Error(`x490 negotiation exceeded ${this.maxRounds} rounds`);
+  }
+
+  private async verifyTemplateHash(requirements: ContractRequirements): Promise<void> {
+    if (this.verifiedHashes.has(requirements.templateHash)) return;
+    const res = await fetch(requirements.templateUrl);
+    if (!res.ok) {
+      throw new Error(`x490: failed to fetch template at ${requirements.templateUrl}: ${res.status}`);
+    }
+    const content = await res.text();
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(content));
+    const hex = [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+    if (hex !== requirements.templateHash) {
+      throw new Error(
+        `x490: template hash mismatch — content may have been tampered. ` +
+        `Expected ${requirements.templateHash}, got ${hex}`,
+      );
+    }
+    this.verifiedHashes.add(requirements.templateHash);
   }
 
   /** Attach a cached agreement token to an existing Headers object if available. */

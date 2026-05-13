@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 from typing import Any, Callable
 
@@ -41,10 +42,13 @@ class ContractClient:
         party_data: dict[str, str],
         on_requirements: Callable[[ContractRequirements], Any] | None = None,
         cache: dict[str, str] | None = None,
+        skip_template_verification: bool = False,
     ) -> None:
         self._party_data = party_data
         self._on_requirements = on_requirements
         self._cache: dict[str, str] = cache if cache is not None else {}
+        self._skip_template_verification = skip_template_verification
+        self._verified_hashes: set[str] = set()
 
     # ------------------------------------------------------------------
     # Public API
@@ -83,6 +87,9 @@ class ContractClient:
                 if hasattr(result, "__await__"):
                     await result
 
+            if not self._skip_template_verification:
+                await self._verify_template_hash(client, requirements)
+
             token = await self._accept(client, requirements)
 
             # Cache token under the resource path declared in requirements
@@ -109,6 +116,26 @@ class ContractClient:
         decoded = _b64url_decode(raw_header)
         data = json.loads(decoded)
         return ContractRequirements.from_dict(data)
+
+    async def _verify_template_hash(
+        self,
+        client: httpx.AsyncClient,
+        requirements: ContractRequirements,
+    ) -> None:
+        if requirements.templateHash in self._verified_hashes:
+            return
+        res = await client.get(requirements.templateUrl)
+        if res.status_code != 200:
+            raise ValueError(
+                f"x490: failed to fetch template at {requirements.templateUrl}: {res.status_code}"
+            )
+        actual = hashlib.sha256(res.content).hexdigest()
+        if actual != requirements.templateHash:
+            raise ValueError(
+                f"x490: template hash mismatch — content may have been tampered. "
+                f"Expected {requirements.templateHash}, got {actual}"
+            )
+        self._verified_hashes.add(requirements.templateHash)
 
     async def _accept(
         self,

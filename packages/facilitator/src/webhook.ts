@@ -1,5 +1,84 @@
+import { promises as dns } from "node:dns";
+import { isIP } from "node:net";
 import type { AgreementRecord, Webhook, WebhookEventType, WebhookPayload } from "./types.js";
 import type { WebhookStore } from "./store.js";
+
+// ── SSRF protection ────────────────────────────────────────────────────────────
+
+function isPrivateIpv4(ip: string): boolean {
+  const [a, b] = ip.split(".").map(Number) as [number, number, number, number];
+  return (
+    a === 127 ||
+    a === 10 ||
+    a === 0 ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 169 && b === 254) // link-local
+  );
+}
+
+function isPrivateIpv6(ip: string): boolean {
+  const lower = ip.toLowerCase();
+  return (
+    lower === "::1" ||
+    lower.startsWith("fc") ||
+    lower.startsWith("fd") ||
+    lower.startsWith("fe80")
+  );
+}
+
+/**
+ * Throw if `url` resolves to a private/loopback address.
+ *
+ * Called both at registration time (fast UX feedback) and at delivery time
+ * (guards against DNS rebinding attacks).
+ */
+export async function assertSafeWebhookUrl(url: string): Promise<void> {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`Invalid webhook URL: ${url}`);
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw new Error(`Webhook URL must use http or https: ${url}`);
+  }
+
+  // Strip brackets from IPv6 literals like [::1]
+  const hostname = parsed.hostname.replace(/^\[|\]$/g, "");
+
+  const version = isIP(hostname);
+  if (version === 4) {
+    if (isPrivateIpv4(hostname)) {
+      throw new Error(`Webhook URL targets a private address: ${hostname}`);
+    }
+    return;
+  }
+  if (version === 6) {
+    if (isPrivateIpv6(hostname)) {
+      throw new Error(`Webhook URL targets a private address: ${hostname}`);
+    }
+    return;
+  }
+
+  // Hostname — resolve DNS and check every returned address
+  const addresses: string[] = [];
+  try {
+    addresses.push(...(await dns.resolve4(hostname)));
+  } catch { /* hostname may not have A records */ }
+  try {
+    addresses.push(...(await dns.resolve6(hostname)));
+  } catch { /* hostname may not have AAAA records */ }
+
+  if (addresses.length === 0) {
+    throw new Error(`Webhook URL hostname did not resolve: ${hostname}`);
+  }
+  for (const addr of addresses) {
+    if (isPrivateIpv4(addr) || isPrivateIpv6(addr)) {
+      throw new Error(`Webhook URL resolves to a private address: ${addr} (${hostname})`);
+    }
+  }
+}
 
 /** Sign a webhook payload body with HMAC-SHA256. Returns "sha256=<hex>". */
 export async function signWebhookPayload(secret: string, body: string): Promise<string> {
@@ -47,6 +126,12 @@ export async function deliverWebhookEvent(
 }
 
 async function deliverToHook(hook: Webhook, body: string): Promise<void> {
+  try {
+    await assertSafeWebhookUrl(hook.url);
+  } catch (err) {
+    console.error(`Webhook delivery blocked (SSRF): ${hook.webhookId} → ${hook.url}`, err);
+    return;
+  }
   try {
     const signature = await signWebhookPayload(hook.secret, body);
     const res = await fetch(hook.url, {

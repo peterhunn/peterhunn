@@ -78,7 +78,7 @@ describe("ContractClient.fetch", () => {
       return new Response(JSON.stringify({ data: "success" }), { status: 200 });
     });
 
-    const client = new ContractClient({ partyData: { name: "Test" } });
+    const client = new ContractClient({ partyData: { name: "Test" }, skipTemplateVerification: true });
     const res = await client.fetch("https://api.example.com/resource");
     assert.equal(res.status, 200);
   });
@@ -110,7 +110,7 @@ describe("ContractClient.fetch", () => {
       return new Response(JSON.stringify(body), { status: 402 });
     });
 
-    const client = new ContractClient({ partyData: { name: "Test" } });
+    const client = new ContractClient({ partyData: { name: "Test" }, skipTemplateVerification: true });
     const res = await client.fetch("https://api.example.com/resource");
     assert.equal(res.status, 402);
     assert.ok(acceptCalled, "should have called accept endpoint");
@@ -138,7 +138,7 @@ describe("ContractClient.establishAgreement", () => {
       return new Response(JSON.stringify(resp), { status: 200 });
     });
 
-    const client = new ContractClient({ partyData: { name: "Test" } });
+    const client = new ContractClient({ partyData: { name: "Test" }, skipTemplateVerification: true });
     const result = await client.establishAgreement(requirements);
     assert.equal(result, token);
   });
@@ -152,7 +152,7 @@ describe("ContractClient.establishAgreement", () => {
       return new Response(JSON.stringify(resp), { status: 200 });
     });
 
-    const client = new ContractClient({ partyData: { name: "Test" } });
+    const client = new ContractClient({ partyData: { name: "Test" }, skipTemplateVerification: true });
     await client.establishAgreement(requirements);
     await client.establishAgreement(requirements);
     assert.equal(fetchCount, 1);
@@ -173,7 +173,7 @@ describe("ContractClient.establishAgreement", () => {
       return new Response(JSON.stringify(resp), { status: 200 });
     });
 
-    const client = new ContractClient({ partyData: { name: "Test" }, maxNegotiationRounds: 3 });
+    const client = new ContractClient({ partyData: { name: "Test" }, maxNegotiationRounds: 3, skipTemplateVerification: true });
     const result = await client.establishAgreement(requirements);
     assert.equal(result, token);
     assert.equal(round, 2);
@@ -186,7 +186,7 @@ describe("ContractClient.establishAgreement", () => {
       return new Response(JSON.stringify(resp), { status: 200 });
     });
 
-    const client = new ContractClient({ partyData: { name: "Test" }, maxNegotiationRounds: 2 });
+    const client = new ContractClient({ partyData: { name: "Test" }, maxNegotiationRounds: 2, skipTemplateVerification: true });
     await assert.rejects(
       () => client.establishAgreement(requirements),
       /exceeded/,
@@ -196,7 +196,7 @@ describe("ContractClient.establishAgreement", () => {
   it("throws when accept endpoint returns non-ok status", async () => {
     mockFetch(async () => new Response("Internal Server Error", { status: 500 }));
 
-    const client = new ContractClient({ partyData: { name: "Test" } });
+    const client = new ContractClient({ partyData: { name: "Test" }, skipTemplateVerification: true });
     await assert.rejects(
       () => client.establishAgreement(requirements),
       /accept failed/,
@@ -213,10 +213,76 @@ describe("ContractClient.establishAgreement", () => {
 
     const client = new ContractClient({
       partyData: { name: "Test" },
+      skipTemplateVerification: true,
       onRequirements: async (req) => { inspected = req; },
     });
     await client.establishAgreement(requirements);
     assert.ok(inspected !== null);
     assert.equal((inspected as ContractRequirements).templateId, requirements.templateId);
+  });
+});
+
+describe("ContractClient template hash verification", () => {
+  it("accepts when template content matches the declared hash", async () => {
+    const templateContent = "This is the contract template.";
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(templateContent));
+    const templateHash = [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+    const token = await signToken(
+      { contractId: "cid-v", templateHash, partyId: "p", resource: "/resource", iat: NOW, exp: NOW + 3600 },
+      SECRET,
+    );
+
+    const req: ContractRequirements = { ...requirements, templateHash };
+    mockFetch(async (url) => {
+      if (url.includes("/template")) return new Response(templateContent, { status: 200 });
+      const resp: AcceptResponse = { status: "accepted", contractId: "cid-v", token };
+      return new Response(JSON.stringify(resp), { status: 200 });
+    });
+
+    const client = new ContractClient({ partyData: { name: "Test" } });
+    const result = await client.establishAgreement(req);
+    assert.equal(result, token);
+  });
+
+  it("throws when template content does not match the declared hash", async () => {
+    const req: ContractRequirements = { ...requirements, templateHash: "a".repeat(64) };
+    mockFetch(async (url) => {
+      if (url.includes("/template")) return new Response("tampered content", { status: 200 });
+      const resp: AcceptResponse = { status: "accepted", contractId: "cid-x", token: "t" };
+      return new Response(JSON.stringify(resp), { status: 200 });
+    });
+
+    const client = new ContractClient({ partyData: { name: "Test" } });
+    await assert.rejects(
+      () => client.establishAgreement(req),
+      /hash mismatch/,
+    );
+  });
+
+  it("fetches the template only once across multiple calls with the same hash", async () => {
+    const templateContent = "Stable template.";
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(templateContent));
+    const templateHash = [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+    const token = await signToken(
+      { contractId: "cid-c", templateHash, partyId: "p", resource: "/resource", iat: NOW, exp: NOW + 3600 },
+      SECRET,
+    );
+
+    let templateFetches = 0;
+    const req: ContractRequirements = { ...requirements, templateHash };
+    mockFetch(async (url) => {
+      if (url.includes("/template")) {
+        templateFetches++;
+        return new Response(templateContent, { status: 200 });
+      }
+      const resp: AcceptResponse = { status: "accepted", contractId: "cid-c", token };
+      return new Response(JSON.stringify(resp), { status: 200 });
+    });
+
+    const client = new ContractClient({ partyData: { name: "Test" } });
+    // Second call uses cached token, so only one template fetch total
+    await client.establishAgreement(req);
+    await client.establishAgreement(req);
+    assert.equal(templateFetches, 1);
   });
 });

@@ -5,7 +5,7 @@ import type { AcceptRequest, AcceptResponse, VerifyResponse, RevokeRequest, Revo
 import type { TenantStore, TemplateStore, AgreementStore, RequirementsStore, WebhookStore } from "./store.js";
 import type { Tenant, RegisteredTemplate, WebhookEventType } from "./types.js";
 import { rateLimit } from "./rate-limit.js";
-import { deliverWebhookEvent } from "./webhook.js";
+import { deliverWebhookEvent, assertSafeWebhookUrl } from "./webhook.js";
 
 export interface FacilitatorAppOptions {
   tenants: TenantStore;
@@ -380,6 +380,11 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     const tenant = c.get("tenant");
     const body = await c.req.json<{ url: string; events: WebhookEventType[] }>();
     if (!body.url) return c.json({ error: "url is required" }, 400);
+    try {
+      await assertSafeWebhookUrl(body.url);
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 400);
+    }
     if (!Array.isArray(body.events) || body.events.length === 0) {
       return c.json({ error: "events must be a non-empty array" }, 400);
     }
