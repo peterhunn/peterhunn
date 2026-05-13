@@ -1,7 +1,8 @@
-import type { ContractRequirements, NegotiableField, AgreementRecord } from "./types-public.js";
+import type { ContractRequirements, NegotiableField } from "@x490/protocol";
+import type { AgreementRecord, TenantApiKey } from "./types.js";
 
 export interface FacilitatorClientOptions {
-  /** API key from POST /v1/tenants */
+  /** API key from POST /v1/tenants or POST /v1/apikeys */
   apiKey: string;
   /** Tenant ID from POST /v1/tenants */
   tenantId: string;
@@ -16,25 +17,25 @@ interface UploadResult {
   description?: string;
 }
 
+export interface AgreementPage {
+  agreements: AgreementRecord[];
+  /** Opaque cursor — pass as `after` to fetch the next page. Null when no more pages. */
+  nextCursor: string | null;
+}
+
 /**
  * TypeScript SDK for server operators integrating with the x490 managed facilitator.
  *
- * Handles authentication, template registration, and building ContractRequirements
- * that point to the facilitator's accept/verify/revoke endpoints.
- *
- * Usage (on your server):
- *
+ * Usage:
  *   const facilitator = new FacilitatorClient({ apiKey, tenantId });
  *   const { hash } = await facilitator.uploadTemplate(ndaText, { title: "Data Use NDA" });
- *   const requirements = facilitator.buildRequirements({
+ *   const requirements = await facilitator.buildRequirements({
  *     templateHash: hash,
  *     requiredPartyFields: ["name", "jurisdiction"],
  *     resource: "/data",
  *     description: "Data Use NDA",
- *     expiresIn: 3600,
+ *     expiresIn: 86400,  // 24 hours
  *   });
- *   // Now serve `requirements` in your 490 responses.
- *   // Use requireContract({ requirements, facilitated: true }) — no secret needed.
  */
 export class FacilitatorClient {
   private readonly baseUrl: string;
@@ -56,8 +57,9 @@ export class FacilitatorClient {
   /**
    * Build ContractRequirements using a pre-registered template.
    *
-   * All facilitator endpoints (accept, verify, revoke) are automatically set.
-   * Pass the returned object directly to requireContract({ requirements, facilitated: true }).
+   * The facilitator persists the expiresIn so tokens issued at accept time
+   * use the correct TTL. Pass the returned object directly to
+   * requireContract({ requirements, facilitated: true }).
    */
   async buildRequirements(opts: {
     templateHash: string;
@@ -76,13 +78,30 @@ export class FacilitatorClient {
     return res.json() as Promise<ContractRequirements>;
   }
 
-  /** List all agreements for your tenant, optionally filtered by resource path. */
-  async listAgreements(filters: { resource?: string } = {}): Promise<AgreementRecord[]> {
-    const qs = filters.resource ? `?resource=${encodeURIComponent(filters.resource)}` : "";
-    const res = await this.get(`/v1/agreements${qs}`);
+  /**
+   * List agreements for your tenant.
+   *
+   * Returns one page of results. Use `page.nextCursor` with `after` to paginate:
+   *
+   *   let cursor: string | null = null;
+   *   do {
+   *     const page = await facilitator.listAgreements({ after: cursor ?? undefined });
+   *     process(page.agreements);
+   *     cursor = page.nextCursor;
+   *   } while (cursor);
+   */
+  async listAgreements(
+    filters: { resource?: string; limit?: number; after?: string } = {},
+  ): Promise<AgreementPage> {
+    const qs = new URLSearchParams();
+    if (filters.resource) qs.set("resource", filters.resource);
+    if (filters.limit) qs.set("limit", String(filters.limit));
+    if (filters.after) qs.set("after", filters.after);
+
+    const q = qs.toString();
+    const res = await this.get(`/v1/agreements${q ? `?${q}` : ""}`);
     if (!res.ok) throw new Error(`listAgreements failed: ${res.status} ${await res.text()}`);
-    const { agreements } = await res.json() as { agreements: AgreementRecord[] };
-    return agreements;
+    return res.json() as Promise<AgreementPage>;
   }
 
   /** Get a single agreement by contractId. Returns null if not found. */
@@ -93,7 +112,7 @@ export class FacilitatorClient {
     return res.json() as Promise<AgreementRecord>;
   }
 
-  /** Revoke an agreement. After this, the token will be rejected by the facilitator verify endpoint. */
+  /** Revoke an agreement. The token will be rejected by the verify endpoint immediately. */
   async revokeAgreement(contractId: string, reason?: string): Promise<void> {
     const res = await this.post(`/v1/${this.opts.tenantId}/revoke`, {
       contractId,
@@ -101,6 +120,34 @@ export class FacilitatorClient {
     });
     if (!res.ok) throw new Error(`revokeAgreement failed: ${res.status} ${await res.text()}`);
   }
+
+  // ── API key management ───────────────────────────────────────────────────────
+
+  /** List all API keys for the tenant (active and revoked). */
+  async listApiKeys(): Promise<TenantApiKey[]> {
+    const res = await this.get("/v1/apikeys");
+    if (!res.ok) throw new Error(`listApiKeys failed: ${res.status} ${await res.text()}`);
+    const { apiKeys } = await res.json() as { apiKeys: TenantApiKey[] };
+    return apiKeys;
+  }
+
+  /**
+   * Create an additional API key.
+   * Returns the raw key — store it securely, it is shown exactly once.
+   */
+  async createApiKey(name: string): Promise<{ keyId: string; apiKey: string }> {
+    const res = await this.post("/v1/apikeys", { name });
+    if (!res.ok) throw new Error(`createApiKey failed: ${res.status} ${await res.text()}`);
+    return res.json() as Promise<{ keyId: string; apiKey: string }>;
+  }
+
+  /** Revoke an API key by keyId. Does not affect other keys. */
+  async revokeApiKey(keyId: string): Promise<void> {
+    const res = await this.delete(`/v1/apikeys/${keyId}`);
+    if (!res.ok) throw new Error(`revokeApiKey failed: ${res.status} ${await res.text()}`);
+  }
+
+  // ── Private helpers ──────────────────────────────────────────────────────────
 
   private post(path: string, body: unknown): Promise<Response> {
     return fetch(`${this.baseUrl}${path}`, {
@@ -115,6 +162,13 @@ export class FacilitatorClient {
       headers: { "X-API-Key": this.opts.apiKey },
     });
   }
+
+  private delete(path: string): Promise<Response> {
+    return fetch(`${this.baseUrl}${path}`, {
+      method: "DELETE",
+      headers: { "X-API-Key": this.opts.apiKey },
+    });
+  }
 }
 
 /**
@@ -126,13 +180,13 @@ export class FacilitatorClient {
 export async function signUp(
   name: string,
   baseUrl = "https://facilitator.x490.dev",
-): Promise<{ tenantId: string; apiKey: string }> {
+): Promise<{ tenantId: string; apiKey: string; keyId: string }> {
   const res = await fetch(`${baseUrl}/v1/tenants`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name }),
   });
   if (!res.ok) throw new Error(`signUp failed: ${res.status} ${await res.text()}`);
-  const body = await res.json() as { tenantId: string; apiKey: string };
-  return { tenantId: body.tenantId, apiKey: body.apiKey };
+  const body = await res.json() as { tenantId: string; apiKey: string; keyId: string };
+  return { tenantId: body.tenantId, apiKey: body.apiKey, keyId: body.keyId };
 }

@@ -8,12 +8,26 @@
 /** A server operator that has signed up for the managed facilitator service. */
 export interface Tenant {
   tenantId: string;
-  /** sha256(apiKey) — raw key is shown once and never stored */
-  apiKeyHash: string;
   /** Random secret used to sign x490 tokens for this tenant. Never exposed. */
   hmacSecret: string;
   name: string;
   createdAt: number;
+}
+
+/**
+ * An API key belonging to a tenant.
+ * Tenants may have multiple active keys (e.g., production + staging).
+ * Keys may be rotated independently without affecting other keys or the tenant.
+ */
+export interface TenantApiKey {
+  keyId: string;
+  tenantId: string;
+  /** sha256(rawApiKey) — raw key shown once, never stored */
+  keyHash: string;
+  /** Human label, e.g. "production" or "ci" */
+  name: string;
+  createdAt: number;
+  revokedAt?: number;
 }
 
 /** A contract template registered by a tenant and hosted by the facilitator. */
@@ -21,12 +35,26 @@ export interface RegisteredTemplate {
   /** hex SHA-256 of content — content-addressed, doubles as stable identifier */
   hash: string;
   tenantId: string;
-  /** Raw template text (Markdown with {{variable}} placeholders) */
+  /** Raw template text with {{variable}} placeholders */
   content: string;
   meta: {
     title?: string;
     description?: string;
   };
+  createdAt: number;
+}
+
+/**
+ * Stored requirements config — persisted when the operator calls buildRequirements.
+ * Lets the accept endpoint use the correct expiresIn per (tenant, template, resource).
+ */
+export interface RequirementsConfig {
+  id: string;
+  tenantId: string;
+  templateHash: string;
+  resource: string;
+  expiresIn: number;
+  requiredPartyFields: string[];
   createdAt: number;
 }
 
@@ -43,8 +71,4 @@ export interface AgreementRecord {
   expiresAt: number;
   revokedAt?: number;
   revokedReason?: string;
-}
-
-export function isRevoked(record: AgreementRecord): boolean {
-  return record.revokedAt !== undefined;
 }

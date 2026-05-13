@@ -26,6 +26,7 @@ import {
   InMemoryTenantStore,
   InMemoryTemplateStore,
   InMemoryAgreementStore,
+  InMemoryRequirementsStore,
   FacilitatorClient,
   signUp,
 } from "@x490/facilitator";
@@ -41,6 +42,7 @@ const facilitatorApp = createFacilitatorApp({
   tenants: new InMemoryTenantStore(),
   templates: new InMemoryTemplateStore(),
   agreements: new InMemoryAgreementStore(),
+  requirements: new InMemoryRequirementsStore(),
   baseUrl: FACILITATOR_BASE,
 });
 
@@ -140,8 +142,8 @@ console.log("\n═════════════════════�
 console.log("  Step 5: Operator reviews the agreement dashboard");
 console.log("══════════════════════════════════════════════════════\n");
 
-const agreements = await facilitator.listAgreements({ resource: "/data" });
-console.log(`  ${agreements.length} agreement(s) for /data:`);
+const { agreements, nextCursor } = await facilitator.listAgreements({ resource: "/data" });
+console.log(`  ${agreements.length} agreement(s) for /data:${nextCursor ? " (more pages available)" : ""}`);
 for (const a of agreements) {
   console.log(`  • contractId=${a.contractId}`);
   console.log(`    party=${a.partyId}  expires=${new Date(a.expiresAt * 1000).toISOString()}`);

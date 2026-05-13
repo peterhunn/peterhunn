@@ -7,12 +7,35 @@ export {
   InMemoryTenantStore,
   InMemoryTemplateStore,
   InMemoryAgreementStore,
+  InMemoryRequirementsStore,
+  sha256hex,
+  encodeCursor,
+  decodeCursor,
 } from "./store.js";
-export type { TenantStore, TemplateStore, AgreementStore } from "./store.js";
+export type {
+  TenantStore,
+  TemplateStore,
+  AgreementStore,
+  RequirementsStore,
+} from "./store.js";
+
+// Postgres store implementations
+export {
+  PostgresTenantStore,
+  PostgresTemplateStore,
+  PostgresAgreementStore,
+  PostgresRequirementsStore,
+} from "./store-postgres.js";
 
 // Client SDK — for server operators integrating with the managed service
 export { FacilitatorClient, signUp } from "./client.js";
 export type { FacilitatorClientOptions } from "./client.js";
 
 // Types
-export type { Tenant, RegisteredTemplate, AgreementRecord } from "./types.js";
+export type {
+  Tenant,
+  TenantApiKey,
+  RegisteredTemplate,
+  AgreementRecord,
+  RequirementsConfig,
+} from "./types.js";

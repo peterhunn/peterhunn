@@ -1,13 +1,16 @@
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { signToken, verifyToken } from "@x490/protocol";
 import type { AcceptRequest, AcceptResponse, VerifyResponse, RevokeRequest, RevokeResponse, NegotiableField } from "@x490/protocol";
-import type { TenantStore, TemplateStore, AgreementStore } from "./store.js";
+import type { TenantStore, TemplateStore, AgreementStore, RequirementsStore } from "./store.js";
 import type { Tenant, RegisteredTemplate } from "./types.js";
+import { rateLimit } from "./rate-limit.js";
 
 export interface FacilitatorAppOptions {
   tenants: TenantStore;
   templates: TemplateStore;
   agreements: AgreementStore;
+  requirements: RequirementsStore;
   /** Public base URL of this facilitator, e.g. "https://facilitator.x490.dev" */
   baseUrl: string;
 }
@@ -18,40 +21,51 @@ type AuthEnv = { Variables: { tenant: Tenant } };
  * Creates the facilitator Hono app.
  *
  * Two audiences:
- *   - Server operators (authenticated with X-API-Key): register templates,
- *     manage agreements, build requirements
- *   - AI agents / end users (no auth): accept contracts, verify tokens
+ *   - Server operators (X-API-Key): sign up, register templates, manage agreements
+ *   - AI agents (public): accept contracts, verify tokens
  *
  * Routes:
  *
- *   Operator-facing (X-API-Key required):
- *     POST /v1/tenants                     sign up → { tenantId, apiKey }
- *     POST /v1/templates                   register template → { hash, url }
- *     GET  /v1/agreements                  list agreements for tenant
- *     GET  /v1/agreements/:contractId      get one agreement
- *     POST /v1/:tenantId/revoke            revoke an agreement
- *     POST /v1/requirements                build ready-to-use ContractRequirements
- *
- *   Agent-facing (public):
+ *   Public:
+ *     POST /v1/tenants                     sign up → { tenantId, apiKey, keyId }
  *     GET  /v1/templates/:hash             serve template content
- *     POST /v1/:tenantId/accept            accept contract → token
- *     GET  /v1/:tenantId/verify            verify token
+ *     POST /v1/:tenantId/accept            accept contract → token  (rate limited)
+ *     GET  /v1/:tenantId/verify            verify token            (rate limited)
+ *
+ *   Operator-facing (X-API-Key required):
+ *     POST /v1/templates                   register template
+ *     POST /v1/requirements                build ContractRequirements
+ *     GET  /v1/agreements                  list agreements (paginated)
+ *     GET  /v1/agreements/:contractId      get one agreement
+ *     POST /v1/:tenantId/revoke            revoke agreement
+ *     GET  /v1/apikeys                     list API keys
+ *     POST /v1/apikeys                     create additional API key
+ *     DELETE /v1/apikeys/:keyId            revoke an API key
  */
 export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
-  const { tenants, templates, agreements, baseUrl } = opts;
+  const { tenants, templates, agreements, requirements, baseUrl } = opts;
 
-  // Public app — no auth required
   const app = new Hono();
-
-  // Authenticated sub-app — all routes require X-API-Key
-  // IMPORTANT: public routes on `app` are registered FIRST so they take precedence
-  // over the wildcard middleware in `authed` when mounted via app.route("/", authed).
   const authed = new Hono<AuthEnv>();
 
   app.onError((err, c) => {
     console.error(err);
     return c.json({ error: err.message }, 500);
   });
+
+  // ── CORS ──────────────────────────────────────────────────────────────────────
+  // Allow browsers (operator dashboard) and AI agent runtimes to call the API.
+  app.use(
+    "/v1/*",
+    cors({
+      origin: "*",
+      allowMethods: ["GET", "POST", "DELETE", "OPTIONS"],
+      allowHeaders: ["Content-Type", "X-API-Key"],
+      maxAge: 86400,
+    }),
+  );
+
+  // ── Auth middleware (applied selectively via sub-app) ──────────────────────
 
   authed.use("*", async (c, next) => {
     const raw = c.req.header("X-API-Key");
@@ -62,16 +76,17 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     await next();
   });
 
-  // ── Tenant sign-up (no auth — first call) ──────────────────────────────────
+  // ── Tenant sign-up (public — first call) ───────────────────────────────────
 
   app.post("/v1/tenants", async (c) => {
     const { name } = await c.req.json<{ name: string }>();
     if (!name?.trim()) return c.json({ error: "name is required" }, 400);
-    const { tenant, rawApiKey } = await tenants.create(name.trim());
+    const { tenant, rawApiKey, keyId } = await tenants.create(name.trim());
     return c.json(
       {
         tenantId: tenant.tenantId,
         apiKey: rawApiKey,
+        keyId,
         note: "Store your API key — it will not be shown again.",
       },
       201,
@@ -79,6 +94,8 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
   });
 
   // ── Template serving (public) ──────────────────────────────────────────────
+  // Public routes registered BEFORE app.route("/", authed) so they take
+  // precedence over the wildcard auth middleware in the authed sub-app.
 
   app.get("/v1/templates/:hash", async (c) => {
     const tmpl = await templates.findByHash(c.req.param("hash"));
@@ -91,10 +108,12 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     });
   });
 
-  // ── Accept endpoint (agent-facing, public) ─────────────────────────────────
+  // ── Accept endpoint (agent-facing, public, rate limited) ───────────────────
 
-  app.post("/v1/:tenantId/accept", async (c) => {
-    const tenantId = c.req.param("tenantId");
+  const acceptLimiter = rateLimit({ windowMs: 60_000, max: 30 });
+
+  app.post("/v1/:tenantId/accept", acceptLimiter, async (c) => {
+    const tenantId = c.req.param("tenantId") ?? "";
     const tenant = await tenants.findById(tenantId);
     if (!tenant) return c.json({ error: "Tenant not found" }, 404);
 
@@ -110,9 +129,12 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
       return c.json({ error: "Template not found for this tenant" }, 404);
     }
 
+    // Look up the operator-configured TTL; fall back to 1 hour.
+    const reqConfig = await requirements.findByTemplate(tenantId, body.templateHash);
+    const expiresIn = reqConfig?.expiresIn ?? 3600;
+
     const contractId = crypto.randomUUID();
     const now = Math.floor(Date.now() / 1000);
-    const expiresIn = 3600;
     const partyId = body.partyData["partyId"] ?? body.partyData["name"] ?? contractId;
 
     const token = await signToken(
@@ -143,10 +165,12 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     return c.json(response, 200);
   });
 
-  // ── Verify endpoint (server-facing, public) ────────────────────────────────
+  // ── Verify endpoint (server-facing, public, rate limited) ─────────────────
 
-  app.get("/v1/:tenantId/verify", async (c) => {
-    const tenantId = c.req.param("tenantId");
+  const verifyLimiter = rateLimit({ windowMs: 60_000, max: 120 });
+
+  app.get("/v1/:tenantId/verify", verifyLimiter, async (c) => {
+    const tenantId = c.req.param("tenantId") ?? "";
     const tenant = await tenants.findById(tenantId);
     if (!tenant) return c.json({ error: "Tenant not found" }, 404);
 
@@ -175,7 +199,7 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     return c.json(response, 200);
   });
 
-  // ── Template registration ──────────────────────────────────────────────────
+  // ── Template registration (auth required) ─────────────────────────────────
 
   authed.post("/v1/templates", async (c) => {
     const tenant = c.get("tenant");
@@ -201,7 +225,7 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     );
   });
 
-  // ── Build ContractRequirements ─────────────────────────────────────────────
+  // ── Build ContractRequirements (auth required) ────────────────────────────
 
   authed.post("/v1/requirements", async (c) => {
     const tenant = c.get("tenant");
@@ -222,18 +246,37 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     if (!tmpl) return c.json({ error: "Template not found. Register it first with POST /v1/templates." }, 404);
     if (tmpl.tenantId !== tenant.tenantId) return c.json({ error: "Template belongs to a different tenant" }, 403);
 
-    const requirements = buildRequirements(body, tenant.tenantId, body.templateHash, baseUrl);
-    return c.json(requirements, 200);
+    // Persist so the accept endpoint can look up the correct TTL.
+    await requirements.upsert({
+      tenantId: tenant.tenantId,
+      templateHash: body.templateHash,
+      resource: body.resource,
+      expiresIn: body.expiresIn,
+      requiredPartyFields: body.requiredPartyFields,
+    });
+
+    const reqs = buildRequirements(body, tenant.tenantId, body.templateHash, baseUrl);
+    return c.json(reqs, 200);
   });
 
-  // ── Agreement listing ──────────────────────────────────────────────────────
+  // ── Agreement listing (auth required, paginated) ───────────────────────────
 
   authed.get("/v1/agreements", async (c) => {
     const tenant = c.get("tenant");
     const resource = c.req.query("resource");
-    let records = await agreements.listByTenant(tenant.tenantId);
-    if (resource) records = records.filter((r) => r.resource === resource || r.resource === "*");
-    return c.json({ agreements: records.map(safeRecord) });
+    const limit = Math.min(Number(c.req.query("limit") ?? "50"), 200);
+    const after = c.req.query("after");
+
+    const { agreements: records, nextCursor } = await agreements.listByTenant(tenant.tenantId, {
+      ...(resource ? { resource } : {}),
+      limit,
+      ...(after ? { after } : {}),
+    });
+
+    return c.json({
+      agreements: records.map(safeRecord),
+      nextCursor,
+    });
   });
 
   authed.get("/v1/agreements/:contractId", async (c) => {
@@ -245,7 +288,7 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     return c.json(safeRecord(record));
   });
 
-  // ── Revocation ─────────────────────────────────────────────────────────────
+  // ── Revocation (auth required) ─────────────────────────────────────────────
 
   authed.post("/v1/:tenantId/revoke", async (c) => {
     const tenant = c.get("tenant");
@@ -266,8 +309,49 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     return c.json(response, 200);
   });
 
-  // Mount authenticated routes AFTER public routes so the wildcard auth
-  // middleware in `authed` does not intercept public endpoints.
+  // ── API key management (auth required) ────────────────────────────────────
+
+  authed.get("/v1/apikeys", async (c) => {
+    const tenant = c.get("tenant");
+    const keys = await tenants.listApiKeys(tenant.tenantId);
+    return c.json({
+      apiKeys: keys.map((k) => ({
+        keyId: k.keyId,
+        name: k.name,
+        createdAt: k.createdAt,
+        revokedAt: k.revokedAt,
+      })),
+    });
+  });
+
+  authed.post("/v1/apikeys", async (c) => {
+    const tenant = c.get("tenant");
+    const body = await c.req.json<{ name?: string }>();
+    const name = body.name?.trim() || "default";
+    const { keyId, rawApiKey } = await tenants.createApiKey(tenant.tenantId, name);
+    return c.json(
+      {
+        keyId,
+        apiKey: rawApiKey,
+        name,
+        note: "Store your API key — it will not be shown again.",
+      },
+      201,
+    );
+  });
+
+  authed.delete("/v1/apikeys/:keyId", async (c) => {
+    const tenant = c.get("tenant");
+    const keyId = c.req.param("keyId");
+    // Ensure the key belongs to this tenant before revoking.
+    const keys = await tenants.listApiKeys(tenant.tenantId);
+    const key = keys.find((k) => k.keyId === keyId);
+    if (!key) return c.json({ error: "API key not found" }, 404);
+    await tenants.revokeApiKey(keyId);
+    return c.json({ revoked: true, keyId });
+  });
+
+  // Mount authenticated routes after public routes.
   app.route("/", authed);
 
   return app;
