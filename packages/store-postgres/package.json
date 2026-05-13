@@ -11,10 +11,12 @@
       "types": "./dist/index.d.ts"
     }
   },
+  "private": true,
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "migrate": "tsx src/migrate.ts"
+    "migrate": "tsx src/migrate.ts",
+    "test": "echo 'No unit tests — integration tests require a live Postgres instance'"
   },
   "dependencies": {
     "@x490/api": "*",

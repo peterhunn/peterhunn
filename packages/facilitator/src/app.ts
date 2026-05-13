@@ -83,7 +83,8 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
 
   // ── Tenant sign-up (public — first call) ───────────────────────────────────
 
-  app.post("/v1/tenants", async (c) => {
+  const signupLimiter = rateLimit({ windowMs: 60_000, max: 5 });
+  app.post("/v1/tenants", signupLimiter, async (c) => {
     const { name } = await c.req.json<{ name: string }>();
     if (!name?.trim()) return c.json({ error: "name is required" }, 400);
     const { tenant, rawApiKey, keyId } = await tenants.create(name.trim());
