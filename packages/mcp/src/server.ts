@@ -20,32 +20,33 @@ interface CachedAgreement {
   expiresAt: number;
 }
 
-const agreements = new Map<string, CachedAgreement>();
-
-function cacheAgreement(token: string, templateId: string): CachedAgreement | null {
-  const decoded = decodeToken(token);
-  if (!decoded) return null;
-  const entry: CachedAgreement = {
-    contractId: decoded.payload.contractId,
-    templateId,
-    resource: decoded.payload.resource,
-    partyId: decoded.payload.partyId,
-    token,
-    issuedAt: decoded.payload.iat,
-    expiresAt: decoded.payload.exp,
-  };
-  agreements.set(decoded.payload.contractId, entry);
-  return entry;
-}
-
-function activeAgreements(): CachedAgreement[] {
-  const now = Math.floor(Date.now() / 1000);
-  return [...agreements.values()].filter((a) => a.expiresAt > now);
-}
-
 // ── Server factory ─────────────────────────────────────────────────────────────
 
 export function createX490McpServer(): McpServer {
+  // Per-instance agreement cache — each server has independent state.
+  const agreements = new Map<string, CachedAgreement>();
+
+  function cacheAgreement(token: string, templateId: string): CachedAgreement | null {
+    const decoded = decodeToken(token);
+    if (!decoded) return null;
+    const entry: CachedAgreement = {
+      contractId: decoded.payload.contractId,
+      templateId,
+      resource: decoded.payload.resource,
+      partyId: decoded.payload.partyId,
+      token,
+      issuedAt: decoded.payload.iat,
+      expiresAt: decoded.payload.exp,
+    };
+    agreements.set(decoded.payload.contractId, entry);
+    return entry;
+  }
+
+  function activeAgreements(): CachedAgreement[] {
+    const now = Math.floor(Date.now() / 1000);
+    return [...agreements.values()].filter((a) => a.expiresAt > now);
+  }
+
   const server = new McpServer({
     name: "x490",
     version: "0.1.0",
