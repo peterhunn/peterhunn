@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { serveStatic } from "@hono/node-server/serve-static";
 import { signToken, verifyToken } from "@x490/protocol";
 import type { AcceptRequest, AcceptResponse, VerifyResponse, RevokeRequest, RevokeResponse, NegotiableField } from "@x490/protocol";
 import type { TenantStore, TemplateStore, AgreementStore, RequirementsStore, WebhookStore } from "./store.js";
@@ -57,6 +58,13 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
 
   // ── Health check ───────────────────────────────────────────────────────────────
   app.get("/health", (c) => c.json({ ok: true }));
+
+  // Dashboard static files — only mounted when the build output exists
+  app.use("/dashboard/*", serveStatic({
+    root: "./packages/dashboard/out",
+    rewriteRequestPath: (path) => path.replace(/^\/dashboard/, "") || "/",
+  }));
+  app.get("/dashboard", (c) => c.redirect("/dashboard/"));
 
   // ── CORS ──────────────────────────────────────────────────────────────────────
   // Allow browsers (operator dashboard) and AI agent runtimes to call the API.
@@ -209,6 +217,13 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
       expiresAt: result.payload.exp,
     };
     return c.json(response, 200);
+  });
+
+  // ── Me endpoint (auth required) ───────────────────────────────────────────
+
+  authed.get("/v1/me", async (c) => {
+    const tenant = c.get("tenant");
+    return c.json({ tenantId: tenant.tenantId, name: tenant.name });
   });
 
   // ── Template registration (auth required) ─────────────────────────────────
