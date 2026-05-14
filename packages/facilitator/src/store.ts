@@ -27,6 +27,8 @@ export interface TenantStore {
   findById(tenantId: string): Promise<Tenant | null>;
   /** O(1) lookup via hash index — does not return revoked keys. */
   findByApiKey(raw: string): Promise<Tenant | null>;
+  /** Find or auto-provision a tenant keyed to an Auth0 subject claim. */
+  findOrCreateByAuth0Sub(sub: string): Promise<Tenant>;
   /** Create an additional API key for an existing tenant. */
   createApiKey(tenantId: string, name: string): Promise<{ keyId: string; rawApiKey: string }>;
   listApiKeys(tenantId: string): Promise<TenantApiKey[]>;
@@ -63,6 +65,7 @@ export class InMemoryTenantStore implements TenantStore {
   private readonly tenants = new Map<string, Tenant>();
   private readonly apiKeys = new Map<string, TenantApiKey>(); // keyId → key
   private readonly keyHashIndex = new Map<string, string>(); // sha256(raw) → keyId
+  private readonly auth0SubIndex = new Map<string, string>(); // auth0 sub → tenantId
 
   async create(name: string): Promise<{ tenant: Tenant; rawApiKey: string; keyId: string }> {
     const { raw, hash } = await generateApiKey();
@@ -98,6 +101,21 @@ export class InMemoryTenantStore implements TenantStore {
 
   async findById(tenantId: string): Promise<Tenant | null> {
     return this.tenants.get(tenantId) ?? null;
+  }
+
+  async findOrCreateByAuth0Sub(sub: string): Promise<Tenant> {
+    const existingId = this.auth0SubIndex.get(sub);
+    if (existingId) return this.tenants.get(existingId)!;
+
+    const tenant: Tenant = {
+      tenantId: crypto.randomUUID(),
+      hmacSecret: generateHmacSecret(),
+      name: sub,
+      createdAt: Math.floor(Date.now() / 1000),
+    };
+    this.tenants.set(tenant.tenantId, tenant);
+    this.auth0SubIndex.set(sub, tenant.tenantId);
+    return tenant;
   }
 
   async createApiKey(tenantId: string, name: string): Promise<{ keyId: string; rawApiKey: string }> {

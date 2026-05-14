@@ -140,6 +140,16 @@ export class PostgresTenantStore implements TenantStore {
     `;
     return result.count > 0;
   }
+
+  async findOrCreateByAuth0Sub(sub: string): Promise<import("./types.js").Tenant> {
+    const rows = await this.sql<TenantRow[]>`
+      INSERT INTO x490_tenants (name, hmac_secret, auth0_sub)
+      VALUES (${sub}, ${generateHmacSecret()}, ${sub})
+      ON CONFLICT (auth0_sub) DO UPDATE SET auth0_sub = EXCLUDED.auth0_sub
+      RETURNING *
+    `;
+    return rowToTenant(rows[0]!);
+  }
 }
 
 // ── Template store ─────────────────────────────────────────────────────────────

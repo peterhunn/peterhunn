@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { getAuth } from "@/lib/auth";
 import { listApiKeys, createApiKey, revokeApiKey, type ApiKey } from "@/lib/api";
 import { Badge } from "@/components/badge";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -25,10 +24,8 @@ export default function ApiKeysPage() {
   const [revokeTarget, setRevokeTarget] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const auth = getAuth();
-    if (!auth) return;
     try {
-      const data = await listApiKeys(auth);
+      const data = await listApiKeys();
       setKeys(data.apiKeys);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load API keys");
@@ -42,11 +39,9 @@ export default function ApiKeysPage() {
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    const auth = getAuth();
-    if (!auth) return;
     setCreating(true);
     try {
-      const result = await createApiKey(auth, newKeyName.trim() || "default");
+      const result = await createApiKey(newKeyName.trim() || "default");
       setNewKey(result);
       setNewKeyName("");
       await load();
@@ -59,10 +54,8 @@ export default function ApiKeysPage() {
 
   async function handleRevoke() {
     if (!revokeTarget) return;
-    const auth = getAuth();
-    if (!auth) return;
     try {
-      await revokeApiKey(auth, revokeTarget);
+      await revokeApiKey(revokeTarget);
       setConfirmOpen(false);
       setRevokeTarget(null);
       await load();

@@ -12,6 +12,8 @@ import {
 const PORT = Number(process.env["PORT"] ?? 4901);
 const BASE_URL = process.env["BASE_URL"] ?? `http://localhost:${PORT}`;
 const DATABASE_URL = process.env["DATABASE_URL"];
+const AUTH0_DOMAIN = process.env["AUTH0_DOMAIN"];
+const AUTH0_AUDIENCE = process.env["AUTH0_AUDIENCE"];
 
 async function buildStores() {
   if (DATABASE_URL) {
@@ -52,7 +54,12 @@ async function buildStores() {
 }
 
 const stores = await buildStores();
-const app = createFacilitatorApp({ ...stores, baseUrl: BASE_URL });
+const app = createFacilitatorApp({
+  ...stores,
+  baseUrl: BASE_URL,
+  ...(AUTH0_DOMAIN ? { auth0Domain: AUTH0_DOMAIN } : {}),
+  ...(AUTH0_AUDIENCE ? { auth0Audience: AUTH0_AUDIENCE } : {}),
+});
 
 serve({ fetch: app.fetch, port: PORT }, () => {
   const backend = DATABASE_URL ? "postgres" : "in-memory";

@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { serveStatic } from "@hono/node-server/serve-static";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 import { signToken, verifyToken } from "@x490/protocol";
 import type { AcceptRequest, AcceptResponse, VerifyResponse, RevokeRequest, RevokeResponse, NegotiableField } from "@x490/protocol";
 import type { TenantStore, TemplateStore, AgreementStore, RequirementsStore, WebhookStore } from "./store.js";
@@ -16,6 +16,10 @@ export interface FacilitatorAppOptions {
   webhooks: WebhookStore;
   /** Public base URL of this facilitator, e.g. "https://facilitator.x490.dev" */
   baseUrl: string;
+  /** Auth0 domain, e.g. "your-tenant.auth0.com". Enables JWT auth when set. */
+  auth0Domain?: string;
+  /** Auth0 API audience identifier. Required when auth0Domain is set. */
+  auth0Audience?: string;
 }
 
 type AuthEnv = { Variables: { tenant: Tenant } };
@@ -45,6 +49,16 @@ type AuthEnv = { Variables: { tenant: Tenant } };
  *     POST /v1/apikeys                     create additional API key
  *     DELETE /v1/apikeys/:keyId            revoke an API key
  */
+// JWKS cache — one RemoteJWKSet per Auth0 domain (reused across requests).
+const jwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
+
+function getJWKS(domain: string): ReturnType<typeof createRemoteJWKSet> {
+  if (!jwksCache.has(domain)) {
+    jwksCache.set(domain, createRemoteJWKSet(new URL(`https://${domain}/.well-known/jwks.json`)));
+  }
+  return jwksCache.get(domain)!;
+}
+
 export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
   const { tenants, templates, agreements, requirements, webhooks, baseUrl } = opts;
 
@@ -59,13 +73,6 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
   // ── Health check ───────────────────────────────────────────────────────────────
   app.get("/health", (c) => c.json({ ok: true }));
 
-  // Dashboard static files — only mounted when the build output exists
-  app.use("/dashboard/*", serveStatic({
-    root: "./packages/dashboard/out",
-    rewriteRequestPath: (path) => path.replace(/^\/dashboard/, "") || "/",
-  }));
-  app.get("/dashboard", (c) => c.redirect("/dashboard/"));
-
   // ── CORS ──────────────────────────────────────────────────────────────────────
   // Allow browsers (operator dashboard) and AI agent runtimes to call the API.
   app.use(
@@ -73,7 +80,7 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     cors({
       origin: "*",
       allowMethods: ["GET", "POST", "DELETE", "OPTIONS"],
-      allowHeaders: ["Content-Type", "X-API-Key"],
+      allowHeaders: ["Content-Type", "X-API-Key", "Authorization"],
       maxAge: 86400,
     }),
   );
@@ -81,12 +88,37 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
   // ── Auth middleware (applied selectively via sub-app) ──────────────────────
 
   authed.use("*", async (c, next) => {
-    const raw = c.req.header("X-API-Key");
-    if (!raw) return c.json({ error: "X-API-Key header required" }, 401);
-    const tenant = await tenants.findByApiKey(raw);
-    if (!tenant) return c.json({ error: "Invalid API key" }, 401);
-    c.set("tenant", tenant);
-    await next();
+    // API key (operator tooling / CI / legacy dashboard)
+    const apiKey = c.req.header("X-API-Key");
+    if (apiKey) {
+      const tenant = await tenants.findByApiKey(apiKey);
+      if (!tenant) return c.json({ error: "Invalid API key" }, 401);
+      c.set("tenant", tenant);
+      return next();
+    }
+
+    // Auth0 JWT (dashboard proxy)
+    if (opts.auth0Domain && opts.auth0Audience) {
+      const authHeader = c.req.header("Authorization");
+      if (authHeader?.startsWith("Bearer ")) {
+        const token = authHeader.slice(7);
+        try {
+          const { payload } = await jwtVerify(token, getJWKS(opts.auth0Domain), {
+            issuer: `https://${opts.auth0Domain}/`,
+            audience: opts.auth0Audience,
+          });
+          if (payload.sub) {
+            const tenant = await tenants.findOrCreateByAuth0Sub(payload.sub);
+            c.set("tenant", tenant);
+            return next();
+          }
+        } catch {
+          return c.json({ error: "Invalid token" }, 401);
+        }
+      }
+    }
+
+    return c.json({ error: "Authentication required" }, 401);
   });
 
   // ── Tenant sign-up (public — first call) ───────────────────────────────────

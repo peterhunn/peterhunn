@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { getAuth } from "@/lib/auth";
+import { useTenant } from "@/lib/tenant-context";
 import { listAgreements, revokeAgreement, type Agreement } from "@/lib/api";
 import { Badge } from "@/components/badge";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -11,6 +11,7 @@ function formatDate(ts: number) {
 }
 
 export default function AgreementsPage() {
+  const tenant = useTenant();
   const [agreements, setAgreements] = useState<Agreement[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -24,10 +25,8 @@ export default function AgreementsPage() {
   const [revoking, setRevoking] = useState(false);
 
   const load = useCallback(async (resource: string, cursor?: string) => {
-    const auth = getAuth();
-    if (!auth) return;
     try {
-      const data = await listAgreements(auth, {
+      const data = await listAgreements({
         ...(resource ? { resource } : {}),
         ...(cursor ? { after: cursor } : {}),
         limit: 50,
@@ -66,12 +65,10 @@ export default function AgreementsPage() {
   }
 
   async function handleRevoke() {
-    if (!revokeTarget) return;
-    const auth = getAuth();
-    if (!auth) return;
+    if (!revokeTarget || !tenant) return;
     setRevoking(true);
     try {
-      await revokeAgreement(auth, revokeTarget);
+      await revokeAgreement(tenant.tenantId, revokeTarget);
       setConfirmOpen(false);
       setRevokeTarget(null);
       await load(resourceFilter);
@@ -189,7 +186,11 @@ export default function AgreementsPage() {
         onConfirm={handleRevoke}
         onCancel={() => { setConfirmOpen(false); setRevokeTarget(null); }}
       />
-      {revoking && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/10"><span className="text-sm text-gray-600">Revoking…</span></div>}
+      {revoking && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/10">
+          <span className="text-sm text-gray-600">Revoking…</span>
+        </div>
+      )}
     </div>
   );
 }

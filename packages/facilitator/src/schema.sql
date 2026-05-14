@@ -6,8 +6,11 @@ CREATE TABLE IF NOT EXISTS x490_tenants (
   tenant_id   UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   name        TEXT        NOT NULL,
   hmac_secret TEXT        NOT NULL,
+  auth0_sub   TEXT        UNIQUE,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Idempotent migration for deployments that predate the auth0_sub column.
+ALTER TABLE x490_tenants ADD COLUMN IF NOT EXISTS auth0_sub TEXT UNIQUE;
 
 -- API keys are separate from tenants to support key rotation.
 -- A tenant may have multiple active keys.

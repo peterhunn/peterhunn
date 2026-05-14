@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { getAuth } from "@/lib/auth";
 import { listWebhooks, createWebhook, deleteWebhook, type Webhook } from "@/lib/api";
 import { Badge } from "@/components/badge";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -28,10 +27,8 @@ export default function WebhooksPage() {
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const auth = getAuth();
-    if (!auth) return;
     try {
-      const data = await listWebhooks(auth);
+      const data = await listWebhooks();
       setWebhooks(data.webhooks);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load webhooks");
@@ -45,21 +42,19 @@ export default function WebhooksPage() {
 
   function toggleEvent(event: string) {
     setSelectedEvents((prev) =>
-      prev.includes(event) ? prev.filter((e) => e !== event) : [...prev, event]
+      prev.includes(event) ? prev.filter((e) => e !== event) : [...prev, event],
     );
   }
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    const auth = getAuth();
-    if (!auth) return;
     if (selectedEvents.length === 0) {
       setError("Select at least one event.");
       return;
     }
     setCreating(true);
     try {
-      const result = await createWebhook(auth, webhookUrl, selectedEvents);
+      const result = await createWebhook(webhookUrl, selectedEvents);
       setCreatedSecret({ webhookId: result.webhookId, secret: result.secret });
       setWebhookUrl("");
       setSelectedEvents([...ALL_EVENTS]);
@@ -73,10 +68,8 @@ export default function WebhooksPage() {
 
   async function handleDelete() {
     if (!deleteTarget) return;
-    const auth = getAuth();
-    if (!auth) return;
     try {
-      await deleteWebhook(auth, deleteTarget);
+      await deleteWebhook(deleteTarget);
       setConfirmOpen(false);
       setDeleteTarget(null);
       await load();
