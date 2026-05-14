@@ -39,8 +39,11 @@ CREATE TABLE IF NOT EXISTS x490_templates (
   content     TEXT        NOT NULL,
   title       TEXT,
   description TEXT,
+  terms       JSONB,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Idempotent migration for deployments that predate the terms column.
+ALTER TABLE x490_templates ADD COLUMN IF NOT EXISTS terms JSONB;
 
 CREATE INDEX IF NOT EXISTS idx_x490_templates_tenant
   ON x490_templates(tenant_id);

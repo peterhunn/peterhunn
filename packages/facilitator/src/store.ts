@@ -36,7 +36,12 @@ export interface TenantStore {
 }
 
 export interface TemplateStore {
-  register(tenantId: string, content: string, meta: RegisteredTemplate["meta"]): Promise<RegisteredTemplate>;
+  register(
+    tenantId: string,
+    content: string,
+    meta: RegisteredTemplate["meta"],
+    terms?: RegisteredTemplate["terms"],
+  ): Promise<RegisteredTemplate>;
   findByHash(hash: string): Promise<RegisteredTemplate | null>;
 }
 
@@ -154,6 +159,7 @@ export class InMemoryTemplateStore implements TemplateStore {
     tenantId: string,
     content: string,
     meta: RegisteredTemplate["meta"],
+    terms?: RegisteredTemplate["terms"],
   ): Promise<RegisteredTemplate> {
     const hash = await sha256hex(content);
     const existing = this.templates.get(hash);
@@ -164,6 +170,7 @@ export class InMemoryTemplateStore implements TemplateStore {
       tenantId,
       content,
       meta,
+      ...(terms ? { terms } : {}),
       createdAt: Math.floor(Date.now() / 1000),
     };
     this.templates.set(hash, tmpl);

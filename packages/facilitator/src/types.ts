@@ -41,6 +41,8 @@ export interface RegisteredTemplate {
     title?: string;
     description?: string;
   };
+  /** Structured clause data provided by the operator at registration time. */
+  terms?: import("@x490/core").ContractTerms;
   createdAt: number;
 }
 

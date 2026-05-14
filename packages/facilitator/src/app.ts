@@ -3,6 +3,7 @@ import { cors } from "hono/cors";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { signToken, verifyToken } from "@x490/protocol";
 import type { AcceptRequest, AcceptResponse, VerifyResponse, RevokeRequest, RevokeResponse, NegotiableField } from "@x490/protocol";
+import type { ContractTerms } from "@x490/core";
 import type { TenantStore, TemplateStore, AgreementStore, RequirementsStore, WebhookStore } from "./store.js";
 import type { Tenant, RegisteredTemplate, WebhookEventType } from "./types.js";
 import { rateLimit } from "./rate-limit.js";
@@ -151,6 +152,7 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
       content: tmpl.content,
       title: tmpl.meta.title,
       description: tmpl.meta.description,
+      ...(tmpl.terms ? { terms: tmpl.terms } : {}),
     });
   });
 
@@ -266,19 +268,21 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
       content: string;
       title?: string;
       description?: string;
+      terms?: ContractTerms;
     }>();
     if (!body.content?.trim()) return c.json({ error: "content is required" }, 400);
 
     const meta: RegisteredTemplate["meta"] = {};
     if (body.title !== undefined) meta.title = body.title;
     if (body.description !== undefined) meta.description = body.description;
-    const tmpl = await templates.register(tenant.tenantId, body.content, meta);
+    const tmpl = await templates.register(tenant.tenantId, body.content, meta, body.terms);
     return c.json(
       {
         hash: tmpl.hash,
         url: `${baseUrl}/v1/templates/${tmpl.hash}`,
         title: tmpl.meta.title,
         description: tmpl.meta.description,
+        ...(tmpl.terms ? { terms: tmpl.terms } : {}),
       },
       201,
     );

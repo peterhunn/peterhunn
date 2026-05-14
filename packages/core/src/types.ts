@@ -67,3 +67,26 @@ export interface ContractResponse<TResult = unknown> {
   emit?: ContractEvent[];
   error?: string;
 }
+
+/**
+ * Structured representation of key legal terms extracted from a contract template.
+ * Operators supply this at template registration time; the facilitator stores it
+ * alongside the template so callers can filter and compare agreements programmatically
+ * without re-parsing the natural-language text.
+ *
+ * All fields are optional — supply only the terms relevant to your template.
+ * Use `extras` for clauses that don't fit the standard fields.
+ */
+export interface ContractTerms {
+  liabilityCap?:       { amount: number; currency: string };
+  governingLaw?:       string;
+  jurisdiction?:       string;
+  terminationNotice?:  { days: number };
+  paymentTerms?:       { netDays: number };
+  autoRenewal?:        boolean;
+  disputeResolution?:  "arbitration" | "litigation" | "mediation";
+  indemnification?:    "mutual" | "unilateral" | "none";
+  confidentiality?:    "mutual" | "unilateral" | "none";
+  /** Operator-defined clauses not covered by the standard fields. */
+  extras?:             Record<string, unknown>;
+}

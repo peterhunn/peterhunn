@@ -160,6 +160,7 @@ interface TemplateRow {
   content: string;
   title: string | null;
   description: string | null;
+  terms: import("@x490/core").ContractTerms | null;
   created_at: Date;
 }
 
@@ -172,6 +173,7 @@ function rowToTemplate(r: TemplateRow): RegisteredTemplate {
     tenantId: r.tenant_id,
     content: r.content,
     meta,
+    ...(r.terms ? { terms: r.terms } : {}),
     createdAt: Math.floor(r.created_at.getTime() / 1000),
   };
 }
@@ -183,14 +185,20 @@ export class PostgresTemplateStore implements TemplateStore {
     tenantId: string,
     content: string,
     meta: RegisteredTemplate["meta"],
+    terms?: RegisteredTemplate["terms"],
   ): Promise<RegisteredTemplate> {
     const hash = await sha256hex(content);
     const rows = await this.sql<TemplateRow[]>`
-      INSERT INTO x490_templates (hash, tenant_id, content, title, description)
-      VALUES (${hash}, ${tenantId}, ${content}, ${meta.title ?? null}, ${meta.description ?? null})
+      INSERT INTO x490_templates (hash, tenant_id, content, title, description, terms)
+      VALUES (
+        ${hash}, ${tenantId}, ${content},
+        ${meta.title ?? null}, ${meta.description ?? null},
+        ${terms ? this.sql.json(JSON.parse(JSON.stringify(terms)) as import("postgres").JSONValue) : null}
+      )
       ON CONFLICT (hash) DO UPDATE
-        SET title = COALESCE(EXCLUDED.title, x490_templates.title),
-            description = COALESCE(EXCLUDED.description, x490_templates.description)
+        SET title       = COALESCE(EXCLUDED.title, x490_templates.title),
+            description = COALESCE(EXCLUDED.description, x490_templates.description),
+            terms       = COALESCE(EXCLUDED.terms, x490_templates.terms)
       RETURNING *
     `;
     return rowToTemplate(rows[0]!);
