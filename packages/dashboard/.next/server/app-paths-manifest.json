@@ -1,8 +1,11 @@
 {
   "/_not-found/page": "app/_not-found/page.js",
-  "/login/page": "app/login/page.js",
   "/page": "app/page.js",
-  "/(dashboard)/agreements/page": "app/(dashboard)/agreements/page.js",
+  "/login/page": "app/login/page.js",
+  "/api/facilitator/[...path]/route": "app/api/facilitator/[...path]/route.js",
+  "/api/auth/[auth0]/route": "app/api/auth/[auth0]/route.js",
+  "/(dashboard)/templates/page": "app/(dashboard)/templates/page.js",
   "/(dashboard)/keys/page": "app/(dashboard)/keys/page.js",
-  "/(dashboard)/webhooks/page": "app/(dashboard)/webhooks/page.js"
+  "/(dashboard)/webhooks/page": "app/(dashboard)/webhooks/page.js",
+  "/(dashboard)/agreements/page": "app/(dashboard)/agreements/page.js"
 }

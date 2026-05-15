@@ -1,1 +1,1 @@
-{"/_not-found/page":"/_not-found","/login/page":"/login","/page":"/","/(dashboard)/agreements/page":"/agreements","/(dashboard)/keys/page":"/keys","/(dashboard)/webhooks/page":"/webhooks"}
+{"/_not-found/page":"/_not-found","/page":"/","/login/page":"/login","/api/facilitator/[...path]/route":"/api/facilitator/[...path]","/api/auth/[auth0]/route":"/api/auth/[auth0]","/(dashboard)/templates/page":"/templates","/(dashboard)/keys/page":"/keys","/(dashboard)/webhooks/page":"/webhooks","/(dashboard)/agreements/page":"/agreements"}
