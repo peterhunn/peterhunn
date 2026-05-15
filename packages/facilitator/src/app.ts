@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { bodyLimit } from "hono/body-limit";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { signToken, verifyToken } from "@x490/protocol";
 import type { AcceptRequest, AcceptResponse, VerifyResponse, RevokeRequest, RevokeResponse, NegotiableField } from "@x490/protocol";
@@ -25,6 +26,20 @@ export interface FacilitatorAppOptions {
 }
 
 type AuthEnv = { Variables: { tenant: Tenant } };
+
+const MIN_EXPIRES_IN = 60;          // 1 minute
+const MAX_EXPIRES_IN = 31_536_000;  // 1 year
+
+// In-process idempotency cache for the accept endpoint.
+// Key: `${tenantId}:${idempotencyKey}` — scoped per tenant to prevent cross-tenant replay.
+// Swap the Map for Redis in multi-instance deployments.
+const idempotencyCache = new Map<string, { response: AcceptResponse; expiresAt: number }>();
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of idempotencyCache) {
+    if (v.expiresAt < now) idempotencyCache.delete(k);
+  }
+}, 60_000).unref();
 
 /**
  * Creates the facilitator Hono app.
@@ -82,8 +97,18 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     cors({
       origin: "*",
       allowMethods: ["GET", "POST", "DELETE", "OPTIONS"],
-      allowHeaders: ["Content-Type", "X-API-Key", "Authorization"],
+      allowHeaders: ["Content-Type", "X-API-Key", "Authorization", "Idempotency-Key"],
       maxAge: 86400,
+    }),
+  );
+
+  // ── Body size limit ───────────────────────────────────────────────────────────
+  // 1 MB is generous for any legitimate API payload (template content, partyData, etc.)
+  app.use(
+    "/v1/*",
+    bodyLimit({
+      maxSize: 1 * 1024 * 1024,
+      onError: (c) => c.json({ error: "Request body too large (max 1 MB)" }, 413),
     }),
   );
 
@@ -169,8 +194,16 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     const body = await c.req.json<AcceptRequest>();
 
     if (!body.templateHash) return c.json({ error: "templateHash required" }, 400);
-    if (!body.partyData || typeof body.partyData !== "object") {
-      return c.json({ error: "partyData required" }, 400);
+    if (!body.partyData || typeof body.partyData !== "object" || Array.isArray(body.partyData)) {
+      return c.json({ error: "partyData must be a non-null object" }, 400);
+    }
+
+    // Validate all partyData values are strings (schema boundary enforcement).
+    const nonStringFields = Object.entries(body.partyData)
+      .filter(([, v]) => typeof v !== "string")
+      .map(([k]) => k);
+    if (nonStringFields.length > 0) {
+      return c.json({ error: `partyData values must be strings; invalid fields: ${nonStringFields.join(", ")}` }, 400);
     }
 
     const tmpl = await templates.findByHash(body.templateHash);
@@ -181,6 +214,26 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     // Look up the operator-configured TTL; fall back to 1 hour.
     const reqConfig = await requirements.findByTemplate(tenantId, body.templateHash);
     const expiresIn = reqConfig?.expiresIn ?? 3600;
+
+    // Validate that all operator-declared required fields are present.
+    if (reqConfig?.requiredPartyFields?.length) {
+      const missing = reqConfig.requiredPartyFields.filter(
+        (f) => !(f in body.partyData) || (body.partyData[f] as string).trim() === "",
+      );
+      if (missing.length > 0) {
+        return c.json({ error: `Missing required party fields: ${missing.join(", ")}` }, 400);
+      }
+    }
+
+    // Idempotency: return the cached response for duplicate requests.
+    const idempotencyKey = c.req.header("Idempotency-Key");
+    if (idempotencyKey) {
+      const cacheKey = `${tenantId}:${idempotencyKey}`;
+      const cached = idempotencyCache.get(cacheKey);
+      if (cached && cached.expiresAt > Date.now()) {
+        return c.json(cached.response, 200);
+      }
+    }
 
     const contractId = crypto.randomUUID();
     const now = Math.floor(Date.now() / 1000);
@@ -232,6 +285,14 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     }
 
     const response: AcceptResponse = { status: "accepted", contractId, token };
+
+    if (idempotencyKey) {
+      idempotencyCache.set(`${tenantId}:${idempotencyKey}`, {
+        response,
+        expiresAt: Date.now() + 24 * 60 * 60 * 1000,
+      });
+    }
+
     return c.json(response, 200);
   });
 
@@ -320,6 +381,17 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
       jurisdiction?: string;
       governingLaw?: string;
     }>();
+
+    if (
+      !Number.isInteger(body.expiresIn) ||
+      body.expiresIn < MIN_EXPIRES_IN ||
+      body.expiresIn > MAX_EXPIRES_IN
+    ) {
+      return c.json(
+        { error: `expiresIn must be an integer between ${MIN_EXPIRES_IN} and ${MAX_EXPIRES_IN} seconds` },
+        400,
+      );
+    }
 
     const tmpl = await templates.findByHash(body.templateHash);
     if (!tmpl) return c.json({ error: "Template not found. Register it first with POST /v1/templates." }, 404);
