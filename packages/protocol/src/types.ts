@@ -41,6 +41,8 @@ export interface ContractRequirements {
   governingLaw?: string;
   /** POST here to accept or propose modified terms */
   acceptEndpoint: string;
+  /** POST here to negotiate specific terms before accepting */
+  negotiateEndpoint?: string;
   /** Optional facilitator endpoint for offline-capable servers to delegate verification */
   verifyEndpoint?: string;
   /** POST here to revoke an agreement (e.g. on termination or breach) */

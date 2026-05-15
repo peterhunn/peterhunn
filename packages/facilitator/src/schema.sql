@@ -57,9 +57,14 @@ CREATE TABLE IF NOT EXISTS x490_requirements (
   resource             TEXT     NOT NULL,
   expires_in           INT      NOT NULL,
   required_party_fields TEXT[]  NOT NULL DEFAULT '{}',
+  negotiable           BOOLEAN  NOT NULL DEFAULT false,
+  negotiable_fields    JSONB    NOT NULL DEFAULT '[]',
   created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (tenant_id, template_hash, resource)
 );
+-- Idempotent migrations for deployments that predate negotiable columns.
+ALTER TABLE x490_requirements ADD COLUMN IF NOT EXISTS negotiable BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE x490_requirements ADD COLUMN IF NOT EXISTS negotiable_fields JSONB NOT NULL DEFAULT '[]';
 
 -- Agreements: one row per accepted contract.
 CREATE TABLE IF NOT EXISTS x490_agreements (

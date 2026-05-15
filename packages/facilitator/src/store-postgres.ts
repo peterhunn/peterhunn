@@ -210,6 +210,40 @@ export class PostgresTemplateStore implements TemplateStore {
     `;
     return rows[0] ? rowToTemplate(rows[0]) : null;
   }
+
+  async listByTenant(
+    tenantId: string,
+    opts: { limit?: number; after?: string } = {},
+  ): Promise<{ templates: RegisteredTemplate[]; nextCursor: string | null }> {
+    const limit = Math.min(opts.limit ?? 50, 200);
+
+    let rows: TemplateRow[];
+    if (opts.after) {
+      const [afterTs, afterHash] = decodeCursor(opts.after);
+      const afterDate = new Date(afterTs * 1000);
+      rows = await this.sql<TemplateRow[]>`
+        SELECT * FROM x490_templates
+        WHERE tenant_id = ${tenantId}
+          AND (created_at < ${afterDate} OR (created_at = ${afterDate} AND hash > ${afterHash}))
+        ORDER BY created_at DESC, hash ASC
+        LIMIT ${limit}
+      `;
+    } else {
+      rows = await this.sql<TemplateRow[]>`
+        SELECT * FROM x490_templates
+        WHERE tenant_id = ${tenantId}
+        ORDER BY created_at DESC, hash ASC
+        LIMIT ${limit}
+      `;
+    }
+
+    const templates = rows.map(rowToTemplate);
+    const last = templates[templates.length - 1];
+    const nextCursor = templates.length === limit && last
+      ? encodeCursor(last.createdAt, last.hash)
+      : null;
+    return { templates, nextCursor };
+  }
 }
 
 // ── Requirements store ─────────────────────────────────────────────────────────
@@ -221,10 +255,13 @@ interface RequirementsRow {
   resource: string;
   expires_in: number;
   required_party_fields: string[];
+  negotiable: boolean;
+  negotiable_fields: import("@x490/protocol").NegotiableField[] | null;
   created_at: Date;
 }
 
 function rowToRequirements(r: RequirementsRow): RequirementsConfig {
+  const nf = r.negotiable_fields;
   return {
     id: r.id,
     tenantId: r.tenant_id,
@@ -232,6 +269,8 @@ function rowToRequirements(r: RequirementsRow): RequirementsConfig {
     resource: r.resource,
     expiresIn: r.expires_in,
     requiredPartyFields: r.required_party_fields,
+    negotiable: r.negotiable,
+    ...(nf && nf.length > 0 ? { negotiableFields: nf } : {}),
     createdAt: Math.floor(r.created_at.getTime() / 1000),
   };
 }
@@ -240,18 +279,25 @@ export class PostgresRequirementsStore implements RequirementsStore {
   constructor(private readonly sql: Sql) {}
 
   async upsert(config: Omit<RequirementsConfig, "id" | "createdAt">): Promise<RequirementsConfig> {
+    const nfJson = config.negotiableFields
+      ? this.sql.json(JSON.parse(JSON.stringify(config.negotiableFields)) as import("postgres").JSONValue)
+      : this.sql.json([] as import("postgres").JSONValue);
     const rows = await this.sql<RequirementsRow[]>`
-      INSERT INTO x490_requirements (tenant_id, template_hash, resource, expires_in, required_party_fields)
+      INSERT INTO x490_requirements (tenant_id, template_hash, resource, expires_in, required_party_fields, negotiable, negotiable_fields)
       VALUES (
         ${config.tenantId},
         ${config.templateHash},
         ${config.resource},
         ${config.expiresIn},
-        ${this.sql.array(config.requiredPartyFields)}
+        ${this.sql.array(config.requiredPartyFields)},
+        ${config.negotiable ?? false},
+        ${nfJson}
       )
       ON CONFLICT (tenant_id, template_hash, resource) DO UPDATE
-        SET expires_in           = EXCLUDED.expires_in,
-            required_party_fields = EXCLUDED.required_party_fields
+        SET expires_in            = EXCLUDED.expires_in,
+            required_party_fields = EXCLUDED.required_party_fields,
+            negotiable            = EXCLUDED.negotiable,
+            negotiable_fields     = EXCLUDED.negotiable_fields
       RETURNING *
     `;
     return rowToRequirements(rows[0]!);

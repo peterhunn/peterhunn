@@ -57,6 +57,8 @@ export interface RequirementsConfig {
   resource: string;
   expiresIn: number;
   requiredPartyFields: string[];
+  negotiable?: boolean;
+  negotiableFields?: import("@x490/protocol").NegotiableField[];
   createdAt: number;
 }
 

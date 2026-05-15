@@ -79,6 +79,23 @@ export async function deleteWebhook(webhookId: string): Promise<void> {
   if (!res.ok) throw new Error(await res.text());
 }
 
+export async function listTemplates(
+  params: { limit?: number; after?: string } = {},
+): Promise<{ templates: Template[]; nextCursor: string | null }> {
+  const qs = new URLSearchParams();
+  if (params.limit) qs.set("limit", String(params.limit));
+  if (params.after) qs.set("after", params.after);
+  const res = await apiFetch(`/v1/templates${qs.toString() ? `?${qs}` : ""}`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function listContractEvents(contractId: string): Promise<{ events: ContractEvent[] }> {
+  const res = await apiFetch(`/v1/agreements/${contractId}/events`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
 export interface Agreement {
   contractId: string;
   tenantId: string;
@@ -106,5 +123,37 @@ export interface Webhook {
   url: string;
   events: string[];
   active: boolean;
+  createdAt: number;
+}
+
+export interface ContractTerms {
+  liabilityCap?: string;
+  governingLaw?: string;
+  jurisdiction?: string;
+  terminationNotice?: string;
+  paymentTerms?: string;
+  autoRenewal?: boolean;
+  disputeResolution?: string;
+  indemnification?: string;
+  confidentiality?: string;
+  extras?: Record<string, unknown>;
+}
+
+export interface Template {
+  hash: string;
+  url: string;
+  title?: string;
+  description?: string;
+  terms?: ContractTerms;
+  createdAt: number;
+}
+
+export interface ContractEvent {
+  eventId: string;
+  contractId: string;
+  type: string;
+  party?: string;
+  payload: Record<string, unknown>;
+  parentEventIds: string[];
   createdAt: number;
 }

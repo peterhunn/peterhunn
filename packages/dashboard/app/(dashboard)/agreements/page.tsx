@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useTenant } from "@/lib/tenant-context";
-import { listAgreements, revokeAgreement, type Agreement } from "@/lib/api";
+import { listAgreements, revokeAgreement, listContractEvents, type Agreement, type ContractEvent } from "@/lib/api";
 import { Badge } from "@/components/badge";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 
@@ -23,6 +23,11 @@ export default function AgreementsPage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<string | null>(null);
   const [revoking, setRevoking] = useState(false);
+
+  const [eventsOpen, setEventsOpen] = useState(false);
+  const [eventsContractId, setEventsContractId] = useState<string | null>(null);
+  const [events, setEvents] = useState<ContractEvent[]>([]);
+  const [eventsLoading, setEventsLoading] = useState(false);
 
   const load = useCallback(async (resource: string, cursor?: string) => {
     try {
@@ -62,6 +67,20 @@ export default function AgreementsPage() {
   function openRevoke(contractId: string) {
     setRevokeTarget(contractId);
     setConfirmOpen(true);
+  }
+
+  async function openEvents(contractId: string) {
+    setEventsContractId(contractId);
+    setEventsOpen(true);
+    setEventsLoading(true);
+    try {
+      const data = await listContractEvents(contractId);
+      setEvents(data.events);
+    } catch {
+      setEvents([]);
+    } finally {
+      setEventsLoading(false);
+    }
   }
 
   async function handleRevoke() {
@@ -124,7 +143,7 @@ export default function AgreementsPage() {
             <table className="min-w-full text-sm divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  {["Party", "Resource", "Issued", "Expires", "Status", ""].map((h) => (
+                  {["Party", "Resource", "Issued", "Expires", "Status", "Actions"].map((h) => (
                     <th key={h} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       {h}
                     </th>
@@ -149,7 +168,13 @@ export default function AgreementsPage() {
                         <Badge variant="green">Active</Badge>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-right">
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
+                      <button
+                        onClick={() => openEvents(a.contractId)}
+                        className="text-xs text-indigo-600 hover:text-indigo-800 font-medium mr-3"
+                      >
+                        Events
+                      </button>
                       {!a.revokedAt && (
                         <button
                           onClick={() => openRevoke(a.contractId)}
@@ -189,6 +214,69 @@ export default function AgreementsPage() {
       {revoking && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/10">
           <span className="text-sm text-gray-600">Revoking…</span>
+        </div>
+      )}
+
+      {eventsOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"
+          onClick={() => setEventsOpen(false)}
+        >
+          <div
+            className="bg-white rounded-xl shadow-lg w-full max-w-lg max-h-[80vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+              <div>
+                <p className="font-semibold text-gray-900 text-sm">Contract Events</p>
+                <p className="font-mono text-xs text-gray-400 mt-0.5 truncate">{eventsContractId}</p>
+              </div>
+              <button
+                onClick={() => setEventsOpen(false)}
+                className="text-gray-400 hover:text-gray-600 text-lg leading-none"
+              >
+                ×
+              </button>
+            </div>
+            <div className="overflow-y-auto flex-1 p-4">
+              {eventsLoading ? (
+                <p className="text-sm text-gray-500">Loading events…</p>
+              ) : events.length === 0 ? (
+                <p className="text-sm text-gray-400 italic">No events recorded.</p>
+              ) : (
+                <ol className="space-y-3">
+                  {events.map((ev, i) => (
+                    <li key={ev.eventId} className="flex gap-3">
+                      <div className="flex flex-col items-center">
+                        <div className="w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-medium shrink-0">
+                          {i + 1}
+                        </div>
+                        {i < events.length - 1 && <div className="w-px flex-1 bg-gray-200 mt-1" />}
+                      </div>
+                      <div className="pb-3 min-w-0">
+                        <p className="text-sm font-medium text-gray-800">{ev.type}</p>
+                        {ev.party && <p className="text-xs text-gray-500">Party: {ev.party}</p>}
+                        <p className="text-xs text-gray-400">{new Date(ev.createdAt * 1000).toLocaleString()}</p>
+                        {ev.parentEventIds.length > 0 && (
+                          <p className="text-xs text-gray-400 font-mono mt-0.5 truncate">
+                            ↑ {ev.parentEventIds[0]}
+                          </p>
+                        )}
+                        {Object.keys(ev.payload).length > 0 && (
+                          <details className="mt-1">
+                            <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600">Payload</summary>
+                            <pre className="text-xs text-gray-600 bg-gray-50 rounded p-2 mt-1 overflow-x-auto">
+                              {JSON.stringify(ev.payload, null, 2)}
+                            </pre>
+                          </details>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

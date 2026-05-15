@@ -43,6 +43,10 @@ export interface TemplateStore {
     terms?: RegisteredTemplate["terms"],
   ): Promise<RegisteredTemplate>;
   findByHash(hash: string): Promise<RegisteredTemplate | null>;
+  listByTenant(tenantId: string, opts?: { limit?: number; after?: string }): Promise<{
+    templates: RegisteredTemplate[];
+    nextCursor: string | null;
+  }>;
 }
 
 export interface RequirementsStore {
@@ -179,6 +183,30 @@ export class InMemoryTemplateStore implements TemplateStore {
 
   async findByHash(hash: string): Promise<RegisteredTemplate | null> {
     return this.templates.get(hash) ?? null;
+  }
+
+  async listByTenant(
+    tenantId: string,
+    opts: { limit?: number; after?: string } = {},
+  ): Promise<{ templates: RegisteredTemplate[]; nextCursor: string | null }> {
+    const limit = Math.min(opts.limit ?? 50, 200);
+    let records = [...this.templates.values()]
+      .filter((t) => t.tenantId === tenantId)
+      .sort((a, b) => b.createdAt - a.createdAt || a.hash.localeCompare(b.hash));
+
+    if (opts.after) {
+      const [afterTs, afterHash] = decodeCursor(opts.after);
+      records = records.filter(
+        (t) => t.createdAt < afterTs || (t.createdAt === afterTs && t.hash > afterHash),
+      );
+    }
+
+    const page = records.slice(0, limit);
+    const last = page[page.length - 1];
+    const nextCursor = page.length === limit && last
+      ? encodeCursor(last.createdAt, last.hash)
+      : null;
+    return { templates: page, nextCursor };
   }
 }
 

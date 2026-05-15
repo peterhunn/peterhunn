@@ -7,6 +7,7 @@ import { TenantProvider } from "@/lib/tenant-context";
 
 const navItems = [
   { href: "/agreements", label: "Agreements" },
+  { href: "/templates", label: "Templates" },
   { href: "/keys", label: "API Keys" },
   { href: "/webhooks", label: "Webhooks" },
 ];

@@ -296,6 +296,109 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     return c.json(response, 200);
   });
 
+  // ── Negotiate endpoint (agent-facing, public, rate limited) ──────────────
+
+  app.post("/v1/:tenantId/negotiate", acceptLimiter, async (c) => {
+    const tenantId = c.req.param("tenantId") ?? "";
+    const tenant = await tenants.findById(tenantId);
+    if (!tenant) return c.json({ error: "Tenant not found" }, 404);
+
+    const body = await c.req.json<AcceptRequest>();
+    if (!body.templateHash) return c.json({ error: "templateHash required" }, 400);
+    if (!body.partyData || typeof body.partyData !== "object" || Array.isArray(body.partyData)) {
+      return c.json({ error: "partyData must be a non-null object" }, 400);
+    }
+
+    const tmpl = await templates.findByHash(body.templateHash);
+    if (!tmpl || tmpl.tenantId !== tenantId) {
+      return c.json({ error: "Template not found for this tenant" }, 404);
+    }
+
+    const reqConfig = await requirements.findByTemplate(tenantId, body.templateHash);
+    if (!reqConfig?.negotiable) {
+      return c.json({ error: "This contract is not negotiable" }, 400);
+    }
+
+    // Validate each proposed term against the negotiableFields allow-list.
+    const proposed = body.negotiationTerms ?? {};
+    const negotiableFields = reqConfig.negotiableFields ?? [];
+    const rejectedFields: string[] = [];
+
+    for (const [field, value] of Object.entries(proposed)) {
+      const def = negotiableFields.find((f) => f.field === field);
+      if (!def) { rejectedFields.push(field); continue; }
+      if (def.allowedValues && !def.allowedValues.includes(String(value))) {
+        rejectedFields.push(field);
+      }
+    }
+
+    if (rejectedFields.length > 0) {
+      const counterOffer = buildRequirements(
+        {
+          templateHash: body.templateHash,
+          requiredPartyFields: reqConfig.requiredPartyFields,
+          resource: reqConfig.resource,
+          description: "",
+          expiresIn: reqConfig.expiresIn,
+          negotiable: reqConfig.negotiable ?? false,
+          ...(reqConfig.negotiableFields ? { negotiableFields: reqConfig.negotiableFields } : {}),
+        },
+        tenantId,
+        body.templateHash,
+        baseUrl,
+      );
+      const response: AcceptResponse = { status: "counter_offer", contractId: "", token: "", counterOffer };
+      return c.json({ ...response, rejectedFields }, 200);
+    }
+
+    // All proposed terms are acceptable — validate partyData and issue token.
+    const nonStringFields = Object.entries(body.partyData)
+      .filter(([, v]) => typeof v !== "string")
+      .map(([k]) => k);
+    if (nonStringFields.length > 0) {
+      return c.json({ error: `partyData values must be strings; invalid fields: ${nonStringFields.join(", ")}` }, 400);
+    }
+    if (reqConfig.requiredPartyFields?.length) {
+      const missing = reqConfig.requiredPartyFields.filter(
+        (f) => !(f in body.partyData) || (body.partyData[f] as string).trim() === "",
+      );
+      if (missing.length > 0) {
+        return c.json({ error: `Missing required party fields: ${missing.join(", ")}` }, 400);
+      }
+    }
+
+    const contractId = crypto.randomUUID();
+    const now = Math.floor(Date.now() / 1000);
+    const partyId = body.partyData["partyId"] ?? body.partyData["name"] ?? contractId;
+    const token = await signToken(
+      { contractId, templateHash: body.templateHash, partyId, resource: "*", iat: now, exp: now + reqConfig.expiresIn },
+      tenant.hmacSecret,
+    );
+
+    await agreements.record({
+      contractId, tenantId, templateHash: body.templateHash, partyId,
+      resource: "*", partyData: body.partyData, token,
+      issuedAt: now, expiresAt: now + reqConfig.expiresIn,
+    });
+
+    void deliverWebhookEvent(webhooks, tenantId, "agreement.created", {
+      contractId, tenantId, templateHash: body.templateHash, partyId,
+      resource: "*", partyData: body.partyData, token, issuedAt: now, expiresAt: now + reqConfig.expiresIn,
+    });
+
+    if (events) {
+      void events.append({
+        eventId: crypto.randomUUID(),
+        contractId, tenantId, type: "agreement.accepted", party: partyId,
+        payload: { templateHash: body.templateHash, partyData: body.partyData, negotiationTerms: proposed },
+        parentEventIds: [], createdAt: now,
+      });
+    }
+
+    const response: AcceptResponse = { status: "accepted", contractId, token };
+    return c.json(response, 200);
+  });
+
   // ── Verify endpoint (server-facing, public, rate limited) ─────────────────
 
   const verifyLimiter = rateLimit({ windowMs: 60_000, max: 120 });
@@ -404,10 +507,35 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
       resource: body.resource,
       expiresIn: body.expiresIn,
       requiredPartyFields: body.requiredPartyFields,
+      negotiable: body.negotiable ?? false,
+      ...(body.negotiableFields ? { negotiableFields: body.negotiableFields } : {}),
     });
 
     const reqs = buildRequirements(body, tenant.tenantId, body.templateHash, baseUrl);
     return c.json(reqs, 200);
+  });
+
+  // ── Template listing (auth required, paginated) ───────────────────────────
+
+  authed.get("/v1/templates", async (c) => {
+    const tenant = c.get("tenant");
+    const limit = Math.min(Number(c.req.query("limit") ?? "50"), 200);
+    const after = c.req.query("after");
+    const { templates: records, nextCursor } = await templates.listByTenant(tenant.tenantId, {
+      limit,
+      ...(after ? { after } : {}),
+    });
+    return c.json({
+      templates: records.map((t) => ({
+        hash: t.hash,
+        url: `${baseUrl}/v1/templates/${t.hash}`,
+        title: t.meta.title,
+        description: t.meta.description,
+        ...(t.terms ? { terms: t.terms } : {}),
+        createdAt: t.createdAt,
+      })),
+      nextCursor,
+    });
   });
 
   // ── Agreement listing (auth required, paginated) ───────────────────────────
@@ -615,6 +743,7 @@ function buildRequirements(
     templateHash,
     requiredPartyFields: opts.requiredPartyFields,
     acceptEndpoint: `${baseUrl}/v1/${tenantId}/accept`,
+    negotiateEndpoint: `${baseUrl}/v1/${tenantId}/negotiate`,
     verifyEndpoint: `${baseUrl}/v1/${tenantId}/verify`,
     revokeEndpoint: `${baseUrl}/v1/${tenantId}/revoke`,
     expiresIn: opts.expiresIn,
