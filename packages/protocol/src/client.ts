@@ -8,8 +8,15 @@ import { decodeToken } from "./token.js";
 import { b64decode } from "./codec.js";
 
 export interface ContractClientOptions {
-  /** Static party data sent in AcceptRequest.partyData */
-  partyData: Record<string, string>;
+  /**
+   * Party data sent in AcceptRequest.partyData.
+   * Pass a function to resolve fields dynamically per-requirements — useful when
+   * different contracts ask for different identity fields, or when the agent's
+   * credentials are fetched at runtime.
+   */
+  partyData:
+    | Record<string, string>
+    | ((requirements: ContractRequirements) => Record<string, string> | Promise<Record<string, string>>);
   /**
    * Called when a server counter-offers. Return modified terms to propose back,
    * or undefined to accept the counter-offer as-is.
@@ -107,14 +114,22 @@ export class ContractClient {
       const negotiationTerms =
         current.negotiable ? await this.opts.onNegotiation?.(current) : undefined;
 
+      const partyData = typeof this.opts.partyData === "function"
+        ? await this.opts.partyData(current)
+        : this.opts.partyData;
+
       const body: AcceptRequest = {
         templateId: current.templateId,
         templateHash: current.templateHash,
-        partyData: this.opts.partyData,
+        partyData,
         ...(negotiationTerms !== undefined ? { negotiationTerms } : {}),
       };
 
-      const res = await fetch(current.acceptEndpoint, {
+      // Use negotiateEndpoint when proposing terms and the server exposes one.
+      const useNegotiate = negotiationTerms !== undefined && current.negotiateEndpoint !== undefined;
+      const endpoint = useNegotiate ? current.negotiateEndpoint! : current.acceptEndpoint;
+
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

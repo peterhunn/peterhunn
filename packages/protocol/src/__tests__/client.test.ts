@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { ContractClient } from "../client.js";
 import { signToken } from "../token.js";
 import { b64encode } from "../codec.js";
-import type { ContractRequirements, AcceptResponse, X402Response } from "../types.js";
+import type { ContractRequirements, AcceptRequest, AcceptResponse, X402Response } from "../types.js";
 
 const SECRET = "client-test-secret";
 const NOW = Math.floor(Date.now() / 1000);
@@ -284,5 +284,122 @@ describe("ContractClient template hash verification", () => {
     await client.establishAgreement(req);
     await client.establishAgreement(req);
     assert.equal(templateFetches, 1);
+  });
+});
+
+describe("ContractClient negotiateEndpoint routing", () => {
+  const negotiableReqs: ContractRequirements = {
+    ...requirements,
+    negotiable: true,
+    negotiableFields: [
+      { field: "jurisdiction", allowedValues: ["US", "UK"], description: "Jurisdiction" },
+    ],
+    acceptEndpoint: "https://api.example.com/accept",
+    negotiateEndpoint: "https://api.example.com/negotiate",
+  };
+
+  it("posts to negotiateEndpoint when negotiationTerms are present and endpoint exists", async () => {
+    const token = await freshToken();
+    let hitUrl = "";
+
+    mockFetch(async (url) => {
+      hitUrl = url;
+      const resp: AcceptResponse = { status: "accepted", contractId: "cid-neg", token };
+      return new Response(JSON.stringify(resp), { status: 200 });
+    });
+
+    const client = new ContractClient({
+      partyData: { name: "Test" },
+      skipTemplateVerification: true,
+      onNegotiation: async () => ({ jurisdiction: "US" }),
+    });
+    await client.establishAgreement(negotiableReqs);
+    assert.equal(hitUrl, "https://api.example.com/negotiate");
+  });
+
+  it("falls back to acceptEndpoint when negotiationTerms are absent", async () => {
+    const token = await freshToken();
+    let hitUrl = "";
+
+    mockFetch(async (url) => {
+      hitUrl = url;
+      const resp: AcceptResponse = { status: "accepted", contractId: "cid-acc", token };
+      return new Response(JSON.stringify(resp), { status: 200 });
+    });
+
+    const client = new ContractClient({
+      partyData: { name: "Test" },
+      skipTemplateVerification: true,
+      // No onNegotiation — no negotiationTerms sent
+    });
+    await client.establishAgreement(negotiableReqs);
+    assert.equal(hitUrl, "https://api.example.com/accept");
+  });
+
+  it("uses acceptEndpoint when negotiationTerms are present but no negotiateEndpoint", async () => {
+    const { negotiateEndpoint: _ne, ...reqs } = negotiableReqs;
+    const token = await freshToken();
+    let hitUrl = "";
+
+    mockFetch(async (url) => {
+      hitUrl = url;
+      const resp: AcceptResponse = { status: "accepted", contractId: "cid-a2", token };
+      return new Response(JSON.stringify(resp), { status: 200 });
+    });
+
+    const client = new ContractClient({
+      partyData: { name: "Test" },
+      skipTemplateVerification: true,
+      onNegotiation: async () => ({ jurisdiction: "UK" }),
+    });
+    await client.establishAgreement(reqs);
+    assert.equal(hitUrl, "https://api.example.com/accept");
+  });
+});
+
+describe("ContractClient partyData as function", () => {
+  it("resolves partyData by calling the function with the current requirements", async () => {
+    const token = await freshToken();
+    let capturedBody: AcceptRequest | null = null;
+
+    mockFetch(async (_url, init) => {
+      capturedBody = JSON.parse(init?.body as string) as AcceptRequest;
+      const resp: AcceptResponse = { status: "accepted", contractId: "cid-fn", token };
+      return new Response(JSON.stringify(resp), { status: 200 });
+    });
+
+    const client = new ContractClient({
+      partyData: async (req) => ({ name: "Dynamic Agent", resource: req.resource }),
+      skipTemplateVerification: true,
+    });
+    await client.establishAgreement(requirements);
+
+    assert.ok(capturedBody !== null);
+    assert.equal((capturedBody as AcceptRequest).partyData["name"], "Dynamic Agent");
+    assert.equal((capturedBody as AcceptRequest).partyData["resource"], requirements.resource);
+  });
+
+  it("calls the partyData function once per round even on counter-offers", async () => {
+    const token = await freshToken();
+    const counter: ContractRequirements = { ...requirements };
+    let callCount = 0;
+    let round = 0;
+
+    mockFetch(async () => {
+      round++;
+      if (round === 1) {
+        const resp: AcceptResponse = { status: "counter_offer", contractId: "cid-co", token: "", counterOffer: counter };
+        return new Response(JSON.stringify(resp), { status: 200 });
+      }
+      const resp: AcceptResponse = { status: "accepted", contractId: "cid-ok", token };
+      return new Response(JSON.stringify(resp), { status: 200 });
+    });
+
+    const client = new ContractClient({
+      partyData: async () => { callCount++; return { name: "Test" }; },
+      skipTemplateVerification: true,
+    });
+    await client.establishAgreement(requirements);
+    assert.equal(callCount, 2); // once per round (initial + after counter)
   });
 });
