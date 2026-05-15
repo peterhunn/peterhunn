@@ -10,8 +10,8 @@
  */
 
 import type postgres from "postgres";
-import type { Tenant, TenantApiKey, RegisteredTemplate, AgreementRecord, RequirementsConfig, Webhook, WebhookEventType } from "./types.js";
-import type { TenantStore, TemplateStore, AgreementStore, RequirementsStore, WebhookStore } from "./store.js";
+import type { Tenant, TenantApiKey, RegisteredTemplate, AgreementRecord, RequirementsConfig, Webhook, WebhookEventType, ContractEventRecord } from "./types.js";
+import type { TenantStore, TemplateStore, AgreementStore, RequirementsStore, WebhookStore, EventStore } from "./store.js";
 import { sha256hex, encodeCursor, decodeCursor } from "./store.js";
 
 type Sql = ReturnType<typeof postgres>;
@@ -479,5 +479,68 @@ export class PostgresWebhookStore implements WebhookStore {
         AND ${event} = ANY(events)
     `;
     return rows.map(rowToWebhook);
+  }
+}
+
+// ── Event store ────────────────────────────────────────────────────────────────
+
+interface EventRow {
+  event_id: string;
+  contract_id: string;
+  tenant_id: string;
+  type: string;
+  party: string | null;
+  payload: Record<string, unknown>;
+  parent_event_ids: string[];
+  created_at: Date;
+}
+
+function rowToEvent(r: EventRow): ContractEventRecord {
+  const e: ContractEventRecord = {
+    eventId: r.event_id,
+    contractId: r.contract_id,
+    tenantId: r.tenant_id,
+    type: r.type,
+    payload: r.payload,
+    parentEventIds: r.parent_event_ids,
+    createdAt: Math.floor(r.created_at.getTime() / 1000),
+  };
+  if (r.party !== null) e.party = r.party;
+  return e;
+}
+
+export class PostgresEventStore implements EventStore {
+  constructor(private readonly sql: Sql) {}
+
+  async append(event: ContractEventRecord): Promise<void> {
+    await this.sql`
+      INSERT INTO x490_contract_events
+        (event_id, contract_id, tenant_id, type, party, payload, parent_event_ids)
+      VALUES (
+        ${event.eventId}, ${event.contractId}, ${event.tenantId},
+        ${event.type}, ${event.party ?? null},
+        ${this.sql.json(event.payload as import("postgres").JSONValue)},
+        ${event.parentEventIds}
+      )
+    `;
+  }
+
+  async listByContract(contractId: string): Promise<ContractEventRecord[]> {
+    const rows = await this.sql<EventRow[]>`
+      SELECT * FROM x490_contract_events
+      WHERE contract_id = ${contractId}
+      ORDER BY created_at ASC
+    `;
+    return rows.map(rowToEvent);
+  }
+
+  async latestEventId(contractId: string): Promise<string | null> {
+    const rows = await this.sql<{ event_id: string }[]>`
+      SELECT event_id FROM x490_contract_events
+      WHERE contract_id = ${contractId}
+      ORDER BY created_at DESC
+      LIMIT 1
+    `;
+    return rows[0]?.event_id ?? null;
   }
 }

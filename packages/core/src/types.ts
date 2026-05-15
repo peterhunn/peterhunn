@@ -42,6 +42,8 @@ export interface ContractEvent {
   timestamp: string;       // ISO 8601
   party?: string;          // partyId of the party submitting the event
   payload: Record<string, unknown>;
+  /** IDs of events that causally precede this one. Empty array = root event. */
+  parentEventIds?: string[];
 }
 
 // Mutable state tracked across the contract lifecycle.

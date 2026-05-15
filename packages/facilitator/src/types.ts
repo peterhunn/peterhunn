@@ -75,6 +75,28 @@ export interface AgreementRecord {
   revokedReason?: string;
 }
 
+/**
+ * A contract lifecycle event stored in the event DAG.
+ * Each event references its causal parents via parentEventIds,
+ * forming a directed acyclic graph that captures the full causal history
+ * of an agreement (accepted → amended → revoked, or parallel multi-party events).
+ */
+export interface ContractEventRecord {
+  eventId: string;
+  contractId: string;
+  tenantId: string;
+  /** Event type — protocol-defined ("agreement.accepted", "agreement.revoked")
+   *  or operator-defined custom event types. */
+  type: string;
+  /** partyId of the party that triggered this event, if applicable. */
+  party?: string;
+  payload: Record<string, unknown>;
+  /** DAG edges — IDs of events that causally precede this one.
+   *  Empty array means this is a root event. */
+  parentEventIds: string[];
+  createdAt: number;
+}
+
 // ── Webhooks ───────────────────────────────────────────────────────────────────
 
 export type WebhookEventType = "agreement.created" | "agreement.revoked";

@@ -4,7 +4,7 @@ import { createRemoteJWKSet, jwtVerify } from "jose";
 import { signToken, verifyToken } from "@x490/protocol";
 import type { AcceptRequest, AcceptResponse, VerifyResponse, RevokeRequest, RevokeResponse, NegotiableField } from "@x490/protocol";
 import type { ContractTerms } from "@x490/core";
-import type { TenantStore, TemplateStore, AgreementStore, RequirementsStore, WebhookStore } from "./store.js";
+import type { TenantStore, TemplateStore, AgreementStore, RequirementsStore, WebhookStore, EventStore } from "./store.js";
 import type { Tenant, RegisteredTemplate, WebhookEventType } from "./types.js";
 import { rateLimit } from "./rate-limit.js";
 import { deliverWebhookEvent, assertSafeWebhookUrl } from "./webhook.js";
@@ -15,6 +15,7 @@ export interface FacilitatorAppOptions {
   agreements: AgreementStore;
   requirements: RequirementsStore;
   webhooks: WebhookStore;
+  events?: EventStore;
   /** Public base URL of this facilitator, e.g. "https://facilitator.x490.dev" */
   baseUrl: string;
   /** Auth0 domain, e.g. "your-tenant.auth0.com". Enables JWT auth when set. */
@@ -61,7 +62,7 @@ function getJWKS(domain: string): ReturnType<typeof createRemoteJWKSet> {
 }
 
 export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
-  const { tenants, templates, agreements, requirements, webhooks, baseUrl } = opts;
+  const { tenants, templates, agreements, requirements, webhooks, events, baseUrl } = opts;
 
   const app = new Hono();
   const authed = new Hono<AuthEnv>();
@@ -215,6 +216,21 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
       resource: "*", partyData: body.partyData, token, issuedAt: now, expiresAt: now + expiresIn,
     });
 
+    // Root event in the contract DAG — no parents.
+    const acceptEventId = crypto.randomUUID();
+    if (events) {
+      void events.append({
+        eventId: acceptEventId,
+        contractId,
+        tenantId,
+        type: "agreement.accepted",
+        party: partyId,
+        payload: { templateHash: body.templateHash, partyData: body.partyData },
+        parentEventIds: [],
+        createdAt: now,
+      });
+    }
+
     const response: AcceptResponse = { status: "accepted", contractId, token };
     return c.json(response, 200);
   });
@@ -351,6 +367,17 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     return c.json(safeRecord(record));
   });
 
+  authed.get("/v1/agreements/:contractId/events", async (c) => {
+    const tenant = c.get("tenant");
+    const record = await agreements.findById(c.req.param("contractId"));
+    if (!record || record.tenantId !== tenant.tenantId) {
+      return c.json({ error: "Agreement not found" }, 404);
+    }
+    if (!events) return c.json({ events: [] });
+    const dag = await events.listByContract(c.req.param("contractId"));
+    return c.json({ events: dag });
+  });
+
   // ── Revocation (auth required) ─────────────────────────────────────────────
 
   authed.post("/v1/:tenantId/revoke", async (c) => {
@@ -371,6 +398,20 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     if (ok) {
       const updated = await agreements.findById(contractId);
       if (updated) void deliverWebhookEvent(webhooks, tenant.tenantId, "agreement.revoked", updated);
+
+      if (events) {
+        const parentId = await events.latestEventId(contractId);
+        void events.append({
+          eventId: crypto.randomUUID(),
+          contractId,
+          tenantId: tenant.tenantId,
+          type: "agreement.revoked",
+          party: tenant.tenantId,
+          payload: reason !== undefined ? { reason } : {},
+          parentEventIds: parentId ? [parentId] : [],
+          createdAt: Math.floor(Date.now() / 1000),
+        });
+      }
     }
     const response: RevokeResponse = { revoked: ok, contractId };
     return c.json(response, 200);

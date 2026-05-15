@@ -32,6 +32,8 @@ export interface ContractEvent {
     timestamp: string;
     party?: string;
     payload: Record<string, unknown>;
+    /** IDs of events that causally precede this one. Empty array = root event. */
+    parentEventIds?: string[];
 }
 export interface ContractState {
     stateId: string;

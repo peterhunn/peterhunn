@@ -103,3 +103,20 @@ CREATE TABLE IF NOT EXISTS x490_webhooks (
 CREATE INDEX IF NOT EXISTS idx_x490_webhooks_tenant_active
   ON x490_webhooks(tenant_id, active)
   WHERE active = true;
+
+-- Contract event DAG: each row is a node; parent_event_ids are the incoming edges.
+-- Root events (no parents) have parent_event_ids = '{}' (empty array).
+CREATE TABLE IF NOT EXISTS x490_contract_events (
+  event_id         TEXT        PRIMARY KEY,
+  contract_id      TEXT        NOT NULL REFERENCES x490_agreements(contract_id) ON DELETE CASCADE,
+  tenant_id        UUID        NOT NULL REFERENCES x490_tenants(tenant_id) ON DELETE CASCADE,
+  type             TEXT        NOT NULL,
+  party            TEXT,
+  payload          JSONB       NOT NULL DEFAULT '{}',
+  parent_event_ids TEXT[]      NOT NULL DEFAULT '{}',
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Retrieve all events for an agreement in causal order.
+CREATE INDEX IF NOT EXISTS idx_x490_contract_events_contract
+  ON x490_contract_events(contract_id, created_at ASC);

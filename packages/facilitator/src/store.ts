@@ -1,4 +1,4 @@
-import type { Tenant, TenantApiKey, RegisteredTemplate, AgreementRecord, RequirementsConfig, Webhook, WebhookEventType } from "./types.js";
+import type { Tenant, TenantApiKey, RegisteredTemplate, AgreementRecord, RequirementsConfig, Webhook, WebhookEventType, ContractEventRecord } from "./types.js";
 
 // ── Crypto helpers ─────────────────────────────────────────────────────────────
 
@@ -346,5 +346,36 @@ export class InMemoryWebhookStore implements WebhookStore {
     return [...this.hooks.values()].filter(
       (h) => h.tenantId === tenantId && h.active && h.events.includes(event),
     );
+  }
+}
+
+// ── Event store ────────────────────────────────────────────────────────────────
+
+export interface EventStore {
+  append(event: ContractEventRecord): Promise<void>;
+  listByContract(contractId: string): Promise<ContractEventRecord[]>;
+  /** ID of the most recently appended event for this contract, or null. */
+  latestEventId(contractId: string): Promise<string | null>;
+}
+
+export class InMemoryEventStore implements EventStore {
+  private readonly events = new Map<string, ContractEventRecord>(); // eventId → event
+  private readonly byContract = new Map<string, string[]>();        // contractId → eventIds (ordered)
+
+  async append(event: ContractEventRecord): Promise<void> {
+    this.events.set(event.eventId, event);
+    const list = this.byContract.get(event.contractId) ?? [];
+    list.push(event.eventId);
+    this.byContract.set(event.contractId, list);
+  }
+
+  async listByContract(contractId: string): Promise<ContractEventRecord[]> {
+    const ids = this.byContract.get(contractId) ?? [];
+    return ids.map((id) => this.events.get(id)!);
+  }
+
+  async latestEventId(contractId: string): Promise<string | null> {
+    const ids = this.byContract.get(contractId) ?? [];
+    return ids[ids.length - 1] ?? null;
   }
 }
