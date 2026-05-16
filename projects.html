@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Projects — Variant</title>
+  <meta name="description" content="Programs and initiatives Variant runs for crypto founders and builders.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="nav">
+  <div class="nav-inner">
+    <a href="index.html" class="nav-logo">Variant</a>
+    <nav class="nav-links" id="nav-links">
+      <a href="about.html">About</a>
+      <a href="team.html">Team</a>
+      <a href="portfolio.html">Portfolio</a>
+      <a href="writing.html">Writing</a>
+      <a href="projects.html">Projects</a>
+      <a href="careers.html">Careers</a>
+    </nav>
+    <button class="nav-burger" id="nav-burger" aria-label="Toggle menu">
+      <span></span><span></span><span></span>
+    </button>
+  </div>
+</header>
+
+<main>
+
+  <div class="page-hero">
+    <div class="wrap">
+      <h1 class="page-title">We build programs that help founders succeed.</h1>
+      <p class="page-desc">Beyond capital, we invest in community, education, and infrastructure for the next generation of ownership economy builders.</p>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="wrap">
+
+      <div class="project-card">
+        <h2 class="project-title">Variant Founder Fellowship</h2>
+        <div class="project-desc">
+          <p>A 12-week cohort-based program for early-stage crypto founders. The Fellowship brings together the most promising builders in the ecosystem for an intensive curriculum covering incentive design, community building, protocol architecture, tokenomics, and go-to-market strategy.</p>
+          <p>Fellows gain access to a curated peer network of exceptional founders, hands-on support from the Variant investment and platform teams, and introductions to the broader Variant portfolio ecosystem. The inaugural cohort in Summer 2023 received approximately 400 applications and accepted 24 projects.</p>
+          <p>The Founder Fellowship reflects our belief that the best investors are also teachers — and that helping the entire ecosystem get smarter about building the ownership economy is good for everyone.</p>
+        </div>
+        <span class="project-tag">Applications open annually</span>
+      </div>
+
+      <div class="project-card">
+        <h2 class="project-title">The Variant Network</h2>
+        <div class="project-desc">
+          <p>A peer community for Variant portfolio companies. The Network is designed to help founders do their jobs better by tapping into the collective expertise of the entire Variant portfolio — over 100 companies building across DeFi, infrastructure, consumer crypto, and more.</p>
+          <p>The Network operates through function-specific working groups focused on topics like engineering, legal, marketing, recruiting, and product. Founders can ask questions, share resources, make introductions, and collaborate on shared challenges. It's the kind of peer access that can only exist at the intersection of a large, high-quality portfolio and a genuine community ethos.</p>
+          <p>We think of the Variant Network as a competitive advantage — not just for individual companies, but for the ecosystem as a whole. When great founders can learn from each other, the entire space moves faster.</p>
+        </div>
+        <span class="project-tag">Portfolio companies only</span>
+      </div>
+
+      <div class="project-card">
+        <h2 class="project-title">Portfolio Job Board</h2>
+        <div class="project-desc">
+          <p>An aggregated job board listing open roles across the entire Variant portfolio. Whether you're an engineer, designer, marketer, lawyer, or operator, the Variant portfolio has opportunities at every stage — from pre-seed startups to well-established protocols.</p>
+          <p>We believe that talent is one of the biggest constraints facing crypto companies, and helping the best people find the best opportunities is one of the highest-value things we can do for our portfolio.</p>
+        </div>
+        <a href="https://jobs.variant.fund" target="_blank" rel="noopener" class="project-tag" style="text-decoration: none;">View open roles at jobs.variant.fund →</a>
+      </div>
+
+    </div>
+  </div>
+
+</main>
+
+<footer class="footer">
+  <div class="footer-inner">
+    <div class="footer-left">
+      <span class="footer-logo">Variant</span>
+      <p class="footer-copy">© 2025 Variant Fund Management, LLC</p>
+    </div>
+    <div class="footer-links">
+      <a href="https://twitter.com/variantfund" target="_blank" rel="noopener">Twitter</a>
+      <a href="https://linkedin.com/company/variantfund" target="_blank" rel="noopener">LinkedIn</a>
+      <a href="https://blog.variant.fund" target="_blank" rel="noopener">Blog</a>
+      <a href="values.html">Values</a>
+      <a href="disclosures.html">Disclosures</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+  const burger = document.getElementById('nav-burger');
+  const links  = document.getElementById('nav-links');
+  burger.addEventListener('click', () => links.classList.toggle('open'));
+</script>
+</body>
+</html>
