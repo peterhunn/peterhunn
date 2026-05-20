@@ -357,6 +357,25 @@ describe("ContractClient negotiateEndpoint routing", () => {
   });
 });
 
+describe("ContractClient partyData pre-validation", () => {
+  it("throws when required party fields are missing from partyData", async () => {
+    const reqWithFields: ContractRequirements = {
+      ...requirements,
+      requiredPartyFields: ["name", "org"],
+    };
+
+    const client = new ContractClient({
+      partyData: {},
+      skipTemplateVerification: true,
+    });
+
+    await assert.rejects(
+      () => client.establishAgreement(reqWithFields),
+      /missing required party fields/,
+    );
+  });
+});
+
 describe("ContractClient partyData as function", () => {
   it("resolves partyData by calling the function with the current requirements", async () => {
     const token = await freshToken();

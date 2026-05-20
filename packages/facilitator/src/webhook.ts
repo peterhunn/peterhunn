@@ -1,7 +1,7 @@
 import { promises as dns } from "node:dns";
 import { isIP } from "node:net";
 import type { AgreementRecord, Webhook, WebhookEventType, WebhookPayload } from "./types.js";
-import type { WebhookStore } from "./store.js";
+import type { WebhookStore, WebhookDeliveryStore } from "./store.js";
 
 // ── SSRF protection ────────────────────────────────────────────────────────────
 
@@ -98,7 +98,8 @@ export async function signWebhookPayload(secret: string, body: string): Promise<
  * Deliver a webhook event to all active subscribers.
  *
  * Fire-and-forget per endpoint: failures are logged but never propagate to
- * the caller. Each delivery gets a 10 s timeout.
+ * the caller. Each delivery gets a 10 s timeout. Failed deliveries are retried
+ * twice (after 2 s, then 4 s) before being marked as failed.
  *
  * For high-volume production use, replace with a queue-backed worker.
  */
@@ -107,6 +108,7 @@ export async function deliverWebhookEvent(
   tenantId: string,
   type: WebhookEventType,
   agreement: AgreementRecord,
+  deliveries?: WebhookDeliveryStore,
 ): Promise<void> {
   const hooks = await store.listActiveForEvent(tenantId, type);
   if (hooks.length === 0) return;
@@ -122,33 +124,85 @@ export async function deliverWebhookEvent(
   const body = JSON.stringify(payload);
 
   // Deliver to all hooks concurrently; don't await — callers shouldn't block.
-  void Promise.all(hooks.map((hook) => deliverToHook(hook, body)));
+  void Promise.all(hooks.map((hook) => deliverToHook(hook, body, agreement.contractId, deliveries)));
 }
 
-async function deliverToHook(hook: Webhook, body: string): Promise<void> {
+async function deliverToHook(
+  hook: Webhook,
+  body: string,
+  contractId: string | undefined,
+  deliveries?: WebhookDeliveryStore,
+): Promise<void> {
   try {
     await assertSafeWebhookUrl(hook.url);
   } catch (err) {
     console.error(`Webhook delivery blocked (SSRF): ${hook.webhookId} → ${hook.url}`, err);
     return;
   }
-  try {
-    const signature = await signWebhookPayload(hook.secret, body);
-    const res = await fetch(hook.url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-X490-Signature": signature,
-        "X-X490-Event": body.includes('"type"') ? (JSON.parse(body) as { type: string }).type : "unknown",
-        "X-X490-Delivery": crypto.randomUUID(),
-      },
-      body,
-      signal: AbortSignal.timeout(10_000),
+
+  const deliveryId = crypto.randomUUID();
+  const parsedPayload = JSON.parse(body) as { type?: string };
+  const eventType = parsedPayload.type ?? "unknown";
+
+  // Record the delivery attempt before the first try.
+  if (deliveries) {
+    await deliveries.record({
+      deliveryId,
+      webhookId: hook.webhookId,
+      tenantId: hook.tenantId,
+      eventType,
+      ...(contractId ? { contractId } : {}),
+      attemptCount: 1,
+      createdAt: Math.floor(Date.now() / 1000),
     });
-    if (!res.ok) {
-      console.error(`Webhook delivery failed: ${hook.webhookId} → ${hook.url} (${res.status})`);
-    }
-  } catch (err) {
-    console.error(`Webhook delivery error: ${hook.webhookId} → ${hook.url}`, err);
   }
+
+  const attemptDelivery = async (): Promise<{ ok: boolean; status?: number; error?: string }> => {
+    try {
+      const signature = await signWebhookPayload(hook.secret, body);
+      const res = await fetch(hook.url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-X490-Signature": signature,
+          "X-X490-Event": eventType,
+          "X-X490-Delivery": deliveryId,
+        },
+        body,
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (res.ok) return { ok: true, status: res.status };
+      return { ok: false, status: res.status, error: `HTTP ${res.status}` };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  };
+
+  // First attempt
+  let result = await attemptDelivery();
+  if (result.ok) {
+    if (deliveries) await deliveries.markSuccess(deliveryId, result.status!);
+    return;
+  }
+
+  // Retry after 2 s
+  await new Promise((r) => setTimeout(r, 2000));
+  result = await attemptDelivery();
+  if (result.ok) {
+    if (deliveries) await deliveries.markSuccess(deliveryId, result.status!);
+    return;
+  }
+
+  // Retry after 4 s
+  await new Promise((r) => setTimeout(r, 4000));
+  result = await attemptDelivery();
+  if (result.ok) {
+    if (deliveries) await deliveries.markSuccess(deliveryId, result.status!);
+    return;
+  }
+
+  // All attempts exhausted — mark failure
+  const errMsg = result.error ?? "unknown error";
+  console.error(`Webhook delivery failed after 3 attempts: ${hook.webhookId} → ${hook.url} (${errMsg})`);
+  if (deliveries) await deliveries.markFailure(deliveryId, errMsg, 3);
 }

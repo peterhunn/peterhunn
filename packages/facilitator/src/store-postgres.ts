@@ -10,8 +10,8 @@
  */
 
 import type postgres from "postgres";
-import type { Tenant, TenantApiKey, RegisteredTemplate, AgreementRecord, RequirementsConfig, Webhook, WebhookEventType, ContractEventRecord } from "./types.js";
-import type { TenantStore, TemplateStore, AgreementStore, RequirementsStore, WebhookStore, EventStore } from "./store.js";
+import type { Tenant, TenantApiKey, RegisteredTemplate, AgreementRecord, RequirementsConfig, Webhook, WebhookEventType, ContractEventRecord, PendingContract, WebhookDelivery } from "./types.js";
+import type { TenantStore, TemplateStore, AgreementStore, RequirementsStore, WebhookStore, EventStore, PendingContractStore, WebhookDeliveryStore } from "./store.js";
 import { sha256hex, encodeCursor, decodeCursor } from "./store.js";
 
 type Sql = ReturnType<typeof postgres>;
@@ -150,6 +150,13 @@ export class PostgresTenantStore implements TenantStore {
     `;
     return rowToTenant(rows[0]!);
   }
+
+  async delete(tenantId: string): Promise<boolean> {
+    const result = await this.sql`
+      DELETE FROM x490_tenants WHERE tenant_id = ${tenantId}
+    `;
+    return result.count > 0;
+  }
 }
 
 // ── Template store ─────────────────────────────────────────────────────────────
@@ -257,6 +264,7 @@ interface RequirementsRow {
   required_party_fields: string[];
   negotiable: boolean;
   negotiable_fields: import("@x490/protocol").NegotiableField[] | null;
+  required_parties: number;
   created_at: Date;
 }
 
@@ -271,6 +279,7 @@ function rowToRequirements(r: RequirementsRow): RequirementsConfig {
     requiredPartyFields: r.required_party_fields,
     negotiable: r.negotiable,
     ...(nf && nf.length > 0 ? { negotiableFields: nf } : {}),
+    ...(r.required_parties > 1 ? { requiredParties: r.required_parties } : {}),
     createdAt: Math.floor(r.created_at.getTime() / 1000),
   };
 }
@@ -282,8 +291,9 @@ export class PostgresRequirementsStore implements RequirementsStore {
     const nfJson = config.negotiableFields
       ? this.sql.json(JSON.parse(JSON.stringify(config.negotiableFields)) as import("postgres").JSONValue)
       : this.sql.json([] as import("postgres").JSONValue);
+    const requiredParties = config.requiredParties ?? 1;
     const rows = await this.sql<RequirementsRow[]>`
-      INSERT INTO x490_requirements (tenant_id, template_hash, resource, expires_in, required_party_fields, negotiable, negotiable_fields)
+      INSERT INTO x490_requirements (tenant_id, template_hash, resource, expires_in, required_party_fields, negotiable, negotiable_fields, required_parties)
       VALUES (
         ${config.tenantId},
         ${config.templateHash},
@@ -291,13 +301,15 @@ export class PostgresRequirementsStore implements RequirementsStore {
         ${config.expiresIn},
         ${this.sql.array(config.requiredPartyFields)},
         ${config.negotiable ?? false},
-        ${nfJson}
+        ${nfJson},
+        ${requiredParties}
       )
       ON CONFLICT (tenant_id, template_hash, resource) DO UPDATE
         SET expires_in            = EXCLUDED.expires_in,
             required_party_fields = EXCLUDED.required_party_fields,
             negotiable            = EXCLUDED.negotiable,
-            negotiable_fields     = EXCLUDED.negotiable_fields
+            negotiable_fields     = EXCLUDED.negotiable_fields,
+            required_parties      = EXCLUDED.required_parties
       RETURNING *
     `;
     return rowToRequirements(rows[0]!);
@@ -588,5 +600,150 @@ export class PostgresEventStore implements EventStore {
       LIMIT 1
     `;
     return rows[0]?.event_id ?? null;
+  }
+}
+
+// ── Pending contract store ─────────────────────────────────────────────────────
+
+interface PendingContractRow {
+  contract_id: string;
+  tenant_id: string;
+  template_hash: string;
+  required_parties: number;
+  acceptances: unknown;
+  completed_at: Date | null;
+  created_at: Date;
+}
+
+function rowToPendingContract(r: PendingContractRow): PendingContract {
+  const entry: PendingContract = {
+    contractId: r.contract_id,
+    tenantId: r.tenant_id,
+    templateHash: r.template_hash,
+    requiredParties: r.required_parties,
+    acceptances: r.acceptances as PendingContract["acceptances"],
+    createdAt: Math.floor(r.created_at.getTime() / 1000),
+  };
+  if (r.completed_at !== null) entry.completedAt = Math.floor(r.completed_at.getTime() / 1000);
+  return entry;
+}
+
+export class PostgresPendingContractStore implements PendingContractStore {
+  constructor(private readonly sql: Sql) {}
+
+  async create(entry: Omit<PendingContract, "acceptances" | "createdAt">): Promise<PendingContract> {
+    const rows = await this.sql<PendingContractRow[]>`
+      INSERT INTO x490_pending_contracts (contract_id, tenant_id, template_hash, required_parties)
+      VALUES (${entry.contractId}, ${entry.tenantId}, ${entry.templateHash}, ${entry.requiredParties})
+      RETURNING *
+    `;
+    return rowToPendingContract(rows[0]!);
+  }
+
+  async addParty(contractId: string, partyId: string, partyData: Record<string, string>): Promise<PendingContract | null> {
+    return await this.sql.begin(async (tx) => {
+      const rows = await tx<PendingContractRow[]>`
+        SELECT * FROM x490_pending_contracts
+        WHERE contract_id = ${contractId} AND completed_at IS NULL
+        FOR UPDATE
+      `;
+      if (!rows[0]) return null;
+      const acceptance = { partyId, partyData, acceptedAt: Math.floor(Date.now() / 1000) };
+      const updated = await tx<PendingContractRow[]>`
+        UPDATE x490_pending_contracts
+        SET acceptances = acceptances || ${this.sql.json(acceptance as import("postgres").JSONValue)}::jsonb
+        WHERE contract_id = ${contractId}
+        RETURNING *
+      `;
+      return rowToPendingContract(updated[0]!);
+    });
+  }
+
+  async get(contractId: string): Promise<PendingContract | null> {
+    const rows = await this.sql<PendingContractRow[]>`
+      SELECT * FROM x490_pending_contracts
+      WHERE contract_id = ${contractId} AND completed_at IS NULL
+    `;
+    return rows[0] ? rowToPendingContract(rows[0]) : null;
+  }
+
+  async complete(contractId: string): Promise<void> {
+    await this.sql`
+      UPDATE x490_pending_contracts
+      SET completed_at = now()
+      WHERE contract_id = ${contractId}
+    `;
+  }
+}
+
+// ── Webhook delivery store ─────────────────────────────────────────────────────
+
+interface WebhookDeliveryRow {
+  delivery_id: string;
+  webhook_id: string;
+  tenant_id: string;
+  event_type: string;
+  contract_id: string | null;
+  status_code: number | null;
+  error: string | null;
+  attempt_count: number;
+  succeeded_at: Date | null;
+  created_at: Date;
+}
+
+function rowToWebhookDelivery(r: WebhookDeliveryRow): WebhookDelivery {
+  const d: WebhookDelivery = {
+    deliveryId: r.delivery_id,
+    webhookId: r.webhook_id,
+    tenantId: r.tenant_id,
+    eventType: r.event_type,
+    attemptCount: r.attempt_count,
+    createdAt: Math.floor(r.created_at.getTime() / 1000),
+  };
+  if (r.contract_id !== null) d.contractId = r.contract_id;
+  if (r.status_code !== null) d.statusCode = r.status_code;
+  if (r.error !== null) d.error = r.error;
+  if (r.succeeded_at !== null) d.succeededAt = Math.floor(r.succeeded_at.getTime() / 1000);
+  return d;
+}
+
+export class PostgresWebhookDeliveryStore implements WebhookDeliveryStore {
+  constructor(private readonly sql: Sql) {}
+
+  async record(delivery: WebhookDelivery): Promise<void> {
+    await this.sql`
+      INSERT INTO x490_webhook_deliveries
+        (delivery_id, webhook_id, tenant_id, event_type, contract_id, attempt_count)
+      VALUES (
+        ${delivery.deliveryId}, ${delivery.webhookId}, ${delivery.tenantId},
+        ${delivery.eventType}, ${delivery.contractId ?? null}, ${delivery.attemptCount}
+      )
+    `;
+  }
+
+  async markSuccess(deliveryId: string, statusCode: number): Promise<void> {
+    await this.sql`
+      UPDATE x490_webhook_deliveries
+      SET status_code = ${statusCode}, succeeded_at = now()
+      WHERE delivery_id = ${deliveryId}
+    `;
+  }
+
+  async markFailure(deliveryId: string, error: string, attemptCount: number): Promise<void> {
+    await this.sql`
+      UPDATE x490_webhook_deliveries
+      SET error = ${error}, attempt_count = ${attemptCount}
+      WHERE delivery_id = ${deliveryId}
+    `;
+  }
+
+  async listByWebhook(webhookId: string, limit = 50): Promise<WebhookDelivery[]> {
+    const rows = await this.sql<WebhookDeliveryRow[]>`
+      SELECT * FROM x490_webhook_deliveries
+      WHERE webhook_id = ${webhookId}
+      ORDER BY created_at DESC
+      LIMIT ${limit}
+    `;
+    return rows.map(rowToWebhookDelivery);
   }
 }

@@ -14,7 +14,7 @@ import type { RevocationStore } from "./revocation.js";
 import type { PendingContractStore } from "./pending.js";
 
 /** Build a 490 response. Native Response bypasses Hono's ContentfulStatusCode union. */
-function x490Response(body: unknown, requirements: ContractRequirements): Response {
+function build490Response(body: unknown, requirements: ContractRequirements): Response {
   return new Response(JSON.stringify(body), {
     status: 490,
     headers: {
@@ -68,7 +68,7 @@ export function requireContract(opts: ContractGateOptions): MiddlewareHandler {
     const raw = c.req.header("X-490-Contract");
 
     if (!raw) {
-      return x490Response(
+      return build490Response(
         { error: "Contract agreement required", contractRequired: opts.requirements },
         opts.requirements,
       );
@@ -78,7 +78,7 @@ export function requireContract(opts: ContractGateOptions): MiddlewareHandler {
     if (useFacilitator) {
       const verifyEndpoint = opts.requirements.verifyEndpoint;
       if (!verifyEndpoint) {
-        return x490Response(
+        return build490Response(
           { error: "facilitated mode requires verifyEndpoint in requirements", contractRequired: opts.requirements },
           opts.requirements,
         );
@@ -90,7 +90,7 @@ export function requireContract(opts: ContractGateOptions): MiddlewareHandler {
           `${verifyEndpoint}?token=${encodeURIComponent(raw)}&resource=${encodeURIComponent(c.req.path)}`,
         );
       } catch {
-        return x490Response(
+        return build490Response(
           { error: "Could not reach facilitator verify endpoint", contractRequired: opts.requirements },
           opts.requirements,
         );
@@ -98,7 +98,7 @@ export function requireContract(opts: ContractGateOptions): MiddlewareHandler {
 
       const verified = await verifyRes.json() as { valid: boolean; contractId?: string; partyId?: string; reason?: string };
       if (!verified.valid) {
-        return x490Response(
+        return build490Response(
           { error: verified.reason ?? "Token verification failed", contractRequired: opts.requirements },
           opts.requirements,
         );
@@ -113,7 +113,7 @@ export function requireContract(opts: ContractGateOptions): MiddlewareHandler {
     // ── Self-hosted mode: verify HMAC locally ────────────────────────────────
     const result = await verifyToken(raw, opts.secret!, c.req.path);
     if (!result.valid) {
-      return x490Response(
+      return build490Response(
         { error: result.reason, contractRequired: opts.requirements },
         opts.requirements,
       );
@@ -122,7 +122,7 @@ export function requireContract(opts: ContractGateOptions): MiddlewareHandler {
     if (opts.revocationStore) {
       const revoked = await opts.revocationStore.isRevoked(result.payload.contractId);
       if (revoked) {
-        return x490Response(
+        return build490Response(
           { error: "Contract has been revoked", contractRequired: opts.requirements },
           opts.requirements,
         );
@@ -433,4 +433,239 @@ export function discoveryHandler(opts: DiscoveryHandlerOptions): MiddlewareHandl
     resources: opts.resources,
   };
   return async (c) => c.json(doc, 200);
+}
+
+// ── Generic fetch adapter ──────────────────────────────────────────────────────
+
+export type FetchContractResult =
+  | { ok: true; contractId: string; partyId: string }
+  | { ok: false; response: Response };
+
+/**
+ * Generic fetch-API adapter for edge runtimes, Next.js middleware, Cloudflare Workers, etc.
+ *
+ * Usage:
+ *   const check = requireContractFetch({ requirements, secret });
+ *   const result = await check(request);
+ *   if (!result.ok) return result.response;   // 490 with X-490-Requirements
+ *   const { contractId, partyId } = result;
+ */
+export function requireContractFetch(
+  opts: ContractGateOptions,
+): (request: Request) => Promise<FetchContractResult> {
+  const useFacilitator =
+    opts.facilitated === true ||
+    (opts.secret === undefined && opts.requirements.verifyEndpoint !== undefined);
+
+  if (!useFacilitator && !opts.secret) {
+    throw new Error(
+      "requireContractFetch: provide either secret (self-hosted) or facilitated: true (managed service)",
+    );
+  }
+
+  return async (request: Request): Promise<FetchContractResult> => {
+    const raw = request.headers.get("X-490-Contract");
+
+    if (!raw) {
+      return {
+        ok: false,
+        response: build490Response(
+          { error: "Contract agreement required", contractRequired: opts.requirements },
+          opts.requirements,
+        ),
+      };
+    }
+
+    // ── Facilitated mode: delegate to verifyEndpoint ──────────────────────────
+    if (useFacilitator) {
+      const verifyEndpoint = opts.requirements.verifyEndpoint;
+      if (!verifyEndpoint) {
+        return {
+          ok: false,
+          response: build490Response(
+            { error: "facilitated mode requires verifyEndpoint in requirements", contractRequired: opts.requirements },
+            opts.requirements,
+          ),
+        };
+      }
+
+      const url = new URL(request.url);
+      let verifyRes: Response;
+      try {
+        verifyRes = await fetch(
+          `${verifyEndpoint}?token=${encodeURIComponent(raw)}&resource=${encodeURIComponent(url.pathname)}`,
+        );
+      } catch {
+        return {
+          ok: false,
+          response: build490Response(
+            { error: "Could not reach facilitator verify endpoint", contractRequired: opts.requirements },
+            opts.requirements,
+          ),
+        };
+      }
+
+      const verified = (await verifyRes.json()) as {
+        valid: boolean;
+        contractId?: string;
+        partyId?: string;
+        reason?: string;
+      };
+      if (!verified.valid) {
+        return {
+          ok: false,
+          response: build490Response(
+            { error: verified.reason ?? "Token verification failed", contractRequired: opts.requirements },
+            opts.requirements,
+          ),
+        };
+      }
+
+      return { ok: true, contractId: verified.contractId ?? "", partyId: verified.partyId ?? "" };
+    }
+
+    // ── Self-hosted mode: verify HMAC locally ────────────────────────────────
+    const url = new URL(request.url);
+    const result = await verifyToken(raw, opts.secret!, url.pathname);
+    if (!result.valid) {
+      return {
+        ok: false,
+        response: build490Response(
+          { error: result.reason, contractRequired: opts.requirements },
+          opts.requirements,
+        ),
+      };
+    }
+
+    if (opts.revocationStore) {
+      const revoked = await opts.revocationStore.isRevoked(result.payload.contractId);
+      if (revoked) {
+        return {
+          ok: false,
+          response: build490Response(
+            { error: "Contract has been revoked", contractRequired: opts.requirements },
+            opts.requirements,
+          ),
+        };
+      }
+    }
+
+    return { ok: true, contractId: result.payload.contractId, partyId: result.payload.partyId };
+  };
+}
+
+// ── Express adapter ────────────────────────────────────────────────────────────
+
+export interface ExpressLikeRequest {
+  headers: Record<string, string | string[] | undefined>;
+  path: string;
+}
+export interface ExpressLikeResponse {
+  status(code: number): ExpressLikeResponse;
+  set(name: string, value: string): ExpressLikeResponse;
+  json(body: unknown): void;
+}
+export type ExpressNextFunction = (err?: unknown) => void;
+
+/**
+ * Express/Connect middleware adapter.
+ *
+ * Reads X-490-Contract from req.headers, returns 490 JSON if absent or invalid,
+ * calls next() on success. Sets req.x490ContractId and req.x490PartyId.
+ *
+ * Usage:
+ *   app.get('/data', requireContractExpress({ requirements, secret }), handler)
+ */
+export function requireContractExpress(
+  opts: ContractGateOptions,
+): (
+  req: ExpressLikeRequest & Record<string, unknown>,
+  res: ExpressLikeResponse,
+  next: ExpressNextFunction,
+) => Promise<void> {
+  const useFacilitator =
+    opts.facilitated === true ||
+    (opts.secret === undefined && opts.requirements.verifyEndpoint !== undefined);
+
+  if (!useFacilitator && !opts.secret) {
+    throw new Error(
+      "requireContractExpress: provide either secret (self-hosted) or facilitated: true (managed service)",
+    );
+  }
+
+  return async (
+    req: ExpressLikeRequest & Record<string, unknown>,
+    res: ExpressLikeResponse,
+    next: ExpressNextFunction,
+  ): Promise<void> => {
+    const rawHeader = req.headers["x-490-contract"];
+    const raw = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
+
+    const send490 = (error: string) => {
+      res
+        .status(490)
+        .set("Content-Type", "application/json")
+        .set("X-490-Requirements", b64encode(JSON.stringify(opts.requirements)))
+        .json({ error, contractRequired: opts.requirements });
+    };
+
+    if (!raw) {
+      send490("Contract agreement required");
+      return;
+    }
+
+    // ── Facilitated mode: delegate to verifyEndpoint ──────────────────────────
+    if (useFacilitator) {
+      const verifyEndpoint = opts.requirements.verifyEndpoint;
+      if (!verifyEndpoint) {
+        send490("facilitated mode requires verifyEndpoint in requirements");
+        return;
+      }
+
+      let verifyRes: Response;
+      try {
+        verifyRes = await fetch(
+          `${verifyEndpoint}?token=${encodeURIComponent(raw)}&resource=${encodeURIComponent(req.path)}`,
+        );
+      } catch {
+        send490("Could not reach facilitator verify endpoint");
+        return;
+      }
+
+      const verified = (await verifyRes.json()) as {
+        valid: boolean;
+        contractId?: string;
+        partyId?: string;
+        reason?: string;
+      };
+      if (!verified.valid) {
+        send490(verified.reason ?? "Token verification failed");
+        return;
+      }
+
+      req["x490ContractId"] = verified.contractId ?? "";
+      req["x490PartyId"] = verified.partyId ?? "";
+      next();
+      return;
+    }
+
+    // ── Self-hosted mode: verify HMAC locally ────────────────────────────────
+    const result = await verifyToken(raw, opts.secret!, req.path);
+    if (!result.valid) {
+      send490(result.reason);
+      return;
+    }
+
+    if (opts.revocationStore) {
+      const revoked = await opts.revocationStore.isRevoked(result.payload.contractId);
+      if (revoked) {
+        send490("Contract has been revoked");
+        return;
+      }
+    }
+
+    req["x490ContractId"] = result.payload.contractId;
+    req["x490PartyId"] = result.payload.partyId;
+    next();
+  };
 }

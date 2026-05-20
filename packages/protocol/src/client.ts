@@ -118,6 +118,16 @@ export class ContractClient {
         ? await this.opts.partyData(current)
         : this.opts.partyData;
 
+      // Pre-validate required fields before the network round-trip.
+      if (current.requiredPartyFields?.length) {
+        const missing = current.requiredPartyFields.filter(
+          (f) => !(f in partyData) || (partyData[f] ?? "").trim() === "",
+        );
+        if (missing.length > 0) {
+          throw new Error(`x490: missing required party fields: ${missing.join(", ")}`);
+        }
+      }
+
       const body: AcceptRequest = {
         templateId: current.templateId,
         templateHash: current.templateHash,

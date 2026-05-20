@@ -59,12 +59,14 @@ CREATE TABLE IF NOT EXISTS x490_requirements (
   required_party_fields TEXT[]  NOT NULL DEFAULT '{}',
   negotiable           BOOLEAN  NOT NULL DEFAULT false,
   negotiable_fields    JSONB    NOT NULL DEFAULT '[]',
+  required_parties     INT      NOT NULL DEFAULT 1,
   created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (tenant_id, template_hash, resource)
 );
 -- Idempotent migrations for deployments that predate negotiable columns.
 ALTER TABLE x490_requirements ADD COLUMN IF NOT EXISTS negotiable BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE x490_requirements ADD COLUMN IF NOT EXISTS negotiable_fields JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE x490_requirements ADD COLUMN IF NOT EXISTS required_parties INT NOT NULL DEFAULT 1;
 
 -- Agreements: one row per accepted contract.
 CREATE TABLE IF NOT EXISTS x490_agreements (
@@ -125,3 +127,34 @@ CREATE TABLE IF NOT EXISTS x490_contract_events (
 -- Retrieve all events for an agreement in causal order.
 CREATE INDEX IF NOT EXISTS idx_x490_contract_events_contract
   ON x490_contract_events(contract_id, created_at ASC);
+
+-- Pending multi-party contracts: accumulates acceptances until all required parties sign.
+CREATE TABLE IF NOT EXISTS x490_pending_contracts (
+  contract_id      TEXT        PRIMARY KEY,
+  tenant_id        UUID        NOT NULL REFERENCES x490_tenants(tenant_id) ON DELETE CASCADE,
+  template_hash    TEXT        NOT NULL,
+  required_parties INT         NOT NULL DEFAULT 2,
+  acceptances      JSONB       NOT NULL DEFAULT '[]',
+  completed_at     TIMESTAMPTZ,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_x490_pending_contracts_tenant
+  ON x490_pending_contracts(tenant_id, created_at DESC);
+
+-- Webhook delivery log: records each delivery attempt and its outcome.
+CREATE TABLE IF NOT EXISTS x490_webhook_deliveries (
+  delivery_id   UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  webhook_id    UUID        NOT NULL REFERENCES x490_webhooks(webhook_id) ON DELETE CASCADE,
+  tenant_id     UUID        NOT NULL REFERENCES x490_tenants(tenant_id) ON DELETE CASCADE,
+  event_type    TEXT        NOT NULL,
+  contract_id   TEXT,
+  status_code   INT,
+  error         TEXT,
+  attempt_count INT         NOT NULL DEFAULT 1,
+  succeeded_at  TIMESTAMPTZ,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_x490_webhook_deliveries_webhook
+  ON x490_webhook_deliveries(webhook_id, created_at DESC);

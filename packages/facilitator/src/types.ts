@@ -59,6 +59,17 @@ export interface RequirementsConfig {
   requiredPartyFields: string[];
   negotiable?: boolean;
   negotiableFields?: import("@x490/protocol").NegotiableField[];
+  requiredParties?: number;
+  createdAt: number;
+}
+
+export interface PendingContract {
+  contractId: string;
+  tenantId: string;
+  templateHash: string;
+  requiredParties: number;
+  acceptances: Array<{ partyId: string; partyData: Record<string, string>; acceptedAt: number }>;
+  completedAt?: number;
   createdAt: number;
 }
 
@@ -126,4 +137,17 @@ export interface WebhookPayload {
   tenantId: string;
   /** Agreement data without the raw token. */
   data: Omit<AgreementRecord, "token">;
+}
+
+export interface WebhookDelivery {
+  deliveryId: string;
+  webhookId: string;
+  tenantId: string;
+  eventType: string;
+  contractId?: string;
+  statusCode?: number;
+  error?: string;
+  attemptCount: number;
+  succeededAt?: number;
+  createdAt: number;
 }

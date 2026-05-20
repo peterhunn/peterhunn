@@ -20,6 +20,8 @@ export type { VerifyOk, VerifyFail } from "./token.js";
 
 export {
   requireContract,
+  requireContractFetch,
+  requireContractExpress,
   acceptHandler,
   verifyHandler,
   revokeHandler,
@@ -31,6 +33,10 @@ export type {
   VerifyHandlerOptions,
   RevokeHandlerOptions,
   DiscoveryHandlerOptions,
+  FetchContractResult,
+  ExpressLikeRequest,
+  ExpressLikeResponse,
+  ExpressNextFunction,
 } from "./middleware.js";
 
 export { InMemoryRevocationStore } from "./revocation.js";

@@ -96,6 +96,24 @@ export async function listContractEvents(contractId: string): Promise<{ events: 
   return res.json();
 }
 
+export async function buildRequirements(data: RequirementsInput): Promise<ContractRequirementsResponse> {
+  const res = await apiFetch("/v1/requirements", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function listWebhookDeliveries(webhookId: string): Promise<{ deliveries: WebhookDelivery[] }> {
+  const res = await apiFetch(`/v1/webhooks/${webhookId}/deliveries`);
+  if (!res.ok) {
+    if (res.status === 404 || res.status === 503) return { deliveries: [] }; // endpoint may not exist yet
+    throw new Error(await res.text());
+  }
+  return res.json();
+}
+
 export interface Agreement {
   contractId: string;
   tenantId: string;
@@ -155,5 +173,51 @@ export interface ContractEvent {
   party?: string;
   payload: Record<string, unknown>;
   parentEventIds: string[];
+  createdAt: number;
+}
+
+export interface RequirementsInput {
+  templateHash: string;
+  resource: string;
+  description: string;
+  expiresIn: number;
+  requiredPartyFields: string[];
+  negotiable?: boolean;
+  negotiableFields?: Array<{ field: string; description: string; allowedValues?: string[] }>;
+  requiredParties?: number;
+  jurisdiction?: string;
+  governingLaw?: string;
+}
+
+export interface ContractRequirementsResponse {
+  scheme: "x490";
+  version: 1;
+  templateId: string;
+  templateUrl: string;
+  templateHash: string;
+  requiredPartyFields: string[];
+  acceptEndpoint: string;
+  negotiateEndpoint?: string;
+  verifyEndpoint?: string;
+  revokeEndpoint?: string;
+  expiresIn: number;
+  resource: string;
+  description: string;
+  negotiable: boolean;
+  negotiableFields?: Array<{ field: string; description: string; allowedValues?: string[] }>;
+  requiredParties?: number;
+  jurisdiction?: string;
+  governingLaw?: string;
+}
+
+export interface WebhookDelivery {
+  deliveryId: string;
+  webhookId: string;
+  eventType: string;
+  contractId?: string;
+  statusCode?: number;
+  error?: string;
+  attemptCount: number;
+  succeededAt?: number;
   createdAt: number;
 }

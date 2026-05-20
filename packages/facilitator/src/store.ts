@@ -1,4 +1,4 @@
-import type { Tenant, TenantApiKey, RegisteredTemplate, AgreementRecord, RequirementsConfig, Webhook, WebhookEventType, ContractEventRecord } from "./types.js";
+import type { Tenant, TenantApiKey, RegisteredTemplate, AgreementRecord, RequirementsConfig, Webhook, WebhookEventType, ContractEventRecord, PendingContract, WebhookDelivery } from "./types.js";
 
 // ── Crypto helpers ─────────────────────────────────────────────────────────────
 
@@ -33,6 +33,7 @@ export interface TenantStore {
   createApiKey(tenantId: string, name: string): Promise<{ keyId: string; rawApiKey: string }>;
   listApiKeys(tenantId: string): Promise<TenantApiKey[]>;
   revokeApiKey(keyId: string): Promise<boolean>;
+  delete(tenantId: string): Promise<boolean>;
 }
 
 export interface TemplateStore {
@@ -152,6 +153,23 @@ export class InMemoryTenantStore implements TenantStore {
     if (!key) return false;
     this.apiKeys.set(keyId, { ...key, revokedAt: Math.floor(Date.now() / 1000) });
     this.keyHashIndex.delete(key.keyHash);
+    return true;
+  }
+
+  async delete(tenantId: string): Promise<boolean> {
+    if (!this.tenants.has(tenantId)) return false;
+    this.tenants.delete(tenantId);
+    // Remove all API keys for this tenant from both indexes.
+    for (const [keyId, key] of this.apiKeys) {
+      if (key.tenantId === tenantId) {
+        this.keyHashIndex.delete(key.keyHash);
+        this.apiKeys.delete(keyId);
+      }
+    }
+    // Remove from auth0 sub index.
+    for (const [sub, tid] of this.auth0SubIndex) {
+      if (tid === tenantId) this.auth0SubIndex.delete(sub);
+    }
     return true;
   }
 }
@@ -311,6 +329,54 @@ export class InMemoryAgreementStore implements AgreementStore {
   }
 }
 
+// ── Pending contract store ─────────────────────────────────────────────────────
+
+export interface PendingContractStore {
+  create(entry: Omit<PendingContract, "acceptances" | "createdAt">): Promise<PendingContract>;
+  addParty(contractId: string, partyId: string, partyData: Record<string, string>): Promise<PendingContract | null>;
+  get(contractId: string): Promise<PendingContract | null>;
+  complete(contractId: string): Promise<void>;
+}
+
+export class InMemoryPendingContractStore implements PendingContractStore {
+  private readonly contracts = new Map<string, PendingContract>();
+
+  async create(entry: Omit<PendingContract, "acceptances" | "createdAt">): Promise<PendingContract> {
+    const contract: PendingContract = {
+      ...entry,
+      acceptances: [],
+      createdAt: Math.floor(Date.now() / 1000),
+    };
+    this.contracts.set(contract.contractId, contract);
+    return contract;
+  }
+
+  async addParty(contractId: string, partyId: string, partyData: Record<string, string>): Promise<PendingContract | null> {
+    const contract = this.contracts.get(contractId);
+    if (!contract || contract.completedAt !== undefined) return null;
+    const updated: PendingContract = {
+      ...contract,
+      acceptances: [
+        ...contract.acceptances,
+        { partyId, partyData, acceptedAt: Math.floor(Date.now() / 1000) },
+      ],
+    };
+    this.contracts.set(contractId, updated);
+    return updated;
+  }
+
+  async get(contractId: string): Promise<PendingContract | null> {
+    const c = this.contracts.get(contractId);
+    if (!c || c.completedAt !== undefined) return null;
+    return c;
+  }
+
+  async complete(contractId: string): Promise<void> {
+    const c = this.contracts.get(contractId);
+    if (c) this.contracts.set(contractId, { ...c, completedAt: Math.floor(Date.now() / 1000) });
+  }
+}
+
 // ── Cursor helpers ─────────────────────────────────────────────────────────────
 
 export function encodeCursor(issuedAt: number, contractId: string): string {
@@ -405,5 +471,51 @@ export class InMemoryEventStore implements EventStore {
   async latestEventId(contractId: string): Promise<string | null> {
     const ids = this.byContract.get(contractId) ?? [];
     return ids[ids.length - 1] ?? null;
+  }
+}
+
+// ── Webhook delivery store ─────────────────────────────────────────────────────
+
+export interface WebhookDeliveryStore {
+  record(delivery: WebhookDelivery): Promise<void>;
+  markSuccess(deliveryId: string, statusCode: number): Promise<void>;
+  markFailure(deliveryId: string, error: string, attemptCount: number): Promise<void>;
+  listByWebhook(webhookId: string, limit?: number): Promise<WebhookDelivery[]>;
+}
+
+export class InMemoryWebhookDeliveryStore implements WebhookDeliveryStore {
+  private readonly deliveries = new Map<string, WebhookDelivery>();     // deliveryId → delivery
+  private readonly byWebhook = new Map<string, string[]>();             // webhookId → deliveryIds (insertion order)
+  private static readonly MAX_PER_WEBHOOK = 200;
+
+  async record(delivery: WebhookDelivery): Promise<void> {
+    this.deliveries.set(delivery.deliveryId, delivery);
+    const list = this.byWebhook.get(delivery.webhookId) ?? [];
+    list.unshift(delivery.deliveryId); // newest first
+    // Trim to max per webhook
+    if (list.length > InMemoryWebhookDeliveryStore.MAX_PER_WEBHOOK) {
+      const removed = list.splice(InMemoryWebhookDeliveryStore.MAX_PER_WEBHOOK);
+      for (const id of removed) this.deliveries.delete(id);
+    }
+    this.byWebhook.set(delivery.webhookId, list);
+  }
+
+  async markSuccess(deliveryId: string, statusCode: number): Promise<void> {
+    const d = this.deliveries.get(deliveryId);
+    if (d) {
+      this.deliveries.set(deliveryId, { ...d, statusCode, succeededAt: Math.floor(Date.now() / 1000) });
+    }
+  }
+
+  async markFailure(deliveryId: string, error: string, attemptCount: number): Promise<void> {
+    const d = this.deliveries.get(deliveryId);
+    if (d) {
+      this.deliveries.set(deliveryId, { ...d, error, attemptCount });
+    }
+  }
+
+  async listByWebhook(webhookId: string, limit = 50): Promise<WebhookDelivery[]> {
+    const ids = this.byWebhook.get(webhookId) ?? [];
+    return ids.slice(0, limit).map((id) => this.deliveries.get(id)!);
   }
 }

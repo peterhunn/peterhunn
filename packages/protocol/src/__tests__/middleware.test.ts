@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { Hono } from "hono";
 import {
   requireContract,
+  requireContractFetch,
+  requireContractExpress,
   acceptHandler,
   verifyHandler,
   revokeHandler,
@@ -12,6 +14,7 @@ import { signToken } from "../token.js";
 import { InMemoryRevocationStore } from "../revocation.js";
 import { InMemoryPendingContractStore } from "../pending.js";
 import type { ContractRequirements, AcceptResponse, RevokeResponse, DiscoveryDocument } from "../types.js";
+import type { ExpressLikeRequest, ExpressLikeResponse, ExpressNextFunction } from "../middleware.js";
 
 const SECRET = "test-middleware-secret";
 const NOW = Math.floor(Date.now() / 1000);
@@ -425,5 +428,102 @@ describe("discoveryHandler", () => {
     assert.equal(body.origin, "https://api.example.com");
     assert.equal(body.resources.length, 1);
     assert.equal(body.resources[0]?.resource, "/data");
+  });
+});
+
+// ── requireContractFetch ───────────────────────────────────────────────────────
+
+describe("requireContractFetch", () => {
+  it("returns ok:false with 490 when X-490-Contract header is absent", async () => {
+    const check = requireContractFetch({ requirements, secret: SECRET });
+    const request = new Request("https://api.example.com/data");
+    const result = await check(request);
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.response.status, 490);
+      assert.ok(result.response.headers.get("X-490-Requirements"));
+      const body = await result.response.json() as { error: string };
+      assert.ok(body.error.includes("Contract"));
+    }
+  });
+
+  it("returns ok:false when token is invalid", async () => {
+    const check = requireContractFetch({ requirements, secret: SECRET });
+    const request = new Request("https://api.example.com/data", {
+      headers: { "X-490-Contract": "bad.token.value" },
+    });
+    const result = await check(request);
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.response.status, 490);
+    }
+  });
+
+  it("returns ok:true with contractId and partyId on valid token", async () => {
+    const token = await makeToken();
+    const check = requireContractFetch({ requirements, secret: SECRET });
+    const request = new Request("https://api.example.com/data", {
+      headers: { "X-490-Contract": token },
+    });
+    const result = await check(request);
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.equal(result.contractId, "cid-test");
+      assert.equal(result.partyId, "party-test");
+    }
+  });
+});
+
+// ── requireContractExpress ─────────────────────────────────────────────────────
+
+describe("requireContractExpress", () => {
+  function makeExpressRes() {
+    const calls: string[] = [];
+    let jsonBody: unknown = null;
+    let statusCode = 200;
+    const res: ExpressLikeResponse = {
+      status(code: number) { statusCode = code; return res; },
+      set(_name: string, _value: string) { calls.push(_name); return res; },
+      json(body: unknown) { jsonBody = body; },
+    };
+    return { res, calls, get statusCode() { return statusCode; }, get jsonBody() { return jsonBody; } };
+  }
+
+  it("calls next() on valid token and sets req fields", async () => {
+    const token = await makeToken();
+    const middleware = requireContractExpress({ requirements, secret: SECRET });
+
+    const req: ExpressLikeRequest & Record<string, unknown> = {
+      headers: { "x-490-contract": token },
+      path: "/data",
+    };
+    const { res } = makeExpressRes();
+    let nextCalled = false;
+    const next: ExpressNextFunction = () => { nextCalled = true; };
+
+    await middleware(req, res, next);
+
+    assert.ok(nextCalled, "next() should have been called");
+    assert.equal(req["x490ContractId"], "cid-test");
+    assert.equal(req["x490PartyId"], "party-test");
+  });
+
+  it("returns 490 JSON when X-490-Contract header is absent", async () => {
+    const middleware = requireContractExpress({ requirements, secret: SECRET });
+
+    const req: ExpressLikeRequest & Record<string, unknown> = {
+      headers: {},
+      path: "/data",
+    };
+    const mock = makeExpressRes();
+    let nextCalled = false;
+    const next: ExpressNextFunction = () => { nextCalled = true; };
+
+    await middleware(req, mock.res, next);
+
+    assert.ok(!nextCalled, "next() should not have been called");
+    assert.equal(mock.statusCode, 490);
+    const body = mock.jsonBody as { error: string };
+    assert.ok(body.error.includes("Contract"));
   });
 });

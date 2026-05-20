@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { listWebhooks, createWebhook, deleteWebhook, type Webhook } from "@/lib/api";
+import { listWebhooks, createWebhook, deleteWebhook, listWebhookDeliveries, type Webhook, type WebhookDelivery } from "@/lib/api";
 import { Badge } from "@/components/badge";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CopyBox } from "@/components/copy-box";
@@ -25,6 +25,11 @@ export default function WebhooksPage() {
 
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+
+  const [deliveriesOpen, setDeliveriesOpen] = useState(false);
+  const [deliveriesWebhook, setDeliveriesWebhook] = useState<Webhook | null>(null);
+  const [deliveries, setDeliveries] = useState<WebhookDelivery[]>([]);
+  const [deliveriesLoading, setDeliveriesLoading] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -63,6 +68,20 @@ export default function WebhooksPage() {
       setError(err instanceof Error ? err.message : "Failed to create webhook");
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function openDeliveries(webhook: Webhook) {
+    setDeliveriesWebhook(webhook);
+    setDeliveriesOpen(true);
+    setDeliveriesLoading(true);
+    try {
+      const data = await listWebhookDeliveries(webhook.webhookId);
+      setDeliveries(data.deliveries);
+    } catch {
+      setDeliveries([]);
+    } finally {
+      setDeliveriesLoading(false);
     }
   }
 
@@ -128,7 +147,13 @@ export default function WebhooksPage() {
                     {w.active ? <Badge variant="green">Active</Badge> : <Badge variant="red">Disabled</Badge>}
                   </td>
                   <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{formatDate(w.createdAt)}</td>
-                  <td className="px-4 py-3 text-right">
+                  <td className="px-4 py-3 text-right whitespace-nowrap">
+                    <button
+                      onClick={() => openDeliveries(w)}
+                      className="text-xs text-indigo-600 hover:text-indigo-800 font-medium mr-3"
+                    >
+                      Deliveries
+                    </button>
                     <button
                       onClick={() => { setDeleteTarget(w.webhookId); setConfirmOpen(true); }}
                       className="text-xs text-red-600 hover:text-red-800 font-medium"
@@ -225,6 +250,85 @@ export default function WebhooksPage() {
         onConfirm={handleDelete}
         onCancel={() => { setConfirmOpen(false); setDeleteTarget(null); }}
       />
+
+      {deliveriesOpen && deliveriesWebhook && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"
+          onClick={() => setDeliveriesOpen(false)}
+        >
+          <div
+            className="bg-white rounded-xl shadow-lg w-full max-w-2xl max-h-[80vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+              <div className="min-w-0">
+                <p className="font-semibold text-gray-900 text-sm">Webhook Deliveries</p>
+                <p className="font-mono text-xs text-gray-400 mt-0.5 truncate">{deliveriesWebhook.url}</p>
+              </div>
+              <button
+                onClick={() => setDeliveriesOpen(false)}
+                className="ml-4 text-gray-400 hover:text-gray-600 text-lg leading-none shrink-0"
+              >
+                ×
+              </button>
+            </div>
+            <div className="overflow-y-auto flex-1 p-4">
+              {deliveriesLoading ? (
+                <p className="text-sm text-gray-500">Loading deliveries…</p>
+              ) : deliveries.length === 0 ? (
+                <p className="text-sm text-gray-400 italic">No deliveries recorded yet.</p>
+              ) : (
+                <div className="overflow-x-auto rounded-lg border border-gray-200">
+                  <table className="min-w-full text-sm divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        {["Event Type", "Contract ID", "Status", "Attempts", "Time"].map((h) => (
+                          <th key={h} className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-100">
+                      {deliveries.map((d) => {
+                        const isSuccess = d.statusCode !== undefined && d.statusCode >= 200 && d.statusCode < 300;
+                        const hasFailed = d.error || (d.statusCode !== undefined && (d.statusCode < 200 || d.statusCode >= 300));
+                        return (
+                          <tr key={d.deliveryId} className="hover:bg-gray-50">
+                            <td className="px-3 py-2 text-gray-700 font-mono text-xs">{d.eventType}</td>
+                            <td className="px-3 py-2 text-gray-500 font-mono text-xs max-w-[120px] truncate" title={d.contractId}>
+                              {d.contractId ? d.contractId.slice(0, 12) + "…" : "—"}
+                            </td>
+                            <td className="px-3 py-2">
+                              {isSuccess ? (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">
+                                  {d.statusCode}
+                                </span>
+                              ) : hasFailed ? (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700">
+                                  {d.error ?? d.statusCode ?? "Error"}
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">
+                                  Pending
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-gray-500 text-xs">{d.attemptCount}</td>
+                            <td className="px-3 py-2 text-gray-500 text-xs whitespace-nowrap">
+                              {formatDate(d.createdAt)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
