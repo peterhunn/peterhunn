@@ -8,6 +8,8 @@ import {
   InMemoryRequirementsStore,
   InMemoryWebhookStore,
   InMemoryEventStore,
+  InMemoryPendingContractStore,
+  InMemoryWebhookDeliveryStore,
 } from "./store.js";
 
 const PORT = Number(process.env["PORT"] ?? 4901);
@@ -27,6 +29,8 @@ async function buildStores() {
       PostgresRequirementsStore,
       PostgresWebhookStore,
       PostgresEventStore,
+      PostgresPendingContractStore,
+      PostgresWebhookDeliveryStore,
     } = await import("./store-postgres.js");
 
     const sql = postgres(DATABASE_URL, {
@@ -42,6 +46,8 @@ async function buildStores() {
       requirements: new PostgresRequirementsStore(sql),
       webhooks: new PostgresWebhookStore(sql),
       events: new PostgresEventStore(sql),
+      pendingContracts: new PostgresPendingContractStore(sql),
+      deliveries: new PostgresWebhookDeliveryStore(sql),
     };
   }
 
@@ -54,6 +60,8 @@ async function buildStores() {
     requirements: new InMemoryRequirementsStore(),
     webhooks: new InMemoryWebhookStore(),
     events: new InMemoryEventStore(),
+    pendingContracts: new InMemoryPendingContractStore(),
+    deliveries: new InMemoryWebhookDeliveryStore(),
   };
 }
 

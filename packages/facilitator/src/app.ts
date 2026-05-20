@@ -5,8 +5,8 @@ import { createRemoteJWKSet, jwtVerify } from "jose";
 import { signToken, verifyToken } from "@x490/protocol";
 import type { AcceptRequest, AcceptResponse, VerifyResponse, RevokeRequest, RevokeResponse, NegotiableField } from "@x490/protocol";
 import type { ContractTerms } from "@x490/core";
-import type { TenantStore, TemplateStore, AgreementStore, RequirementsStore, WebhookStore, EventStore } from "./store.js";
-import type { Tenant, RegisteredTemplate, WebhookEventType } from "./types.js";
+import type { TenantStore, TemplateStore, AgreementStore, RequirementsStore, WebhookStore, EventStore, PendingContractStore, WebhookDeliveryStore } from "./store.js";
+import type { Tenant, RegisteredTemplate, WebhookEventType, ContractEventRecord } from "./types.js";
 import { rateLimit } from "./rate-limit.js";
 import { deliverWebhookEvent, assertSafeWebhookUrl } from "./webhook.js";
 
@@ -17,6 +17,8 @@ export interface FacilitatorAppOptions {
   requirements: RequirementsStore;
   webhooks: WebhookStore;
   events?: EventStore;
+  pendingContracts?: PendingContractStore;
+  deliveries?: WebhookDeliveryStore;
   /** Public base URL of this facilitator, e.g. "https://facilitator.x490.dev" */
   baseUrl: string;
   /** Auth0 domain, e.g. "your-tenant.auth0.com". Enables JWT auth when set. */
@@ -77,7 +79,7 @@ function getJWKS(domain: string): ReturnType<typeof createRemoteJWKSet> {
 }
 
 export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
-  const { tenants, templates, agreements, requirements, webhooks, events, baseUrl } = opts;
+  const { tenants, templates, agreements, requirements, webhooks, events, pendingContracts, deliveries, baseUrl } = opts;
 
   const app = new Hono();
   const authed = new Hono<AuthEnv>();
@@ -235,6 +237,109 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
       }
     }
 
+    // Multi-party contract flow
+    const multiPartyBody = body as AcceptRequest & { pendingContractId?: string };
+    if (reqConfig && (reqConfig.requiredParties ?? 1) > 1 && pendingContracts) {
+      const now = Math.floor(Date.now() / 1000);
+      const partyId = body.partyData["partyId"] ?? body.partyData["name"] ?? crypto.randomUUID();
+
+      if (multiPartyBody.pendingContractId) {
+        // Subsequent signer — add party to existing pending contract
+        const entry = await pendingContracts.addParty(multiPartyBody.pendingContractId, partyId, body.partyData);
+        if (!entry) return c.json({ error: "Pending contract not found or already completed" }, 404);
+
+        if (entry.acceptances.length >= (reqConfig.requiredParties ?? 1)) {
+          // All parties have signed — complete and issue token
+          await pendingContracts.complete(entry.contractId);
+
+          const token = await signToken(
+            {
+              contractId: entry.contractId,
+              templateHash: body.templateHash,
+              partyId,
+              resource: "*",
+              iat: now,
+              exp: now + expiresIn,
+            },
+            tenant.hmacSecret,
+          );
+
+          await agreements.record({
+            contractId: entry.contractId,
+            tenantId,
+            templateHash: body.templateHash,
+            partyId,
+            resource: "*",
+            partyData: body.partyData,
+            token,
+            issuedAt: now,
+            expiresAt: now + expiresIn,
+          });
+
+          void deliverWebhookEvent(webhooks, tenantId, "agreement.created", {
+            contractId: entry.contractId, tenantId, templateHash: body.templateHash, partyId,
+            resource: "*", partyData: body.partyData, token, issuedAt: now, expiresAt: now + expiresIn,
+          }, deliveries);
+
+          if (events) {
+            const parentId = await events.latestEventId(entry.contractId);
+            void events.append({
+              eventId: crypto.randomUUID(),
+              contractId: entry.contractId,
+              tenantId,
+              type: "agreement.accepted",
+              party: partyId,
+              payload: { templateHash: body.templateHash, partyData: body.partyData },
+              parentEventIds: parentId ? [parentId] : [],
+              createdAt: now,
+            });
+          }
+
+          const response: AcceptResponse = { status: "accepted", contractId: entry.contractId, token };
+          return c.json(response, 200);
+        } else {
+          // More parties still needed
+          return c.json({
+            status: "pending",
+            contractId: entry.contractId,
+            token: "",
+            pendingAcceptances: entry.acceptances.length,
+            requiredAcceptances: reqConfig.requiredParties,
+          }, 200);
+        }
+      } else {
+        // First signer — create a new pending contract
+        const entry = await pendingContracts.create({
+          contractId: crypto.randomUUID(),
+          tenantId,
+          templateHash: body.templateHash,
+          requiredParties: reqConfig.requiredParties ?? 2,
+        });
+        await pendingContracts.addParty(entry.contractId, partyId, body.partyData);
+
+        if (events) {
+          void events.append({
+            eventId: crypto.randomUUID(),
+            contractId: entry.contractId,
+            tenantId,
+            type: "agreement.pending",
+            party: partyId,
+            payload: { templateHash: body.templateHash, partyData: body.partyData, requiredParties: reqConfig.requiredParties },
+            parentEventIds: [],
+            createdAt: now,
+          });
+        }
+
+        return c.json({
+          status: "pending",
+          contractId: entry.contractId,
+          token: "",
+          pendingAcceptances: 1,
+          requiredAcceptances: reqConfig.requiredParties,
+        }, 200);
+      }
+    }
+
     const contractId = crypto.randomUUID();
     const now = Math.floor(Date.now() / 1000);
     const partyId = body.partyData["partyId"] ?? body.partyData["name"] ?? contractId;
@@ -267,7 +372,7 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     void deliverWebhookEvent(webhooks, tenantId, "agreement.created", {
       contractId, tenantId, templateHash: body.templateHash, partyId,
       resource: "*", partyData: body.partyData, token, issuedAt: now, expiresAt: now + expiresIn,
-    });
+    }, deliveries);
 
     // Root event in the contract DAG — no parents.
     const acceptEventId = crypto.randomUUID();
@@ -384,7 +489,7 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     void deliverWebhookEvent(webhooks, tenantId, "agreement.created", {
       contractId, tenantId, templateHash: body.templateHash, partyId,
       resource: "*", partyData: body.partyData, token, issuedAt: now, expiresAt: now + reqConfig.expiresIn,
-    });
+    }, deliveries);
 
     if (events) {
       void events.append({
@@ -509,6 +614,7 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
       requiredPartyFields: body.requiredPartyFields,
       negotiable: body.negotiable ?? false,
       ...(body.negotiableFields ? { negotiableFields: body.negotiableFields } : {}),
+      ...(body.requiredParties ? { requiredParties: body.requiredParties } : {}),
     });
 
     const reqs = buildRequirements(body, tenant.tenantId, body.templateHash, baseUrl);
@@ -597,7 +703,7 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     const ok = await agreements.revoke(contractId, reason);
     if (ok) {
       const updated = await agreements.findById(contractId);
-      if (updated) void deliverWebhookEvent(webhooks, tenant.tenantId, "agreement.revoked", updated);
+      if (updated) void deliverWebhookEvent(webhooks, tenant.tenantId, "agreement.revoked", updated, deliveries);
 
       if (events) {
         const parentId = await events.latestEventId(contractId);
@@ -708,6 +814,55 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     }
     await webhooks.disable(webhookId);
     return c.json({ disabled: true, webhookId });
+  });
+
+  authed.get("/v1/webhooks/:webhookId/deliveries", async (c) => {
+    const tenant = c.get("tenant");
+    const webhookId = c.req.param("webhookId");
+    const hook = await webhooks.findById(webhookId);
+    if (!hook || hook.tenantId !== tenant.tenantId) {
+      return c.json({ error: "Webhook not found" }, 404);
+    }
+    const list = await deliveries?.listByWebhook(webhookId, 50) ?? [];
+    return c.json({ deliveries: list });
+  });
+
+  // ── Tenant deletion (auth required) ──────────────────────────────────────────
+
+  authed.delete("/v1/tenants/:tenantId", async (c) => {
+    const tenant = c.get("tenant");
+    if (c.req.param("tenantId") !== tenant.tenantId) return c.json({ error: "Forbidden" }, 403);
+    const ok = await tenants.delete(tenant.tenantId);
+    return c.json({ deleted: ok, tenantId: tenant.tenantId });
+  });
+
+  // ── Custom contract events (auth required) ────────────────────────────────────
+
+  authed.post("/v1/agreements/:contractId/events", async (c) => {
+    const tenant = c.get("tenant");
+    const record = await agreements.findById(c.req.param("contractId"));
+    if (!record || record.tenantId !== tenant.tenantId) return c.json({ error: "Agreement not found" }, 404);
+    if (record.revokedAt) return c.json({ error: "Cannot append events to a revoked contract" }, 409);
+    if (!events) return c.json({ error: "Event store not configured" }, 503);
+
+    const body = await c.req.json<{ type: string; payload?: Record<string, unknown> }>();
+    if (!body.type?.trim()) return c.json({ error: "type is required" }, 400);
+    if (body.type.startsWith("agreement.")) {
+      return c.json({ error: "Event types starting with 'agreement.' are reserved" }, 400);
+    }
+
+    const parentId = await events.latestEventId(c.req.param("contractId"));
+    const event: ContractEventRecord = {
+      eventId: crypto.randomUUID(),
+      contractId: c.req.param("contractId"),
+      tenantId: tenant.tenantId,
+      type: body.type,
+      payload: body.payload ?? {},
+      parentEventIds: parentId ? [parentId] : [],
+      createdAt: Math.floor(Date.now() / 1000),
+    };
+    await events.append(event);
+    return c.json(event, 201);
   });
 
   // Mount authenticated routes after public routes.
