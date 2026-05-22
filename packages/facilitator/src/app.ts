@@ -1,7 +1,11 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { join, dirname } from "node:path";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { bodyLimit } from "hono/body-limit";
 import { createRemoteJWKSet, jwtVerify } from "jose";
+import { parse as parseYaml } from "yaml";
 import { signToken, verifyToken } from "@x490/protocol";
 import type { AcceptRequest, AcceptResponse, VerifyResponse, RevokeRequest, RevokeResponse, NegotiableField } from "@x490/protocol";
 import type { ContractTerms } from "@x490/core";
@@ -148,6 +152,57 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     }
 
     return c.json({ error: "Authentication required" }, 401);
+  });
+
+  // ── OpenAPI spec + Swagger UI (public) ────────────────────────────────────
+
+  // Resolve the YAML file relative to this source file so it works regardless
+  // of the process cwd.  At runtime the compiled JS lives in dist/, one level
+  // below package root, so we step up two levels from __filename.
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = dirname(__filename);
+  const openapiPath = join(__dirname, "..", "openapi.yaml");
+
+  let _openapiJson: unknown;
+  function getOpenApiJson(): unknown {
+    if (!_openapiJson) {
+      _openapiJson = parseYaml(readFileSync(openapiPath, "utf-8"));
+    }
+    return _openapiJson;
+  }
+
+  app.get("/v1/openapi.json", (c) => {
+    try {
+      return c.json(getOpenApiJson());
+    } catch {
+      return c.json({ error: "Could not load OpenAPI spec" }, 500);
+    }
+  });
+
+  app.get("/v1/docs", (c) => {
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>x490 Facilitator API Docs</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script>
+    SwaggerUIBundle({
+      url: "/v1/openapi.json",
+      dom_id: "#swagger-ui",
+      presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
+      layout: "BaseLayout",
+      deepLinking: true,
+    });
+  </script>
+</body>
+</html>`;
+    return c.html(html);
   });
 
   // ── Tenant sign-up (public — first call) ───────────────────────────────────

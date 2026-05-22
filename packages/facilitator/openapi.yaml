@@ -1,0 +1,1440 @@
+openapi: 3.1.0
+info:
+  title: x490 Facilitator API
+  version: 1.0.0
+  description: |
+    The x490 Facilitator provides managed token issuance, template registry,
+    and agreement tracking for the x490 smart-legal-contract protocol.
+
+    Two authentication schemes are supported for operator-facing endpoints:
+    - **API Key** (`X-API-Key` header) — issued at tenant creation or via POST /v1/apikeys
+    - **Auth0 JWT** (`Authorization: Bearer <token>`) — for dashboard integrations
+
+servers:
+  - url: /
+    description: This server
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Auth0 JWT or API key passed as a Bearer token
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: Tenant API key
+
+  schemas:
+    # ── Primitive building blocks ────────────────────────────────────────────
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          example: "Template not found"
+
+    # ── NegotiableField ──────────────────────────────────────────────────────
+
+    NegotiableField:
+      type: object
+      required: [field]
+      properties:
+        field:
+          type: string
+          description: Name of the negotiable contract field
+        allowedValues:
+          type: array
+          items:
+            type: string
+          description: Enumeration of permitted values; absent means any value is accepted
+        description:
+          type: string
+          description: Human-readable description of the field
+
+    # ── ContractRequirements ─────────────────────────────────────────────────
+
+    ContractRequirements:
+      type: object
+      required:
+        - scheme
+        - version
+        - templateId
+        - templateUrl
+        - templateHash
+        - requiredPartyFields
+        - acceptEndpoint
+        - expiresIn
+        - resource
+        - negotiable
+      properties:
+        scheme:
+          type: string
+          enum: [x490]
+        version:
+          type: integer
+          enum: [1]
+        templateId:
+          type: string
+        templateUrl:
+          type: string
+          format: uri
+        templateHash:
+          type: string
+        requiredPartyFields:
+          type: array
+          items:
+            type: string
+        acceptEndpoint:
+          type: string
+          format: uri
+        negotiateEndpoint:
+          type: string
+          format: uri
+        verifyEndpoint:
+          type: string
+          format: uri
+        revokeEndpoint:
+          type: string
+          format: uri
+        expiresIn:
+          type: integer
+          description: Token TTL in seconds
+          minimum: 60
+          maximum: 31536000
+        resource:
+          type: string
+        description:
+          type: string
+        negotiable:
+          type: boolean
+        negotiableFields:
+          type: array
+          items:
+            $ref: "#/components/schemas/NegotiableField"
+        requiredParties:
+          type: integer
+          minimum: 2
+          description: Number of parties required to sign (multi-party contracts)
+        jurisdiction:
+          type: string
+        governingLaw:
+          type: string
+
+    # ── AcceptRequest ────────────────────────────────────────────────────────
+
+    AcceptRequest:
+      type: object
+      required: [templateHash, partyData]
+      properties:
+        templateId:
+          type: string
+          description: Template identifier (informational; server resolves by hash)
+        templateHash:
+          type: string
+          description: SHA-256 hash of the template content
+        partyData:
+          type: object
+          additionalProperties:
+            type: string
+          description: Key-value map of party-specific fields; all values must be strings
+        negotiationTerms:
+          type: object
+          additionalProperties: true
+          description: Proposed negotiation overrides (only honoured by POST /negotiate)
+        pendingContractId:
+          type: string
+          description: >
+            For multi-party contracts: the contractId returned by the first signer.
+            Omit for the first acceptance.
+
+    # ── AcceptResponse ───────────────────────────────────────────────────────
+
+    AcceptResponse:
+      type: object
+      required: [status, contractId, token]
+      properties:
+        status:
+          type: string
+          enum: [accepted, pending, counter_offer]
+        contractId:
+          type: string
+          description: UUID of the resulting contract (empty string when status is counter_offer)
+        token:
+          type: string
+          description: Signed contract token (empty string when status is pending or counter_offer)
+        counterOffer:
+          $ref: "#/components/schemas/ContractRequirements"
+          description: Present when status is counter_offer; describes the acceptable terms
+        pendingAcceptances:
+          type: integer
+          description: Number of parties that have accepted so far (multi-party flow)
+        requiredAcceptances:
+          type: integer
+          description: Total parties required before the contract is finalised
+
+    # ── VerifyResponse ───────────────────────────────────────────────────────
+
+    VerifyResponse:
+      type: object
+      required: [valid]
+      properties:
+        valid:
+          type: boolean
+        contractId:
+          type: string
+        partyId:
+          type: string
+        templateHash:
+          type: string
+        expiresAt:
+          type: integer
+          description: Unix timestamp (seconds) at which the token expires
+        reason:
+          type: string
+          description: Present when valid is false; explains why verification failed
+
+    # ── Template ─────────────────────────────────────────────────────────────
+
+    Template:
+      type: object
+      required: [hash, content]
+      properties:
+        hash:
+          type: string
+          description: SHA-256 hex digest of the template content
+        url:
+          type: string
+          format: uri
+        content:
+          type: string
+          description: Raw template text
+        title:
+          type: string
+        description:
+          type: string
+        terms:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: integer
+          description: Unix timestamp (seconds)
+
+    # ── Agreement ────────────────────────────────────────────────────────────
+
+    Agreement:
+      type: object
+      required:
+        - contractId
+        - tenantId
+        - templateHash
+        - partyId
+        - resource
+        - partyData
+        - issuedAt
+        - expiresAt
+      properties:
+        contractId:
+          type: string
+        tenantId:
+          type: string
+        templateHash:
+          type: string
+        partyId:
+          type: string
+        resource:
+          type: string
+        partyData:
+          type: object
+          additionalProperties:
+            type: string
+        issuedAt:
+          type: integer
+          description: Unix timestamp (seconds)
+        expiresAt:
+          type: integer
+          description: Unix timestamp (seconds)
+        revokedAt:
+          type: integer
+          description: Unix timestamp (seconds); present only when the contract has been revoked
+        revokedReason:
+          type: string
+
+    # ── ContractEvent ────────────────────────────────────────────────────────
+
+    ContractEvent:
+      type: object
+      required:
+        - eventId
+        - contractId
+        - tenantId
+        - type
+        - payload
+        - parentEventIds
+        - createdAt
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        contractId:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+        type:
+          type: string
+          description: >
+            Event type. System events use the "agreement." prefix (reserved);
+            custom events must use a different prefix.
+        party:
+          type: string
+          description: Party identifier associated with the event (optional)
+        payload:
+          type: object
+          additionalProperties: true
+        parentEventIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        createdAt:
+          type: integer
+          description: Unix timestamp (seconds)
+
+    # ── WebhookDelivery ──────────────────────────────────────────────────────
+
+    WebhookDelivery:
+      type: object
+      required:
+        - deliveryId
+        - webhookId
+        - tenantId
+        - eventType
+        - attemptCount
+        - createdAt
+      properties:
+        deliveryId:
+          type: string
+        webhookId:
+          type: string
+        tenantId:
+          type: string
+        eventType:
+          type: string
+        contractId:
+          type: string
+        statusCode:
+          type: integer
+          description: HTTP status code returned by the destination
+        error:
+          type: string
+        attemptCount:
+          type: integer
+        succeededAt:
+          type: integer
+          description: Unix timestamp (seconds)
+        createdAt:
+          type: integer
+          description: Unix timestamp (seconds)
+
+    # ── Pagination wrapper ───────────────────────────────────────────────────
+
+    Cursor:
+      type: object
+      properties:
+        nextCursor:
+          type: string
+          description: Opaque cursor; pass as `cursor` query param in the next request
+
+paths:
+  # ── Health ─────────────────────────────────────────────────────────────────
+
+  /health:
+    get:
+      operationId: getHealth
+      summary: Health check
+      tags: [public]
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok:
+                    type: boolean
+                    enum: [true]
+
+  # ── OpenAPI / Docs ─────────────────────────────────────────────────────────
+
+  /v1/openapi.json:
+    get:
+      operationId: getOpenApiSpec
+      summary: OpenAPI 3.1 spec (JSON)
+      tags: [public]
+      responses:
+        "200":
+          description: OpenAPI specification document
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /v1/docs:
+    get:
+      operationId: getDocs
+      summary: Swagger UI
+      tags: [public]
+      responses:
+        "200":
+          description: HTML page with embedded Swagger UI
+          content:
+            text/html:
+              schema:
+                type: string
+
+  # ── Tenant management ──────────────────────────────────────────────────────
+
+  /v1/tenants:
+    post:
+      operationId: createTenant
+      summary: Create a new tenant (sign up)
+      tags: [public]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  example: "Acme Corp"
+      responses:
+        "201":
+          description: Tenant created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tenantId, apiKey, keyId, note]
+                properties:
+                  tenantId:
+                    type: string
+                  apiKey:
+                    type: string
+                    description: Raw API key — shown once; store securely
+                  keyId:
+                    type: string
+                  name:
+                    type: string
+                  note:
+                    type: string
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Rate limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/tenants/{tenantId}:
+    delete:
+      operationId: deleteTenant
+      summary: Delete own tenant (GDPR erasure)
+      tags: [tenants]
+      security:
+        - apiKeyAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Tenant deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deleted, tenantId]
+                properties:
+                  deleted:
+                    type: boolean
+                  tenantId:
+                    type: string
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Forbidden — tenantId does not match authenticated tenant
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ── Templates ──────────────────────────────────────────────────────────────
+
+  /v1/templates:
+    post:
+      operationId: uploadTemplate
+      summary: Upload (register) a template
+      tags: [templates]
+      security:
+        - apiKeyAuth: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content:
+                  type: string
+                  description: Raw template text (Markdown, plain text, etc.)
+                title:
+                  type: string
+                description:
+                  type: string
+                terms:
+                  type: object
+                  additionalProperties: true
+      responses:
+        "201":
+          description: Template registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Template"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    get:
+      operationId: listTemplates
+      summary: List templates (paginated)
+      tags: [templates]
+      security:
+        - apiKeyAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: cursor
+          in: query
+          schema:
+            type: string
+          description: Opaque pagination cursor from a previous response
+      responses:
+        "200":
+          description: Paginated list of templates
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Cursor"
+                  - type: object
+                    required: [templates]
+                    properties:
+                      templates:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Template"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/templates/{hash}:
+    get:
+      operationId: getTemplate
+      summary: Get template by hash (public)
+      tags: [public, templates]
+      parameters:
+        - name: hash
+          in: path
+          required: true
+          schema:
+            type: string
+          description: SHA-256 hex digest of the template content
+      responses:
+        "200":
+          description: Template found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Template"
+        "404":
+          description: Template not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ── Requirements ───────────────────────────────────────────────────────────
+
+  /v1/requirements:
+    post:
+      operationId: upsertRequirements
+      summary: Upsert contract requirements configuration
+      tags: [requirements]
+      security:
+        - apiKeyAuth: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - templateHash
+                - requiredPartyFields
+                - resource
+                - description
+                - expiresIn
+              properties:
+                templateHash:
+                  type: string
+                requiredPartyFields:
+                  type: array
+                  items:
+                    type: string
+                resource:
+                  type: string
+                description:
+                  type: string
+                expiresIn:
+                  type: integer
+                  minimum: 60
+                  maximum: 31536000
+                  description: Token TTL in seconds
+                negotiable:
+                  type: boolean
+                  default: false
+                negotiableFields:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/NegotiableField"
+                requiredParties:
+                  type: integer
+                  minimum: 2
+                jurisdiction:
+                  type: string
+                governingLaw:
+                  type: string
+      responses:
+        "200":
+          description: Requirements upserted; returns computed ContractRequirements object
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractRequirements"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Template belongs to a different tenant
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Template not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ── Accept / Negotiate / Verify ────────────────────────────────────────────
+
+  /v1/{tenantId}/accept:
+    post:
+      operationId: acceptContract
+      summary: Accept a contract (agent-facing, public)
+      tags: [public, contracts]
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
+          description: >
+            Optional client-generated idempotency key (UUID recommended).
+            Re-sending the same key within 24 h returns the cached response.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AcceptRequest"
+      responses:
+        "200":
+          description: Contract accepted (or pending for multi-party contracts)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AcceptResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Tenant or template not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Rate limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/{tenantId}/negotiate:
+    post:
+      operationId: negotiateContract
+      summary: Negotiate contract terms (agent-facing, public)
+      tags: [public, contracts]
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AcceptRequest"
+      responses:
+        "200":
+          description: Negotiation result — accepted, or counter-offer with acceptable terms
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/AcceptResponse"
+                  - type: object
+                    properties:
+                      rejectedFields:
+                        type: array
+                        items:
+                          type: string
+                        description: >
+                          Fields whose proposed values were rejected; only present
+                          when status is counter_offer
+        "400":
+          description: Validation error or contract is not negotiable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Tenant or template not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Rate limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/{tenantId}/verify:
+    get:
+      operationId: verifyContract
+      summary: Verify a contract token (public)
+      tags: [public, contracts]
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Signed contract token to verify
+        - name: resource
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Resource scope to validate against; defaults to "*"
+      responses:
+        "200":
+          description: Verification result (always 200; check the `valid` field)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerifyResponse"
+        "400":
+          description: Missing token query parameter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Tenant not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Rate limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/{tenantId}/revoke:
+    post:
+      operationId: revokeContract
+      summary: Revoke a contract
+      tags: [contracts]
+      security:
+        - apiKeyAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [contractId]
+              properties:
+                contractId:
+                  type: string
+                reason:
+                  type: string
+      responses:
+        "200":
+          description: Revocation result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revoked, contractId]
+                properties:
+                  revoked:
+                    type: boolean
+                  contractId:
+                    type: string
+        "400":
+          description: Missing contractId
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Agreement not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ── Me ─────────────────────────────────────────────────────────────────────
+
+  /v1/me:
+    get:
+      operationId: getMe
+      summary: Get current tenant info
+      tags: [tenants]
+      security:
+        - apiKeyAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current tenant
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tenantId, name]
+                properties:
+                  tenantId:
+                    type: string
+                  name:
+                    type: string
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ── Agreements ─────────────────────────────────────────────────────────────
+
+  /v1/agreements:
+    get:
+      operationId: listAgreements
+      summary: List agreements (paginated)
+      tags: [agreements]
+      security:
+        - apiKeyAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: resource
+          in: query
+          schema:
+            type: string
+          description: Filter by resource scope
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: cursor
+          in: query
+          schema:
+            type: string
+          description: Opaque pagination cursor from a previous response
+      responses:
+        "200":
+          description: Paginated list of agreements (token field omitted)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Cursor"
+                  - type: object
+                    required: [agreements]
+                    properties:
+                      agreements:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Agreement"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/agreements/{contractId}:
+    get:
+      operationId: getAgreement
+      summary: Get single agreement by contractId
+      tags: [agreements]
+      security:
+        - apiKeyAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Agreement record (token field omitted)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agreement"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Agreement not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/agreements/{contractId}/events:
+    get:
+      operationId: listContractEvents
+      summary: Get event DAG for a contract
+      tags: [agreements]
+      security:
+        - apiKeyAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Ordered list of contract events
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events]
+                properties:
+                  events:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ContractEvent"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Agreement not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    post:
+      operationId: appendContractEvent
+      summary: Append a custom event to a contract's DAG
+      tags: [agreements]
+      security:
+        - apiKeyAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type]
+              properties:
+                type:
+                  type: string
+                  description: >
+                    Event type string. Must NOT start with "agreement." — those
+                    prefixes are reserved for system events.
+                  example: "audit.reviewed"
+                payload:
+                  type: object
+                  additionalProperties: true
+      responses:
+        "201":
+          description: Event appended
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractEvent"
+        "400":
+          description: Validation error or reserved event type
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Agreement not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Contract is revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: Event store not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ── API Keys ───────────────────────────────────────────────────────────────
+
+  /v1/apikeys:
+    get:
+      operationId: listApiKeys
+      summary: List API keys for authenticated tenant
+      tags: [apikeys]
+      security:
+        - apiKeyAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: List of API keys (raw key values never returned)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [apiKeys]
+                properties:
+                  apiKeys:
+                    type: array
+                    items:
+                      type: object
+                      required: [keyId, name, createdAt]
+                      properties:
+                        keyId:
+                          type: string
+                        name:
+                          type: string
+                        createdAt:
+                          type: integer
+                        revokedAt:
+                          type: integer
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    post:
+      operationId: createApiKey
+      summary: Create a new API key
+      tags: [apikeys]
+      security:
+        - apiKeyAuth: []
+        - bearerAuth: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  default: default
+      responses:
+        "201":
+          description: API key created (raw key shown once — store securely)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [keyId, apiKey, name, note]
+                properties:
+                  keyId:
+                    type: string
+                  apiKey:
+                    type: string
+                  name:
+                    type: string
+                  note:
+                    type: string
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/apikeys/{keyId}:
+    delete:
+      operationId: deleteApiKey
+      summary: Revoke an API key
+      tags: [apikeys]
+      security:
+        - apiKeyAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: keyId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Key revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revoked, keyId]
+                properties:
+                  revoked:
+                    type: boolean
+                  keyId:
+                    type: string
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Key not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ── Webhooks ───────────────────────────────────────────────────────────────
+
+  /v1/webhooks:
+    get:
+      operationId: listWebhooks
+      summary: List webhooks
+      tags: [webhooks]
+      security:
+        - apiKeyAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: List of webhooks (signing secret never returned)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [webhooks]
+                properties:
+                  webhooks:
+                    type: array
+                    items:
+                      type: object
+                      required: [webhookId, url, events, tenantId]
+                      properties:
+                        webhookId:
+                          type: string
+                        tenantId:
+                          type: string
+                        url:
+                          type: string
+                          format: uri
+                        events:
+                          type: array
+                          items:
+                            type: string
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    post:
+      operationId: createWebhook
+      summary: Register a webhook
+      tags: [webhooks]
+      security:
+        - apiKeyAuth: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url, events]
+              properties:
+                url:
+                  type: string
+                  format: uri
+                  description: HTTPS endpoint to receive webhook payloads
+                secret:
+                  type: string
+                  description: Optional pre-shared signing secret; auto-generated if omitted
+                events:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: string
+                    enum: [agreement.created, agreement.revoked]
+      responses:
+        "201":
+          description: Webhook registered (signing secret shown once — store securely)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [webhookId, url, events, secret, note]
+                properties:
+                  webhookId:
+                    type: string
+                  url:
+                    type: string
+                    format: uri
+                  events:
+                    type: array
+                    items:
+                      type: string
+                  secret:
+                    type: string
+                  note:
+                    type: string
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/webhooks/{webhookId}:
+    delete:
+      operationId: deleteWebhook
+      summary: Delete (disable) a webhook
+      tags: [webhooks]
+      security:
+        - apiKeyAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: webhookId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Webhook disabled
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [disabled, webhookId]
+                properties:
+                  disabled:
+                    type: boolean
+                  webhookId:
+                    type: string
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Webhook not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/webhooks/{webhookId}/deliveries:
+    get:
+      operationId: listWebhookDeliveries
+      summary: List recent webhook deliveries (last 50)
+      tags: [webhooks]
+      security:
+        - apiKeyAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: webhookId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Delivery records
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deliveries]
+                properties:
+                  deliveries:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WebhookDelivery"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Webhook not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
