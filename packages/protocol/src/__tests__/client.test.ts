@@ -158,6 +158,70 @@ describe("ContractClient.establishAgreement", () => {
     assert.equal(fetchCount, 1);
   });
 
+  it("refreshes when cached token is within the refresh threshold", async () => {
+    // Token that expires in 30 seconds — within the default 60s threshold
+    const nearExpiryToken = await signToken(
+      { contractId: "cid-ne", templateHash: requirements.templateHash, partyId: "p", resource: "/resource", iat: NOW, exp: NOW + 30 },
+      SECRET,
+    );
+    const freshTok = await freshToken();
+    let fetchCount = 0;
+
+    mockFetch(async () => {
+      fetchCount++;
+      const resp: AcceptResponse = { status: "accepted", contractId: "cid-ne2", token: fetchCount === 1 ? nearExpiryToken : freshTok };
+      return new Response(JSON.stringify(resp), { status: 200 });
+    });
+
+    const client = new ContractClient({ partyData: { name: "Test" }, skipTemplateVerification: true });
+    const t1 = await client.establishAgreement(requirements);
+    // t1 is near-expiry — second call should re-fetch
+    const t2 = await client.establishAgreement(requirements);
+    assert.equal(t1, nearExpiryToken);
+    assert.equal(t2, freshTok);
+    assert.equal(fetchCount, 2);
+  });
+
+  it("does not refresh when cached token exceeds the refresh threshold", async () => {
+    // Token that expires in 90 seconds — outside the default 60s threshold
+    const longerToken = await signToken(
+      { contractId: "cid-lt", templateHash: requirements.templateHash, partyId: "p", resource: "/resource", iat: NOW, exp: NOW + 90 },
+      SECRET,
+    );
+    let fetchCount = 0;
+
+    mockFetch(async () => {
+      fetchCount++;
+      const resp: AcceptResponse = { status: "accepted", contractId: "cid-lt", token: longerToken };
+      return new Response(JSON.stringify(resp), { status: 200 });
+    });
+
+    const client = new ContractClient({ partyData: { name: "Test" }, skipTemplateVerification: true });
+    await client.establishAgreement(requirements);
+    await client.establishAgreement(requirements);
+    assert.equal(fetchCount, 1);
+  });
+
+  it("respects a custom tokenRefreshThreshold", async () => {
+    // Token expires in 45 seconds; with a 30s threshold it should NOT refresh
+    const midToken = await signToken(
+      { contractId: "cid-mid", templateHash: requirements.templateHash, partyId: "p", resource: "/resource", iat: NOW, exp: NOW + 45 },
+      SECRET,
+    );
+    let fetchCount = 0;
+
+    mockFetch(async () => {
+      fetchCount++;
+      const resp: AcceptResponse = { status: "accepted", contractId: "cid-mid", token: midToken };
+      return new Response(JSON.stringify(resp), { status: 200 });
+    });
+
+    const client = new ContractClient({ partyData: { name: "Test" }, skipTemplateVerification: true, tokenRefreshThreshold: 30 });
+    await client.establishAgreement(requirements);
+    await client.establishAgreement(requirements);
+    assert.equal(fetchCount, 1);
+  });
+
   it("handles a counter-offer round-trip and accepts", async () => {
     const token = await freshToken();
     const counter: ContractRequirements = { ...requirements, jurisdiction: "UK", templateHash: "testhash123" };

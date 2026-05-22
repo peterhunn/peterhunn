@@ -34,6 +34,11 @@ export interface ContractClientOptions {
   /** Max negotiation round-trips before giving up (default: 3) */
   maxNegotiationRounds?: number;
   /**
+   * Seconds before a token's expiry at which the client proactively refreshes it.
+   * Prevents serving a token that expires mid-request. Default: 60.
+   */
+  tokenRefreshThreshold?: number;
+  /**
    * Skip fetching and verifying the template hash before accepting (default: false).
    * Set to true only in tests or environments where the template server is unavailable.
    */
@@ -54,11 +59,13 @@ export interface ContractClientOptions {
 export class ContractClient {
   private readonly cache: Map<string, string>;
   private readonly maxRounds: number;
+  private readonly refreshThreshold: number;
   private readonly verifiedHashes = new Set<string>();
 
   constructor(private readonly opts: ContractClientOptions) {
     this.cache = opts.cache ?? new Map();
     this.maxRounds = opts.maxNegotiationRounds ?? 3;
+    this.refreshThreshold = opts.tokenRefreshThreshold ?? 60;
   }
 
   async fetch(url: string, init?: RequestInit): Promise<Response> {
@@ -99,7 +106,7 @@ export class ContractClient {
   /** Establish a contract agreement, handling negotiation round-trips. */
   async establishAgreement(requirements: ContractRequirements): Promise<string> {
     const cached = this.cache.get(requirements.templateHash);
-    if (cached && !this.isExpired(cached)) return cached;
+    if (cached && !this.isExpiredOrNearExpiry(cached)) return cached;
 
     await this.opts.onRequirements?.(requirements);
 
@@ -197,7 +204,7 @@ export class ContractClient {
 
   private findCachedToken(resource: string): string | undefined {
     for (const token of this.cache.values()) {
-      if (this.isExpired(token)) continue;
+      if (this.isExpiredOrNearExpiry(token)) continue;
       const decoded = decodeToken(token);
       if (!decoded) continue;
       if (decoded.payload.resource === "*" || decoded.payload.resource === resource) {
@@ -207,9 +214,9 @@ export class ContractClient {
     return undefined;
   }
 
-  private isExpired(raw: string): boolean {
+  private isExpiredOrNearExpiry(raw: string): boolean {
     const decoded = decodeToken(raw);
     if (!decoded) return true;
-    return decoded.payload.exp < Math.floor(Date.now() / 1000);
+    return decoded.payload.exp - Math.floor(Date.now() / 1000) < this.refreshThreshold;
   }
 }
