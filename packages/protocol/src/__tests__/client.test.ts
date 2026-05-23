@@ -440,6 +440,141 @@ describe("ContractClient partyData pre-validation", () => {
   });
 });
 
+describe("ContractClient checkRevocationOnUse", () => {
+  const verifyEndpointReqs: ContractRequirements = {
+    ...requirements,
+    verifyEndpoint: "https://facilitator.example.com/v1/tenant1/verify",
+  };
+
+  it("when checkRevocationOnUse is true and verify returns { valid: false } — token is evicted, onRevoked fires, client re-establishes", async () => {
+    const staleToken = await signToken(
+      { contractId: "cid-revoked-check", templateHash: verifyEndpointReqs.templateHash, partyId: "p", resource: "/resource", iat: NOW, exp: NOW + 3600 },
+      SECRET,
+    );
+    const freshTok = await freshToken();
+    const reqHeader = b64encode(JSON.stringify(verifyEndpointReqs));
+    let revokedId: string | null = null;
+    let acceptCalls = 0;
+    let resourceCalls = 0;
+    let verifyCalls = 0;
+    // Phase 1: first call to /accept returns the stale token, priming the verifyEndpointByHash map
+    // Phase 2: verify returns { valid: false }, token is evicted, onRevoked fires
+    // Phase 3: 490 flow re-establishes with a fresh token via a second /accept call
+    let acceptPhase = 0;
+
+    mockFetch(async (url) => {
+      if (url.includes("/verify")) {
+        verifyCalls++;
+        return new Response(JSON.stringify({ valid: false }), { status: 200 });
+      }
+      if (url.includes("/accept")) {
+        acceptCalls++;
+        acceptPhase++;
+        const token = acceptPhase === 1 ? staleToken : freshTok;
+        const contractId = acceptPhase === 1 ? "cid-revoked-check" : "cid-new-check";
+        const resp: AcceptResponse = { status: "accepted", contractId, token };
+        return new Response(JSON.stringify(resp), { status: 200 });
+      }
+      resourceCalls++;
+      if (resourceCalls === 1) {
+        return new Response(null, { status: 490, headers: { "X-490-Requirements": reqHeader } });
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
+
+    const client = new ContractClient({
+      partyData: { name: "Test" },
+      skipTemplateVerification: true,
+      checkRevocationOnUse: true,
+      onRevoked: (id) => { revokedId = id; },
+    });
+
+    // First call: no cached token → 490 flow → establishes agreement (staleToken) + primes verifyEndpointByHash
+    // Second call: has cached staleToken → checkRevocationOnUse triggers verify → { valid: false }
+    //              → evict staleToken + fire onRevoked → 490 flow re-establishes with freshTok
+    const res = await client.fetch("https://api.example.com/resource");
+    assert.equal(res.status, 200);
+    // First request hit 490 (resourceCalls === 1), triggered accept (acceptCalls === 1 after phase 1 setup)
+    // Second request (retry after 490) succeeded — but we need a second client.fetch call to trigger revocation check
+    // Reset resourceCalls and call again to trigger the revocation path
+    resourceCalls = 0;
+    acceptCalls = 0;
+    verifyCalls = 0;
+
+    const res2 = await client.fetch("https://api.example.com/resource");
+    assert.equal(res2.status, 200);
+    assert.equal(verifyCalls, 1, "should have called verifyEndpoint");
+    assert.equal(acceptCalls, 1, "should have re-established after revocation");
+    assert.equal(revokedId, "cid-revoked-check", "onRevoked should fire with correct contractId");
+  });
+
+  it("when checkRevocationOnUse is true and verify returns { valid: true } — token is reused, no re-establishment", async () => {
+    const validToken = await signToken(
+      { contractId: "cid-valid-check", templateHash: verifyEndpointReqs.templateHash, partyId: "p", resource: "/resource", iat: NOW, exp: NOW + 3600 },
+      SECRET,
+    );
+    let acceptCalls = 0;
+    let verifyCalls = 0;
+
+    mockFetch(async (url) => {
+      if (url.includes("/verify")) {
+        verifyCalls++;
+        return new Response(JSON.stringify({ valid: true }), { status: 200 });
+      }
+      if (url.includes("/accept")) {
+        acceptCalls++;
+        const resp: AcceptResponse = { status: "accepted", contractId: "cid-v2", token: validToken };
+        return new Response(JSON.stringify(resp), { status: 200 });
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
+
+    // Establish agreement first to prime the verifyEndpointByHash map
+    const client = new ContractClient({
+      partyData: { name: "Test" },
+      skipTemplateVerification: true,
+      checkRevocationOnUse: true,
+    });
+    await client.establishAgreement(verifyEndpointReqs);
+    acceptCalls = 0; // reset counter after initial establishment
+
+    const res = await client.fetch("https://api.example.com/resource");
+    assert.equal(res.status, 200);
+    assert.equal(verifyCalls, 1, "should have called verifyEndpoint");
+    assert.equal(acceptCalls, 0, "should NOT re-establish when token is still valid");
+  });
+
+  it("when checkRevocationOnUse is false (default) — verify endpoint is never called even if verifyEndpoint is in requirements", async () => {
+    const validToken = await signToken(
+      { contractId: "cid-no-check", templateHash: verifyEndpointReqs.templateHash, partyId: "p", resource: "/resource", iat: NOW, exp: NOW + 3600 },
+      SECRET,
+    );
+    let verifyCalls = 0;
+
+    mockFetch(async (url) => {
+      if (url.includes("/verify")) {
+        verifyCalls++;
+        return new Response(JSON.stringify({ valid: false }), { status: 200 });
+      }
+      if (url.includes("/accept")) {
+        const resp: AcceptResponse = { status: "accepted", contractId: "cid-nc2", token: validToken };
+        return new Response(JSON.stringify(resp), { status: 200 });
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
+
+    // Default client — checkRevocationOnUse not set (defaults to false)
+    const client = new ContractClient({
+      partyData: { name: "Test" },
+      skipTemplateVerification: true,
+    });
+    await client.establishAgreement(verifyEndpointReqs);
+
+    await client.fetch("https://api.example.com/resource");
+    assert.equal(verifyCalls, 0, "verifyEndpoint should NOT be called when checkRevocationOnUse is false");
+  });
+});
+
 describe("ContractClient partyData as function", () => {
   it("resolves partyData by calling the function with the current requirements", async () => {
     const token = await freshToken();

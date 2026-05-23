@@ -49,6 +49,12 @@ export interface ContractClientOptions {
    * Set to true only in tests or environments where the template server is unavailable.
    */
   skipTemplateVerification?: boolean;
+  /**
+   * When true, the client calls verifyEndpoint before attaching a cached token
+   * to confirm the contract hasn't been revoked server-side. Adds one round-trip
+   * per request. Default: false.
+   */
+  checkRevocationOnUse?: boolean;
 }
 
 /**
@@ -67,6 +73,7 @@ export class ContractClient {
   private readonly maxRounds: number;
   private readonly refreshThreshold: number;
   private readonly verifiedHashes = new Set<string>();
+  private readonly verifyEndpointByHash = new Map<string, string>();
 
   constructor(private readonly opts: ContractClientOptions) {
     this.cache = opts.cache ?? new Map();
@@ -79,7 +86,23 @@ export class ContractClient {
 
     // Pre-attach a cached valid token if available for this resource
     const cached = this.findCachedToken(new URL(url).pathname);
-    if (cached) headers.set("X-490-Contract", cached);
+    // Track whether the token was already evicted by the proactive revocation check
+    // so the 490 handler does not fire onRevoked a second time.
+    let alreadyEvicted = false;
+    if (cached && this.opts.checkRevocationOnUse) {
+      const revoked = await this.checkIfRevoked(cached);
+      if (revoked) {
+        this.evictToken(cached);  // remove from cache
+        alreadyEvicted = true;
+        const decoded = decodeToken(cached);
+        if (decoded) void this.opts.onRevoked?.(decoded.payload.contractId);
+        // don't attach — let the 490 flow re-establish
+      } else {
+        headers.set("X-490-Contract", cached);
+      }
+    } else if (cached) {
+      headers.set("X-490-Contract", cached);
+    }
 
     const response = await fetch(url, { ...init, headers });
 
@@ -92,7 +115,8 @@ export class ContractClient {
 
       // If we presented a cached token that the server rejected, evict it and
       // notify the caller — the contract may have been revoked server-side.
-      if (cached) {
+      // Skip if the token was already evicted by the proactive revocation check above.
+      if (cached && !alreadyEvicted) {
         const decoded = decodeToken(cached);
         if (decoded) void this.opts.onRevoked?.(decoded.payload.contractId);
         this.cache.delete(requirements.templateHash);
@@ -175,8 +199,14 @@ export class ContractClient {
 
       if (result.status === "accepted") {
         this.cache.set(requirements.templateHash, result.token);
+        if (requirements.verifyEndpoint) {
+          this.verifyEndpointByHash.set(requirements.templateHash, requirements.verifyEndpoint);
+        }
         if (result.counterOffer) {
           this.cache.set(result.counterOffer.templateHash, result.token);
+          if (result.counterOffer.verifyEndpoint) {
+            this.verifyEndpointByHash.set(result.counterOffer.templateHash, result.counterOffer.verifyEndpoint);
+          }
         }
         return result.token;
       }
@@ -233,5 +263,42 @@ export class ContractClient {
     const decoded = decodeToken(raw);
     if (!decoded) return true;
     return decoded.payload.exp - Math.floor(Date.now() / 1000) < this.refreshThreshold;
+  }
+
+  private async checkIfRevoked(token: string): Promise<boolean> {
+    // Find the templateHash for this token by scanning the cache
+    let templateHash: string | undefined;
+    for (const [hash, cached] of this.cache.entries()) {
+      if (cached === token) {
+        templateHash = hash;
+        break;
+      }
+    }
+
+    if (!templateHash) return false;
+
+    const verifyEndpoint = this.verifyEndpointByHash.get(templateHash);
+    if (!verifyEndpoint) return false;
+
+    try {
+      const res = await fetch(`${verifyEndpoint}?token=${encodeURIComponent(token)}`);
+      if (res.ok) {
+        const body = (await res.json()) as { valid: boolean };
+        if (body.valid === false) return true; // revoked
+      }
+    } catch {
+      // fail open — can't reach verify endpoint
+    }
+    return false;
+  }
+
+  private evictToken(token: string): void {
+    for (const [hash, cached] of this.cache.entries()) {
+      if (cached === token) {
+        this.cache.delete(hash);
+        this.verifyEndpointByHash.delete(hash);
+        break;
+      }
+    }
   }
 }
