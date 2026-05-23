@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { listPendingContracts, type PendingContract } from "@/lib/api";
 
 function formatDate(ts: number): string {
@@ -13,6 +13,26 @@ function truncate(s: string, n = 8): string {
 
 function partyName(acceptance: PendingContract["acceptances"][number]): string {
   return acceptance.partyData["name"] ?? acceptance.partyId;
+}
+
+function CopyIdButton({ id }: { id: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(id).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }, [id]);
+
+  return (
+    <button
+      onClick={handleCopy}
+      className="text-xs border rounded px-2 py-1 border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+    >
+      {copied ? "Copied!" : "Copy ID"}
+    </button>
+  );
 }
 
 export default function PendingContractsPage() {
@@ -67,6 +87,7 @@ export default function PendingContractsPage() {
                 <th className="px-4 py-3">Progress</th>
                 <th className="px-4 py-3">Signed by</th>
                 <th className="px-4 py-3">Created</th>
+                <th className="px-4 py-3">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
@@ -93,6 +114,9 @@ export default function PendingContractsPage() {
                   </td>
                   <td className="px-4 py-3 text-gray-500 dark:text-gray-400 whitespace-nowrap">
                     {formatDate(contract.createdAt)}
+                  </td>
+                  <td className="px-4 py-3">
+                    <CopyIdButton id={contract.contractId} />
                   </td>
                 </tr>
               ))}
