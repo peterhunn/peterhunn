@@ -336,6 +336,8 @@ export interface PendingContractStore {
   addParty(contractId: string, partyId: string, partyData: Record<string, string>): Promise<PendingContract | null>;
   get(contractId: string): Promise<PendingContract | null>;
   complete(contractId: string): Promise<void>;
+  /** List all pending (completedAt is null) contracts for a tenant. */
+  listByTenant(tenantId: string): Promise<PendingContract[]>;
 }
 
 export class InMemoryPendingContractStore implements PendingContractStore {
@@ -374,6 +376,12 @@ export class InMemoryPendingContractStore implements PendingContractStore {
   async complete(contractId: string): Promise<void> {
     const c = this.contracts.get(contractId);
     if (c) this.contracts.set(contractId, { ...c, completedAt: Math.floor(Date.now() / 1000) });
+  }
+
+  async listByTenant(tenantId: string): Promise<PendingContract[]> {
+    return [...this.contracts.values()]
+      .filter((c) => c.tenantId === tenantId && c.completedAt === undefined)
+      .sort((a, b) => b.createdAt - a.createdAt);
   }
 }
 

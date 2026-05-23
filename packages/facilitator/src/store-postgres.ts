@@ -674,6 +674,15 @@ export class PostgresPendingContractStore implements PendingContractStore {
       WHERE contract_id = ${contractId}
     `;
   }
+
+  async listByTenant(tenantId: string): Promise<PendingContract[]> {
+    const rows = await this.sql<PendingContractRow[]>`
+      SELECT * FROM x490_pending_contracts
+      WHERE tenant_id = ${tenantId} AND completed_at IS NULL
+      ORDER BY created_at DESC
+    `;
+    return rows.map(rowToPendingContract);
+  }
 }
 
 // ── Webhook delivery store ─────────────────────────────────────────────────────

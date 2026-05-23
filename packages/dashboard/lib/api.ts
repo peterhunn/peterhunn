@@ -221,3 +221,25 @@ export interface WebhookDelivery {
   succeededAt?: number;
   createdAt: number;
 }
+
+export interface PendingContractAcceptance {
+  partyId: string;
+  partyData: Record<string, string>;
+  acceptedAt: number;
+}
+
+export interface PendingContract {
+  contractId: string;
+  tenantId: string;
+  templateHash: string;
+  requiredParties: number;
+  acceptances: PendingContractAcceptance[];
+  completedAt?: number;
+  createdAt: number;
+}
+
+export async function listPendingContracts(): Promise<{ pendingContracts: PendingContract[] }> {
+  const res = await apiFetch("/v1/pending-contracts");
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}

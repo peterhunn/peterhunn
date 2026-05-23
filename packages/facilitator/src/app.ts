@@ -891,6 +891,15 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     return c.json({ deleted: ok, tenantId: tenant.tenantId });
   });
 
+  // ── Pending contracts listing (auth required) ─────────────────────────────────
+
+  authed.get("/v1/pending-contracts", async (c) => {
+    const tenant = c.get("tenant");
+    if (!pendingContracts) return c.json({ pendingContracts: [] });
+    const contracts = await pendingContracts.listByTenant(tenant.tenantId);
+    return c.json({ pendingContracts: contracts });
+  });
+
   // ── Custom contract events (auth required) ────────────────────────────────────
 
   authed.post("/v1/agreements/:contractId/events", async (c) => {
