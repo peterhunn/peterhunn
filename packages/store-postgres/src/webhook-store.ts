@@ -1,5 +1,11 @@
 import type postgres from "postgres";
-import type { WebhookStore, Webhook, WebhookEventType } from "@x490/api";
+import type {
+  WebhookStore,
+  Webhook,
+  WebhookEventType,
+  WebhookDeliveryStore,
+  WebhookDelivery,
+} from "@x490/api";
 
 type Sql = ReturnType<typeof postgres>;
 
@@ -67,5 +73,71 @@ export class PostgresWebhookStore implements WebhookStore {
 
   async delete(id: string): Promise<void> {
     await this.sql`DELETE FROM webhooks WHERE id = ${id}`;
+  }
+}
+
+interface DeliveryRow {
+  id: string;
+  webhook_id: string;
+  org_id: string;
+  event_type: string;
+  status_code: number | null;
+  error: string | null;
+  attempt_count: number;
+  succeeded_at: Date | null;
+  created_at: Date;
+}
+
+function rowToDelivery(r: DeliveryRow): WebhookDelivery {
+  return {
+    id: r.id,
+    webhookId: r.webhook_id,
+    orgId: r.org_id,
+    event: r.event_type as WebhookEventType,
+    ...(r.status_code != null ? { statusCode: r.status_code } : {}),
+    ...(r.error != null ? { error: r.error } : {}),
+    attemptCount: r.attempt_count,
+    ...(r.succeeded_at != null ? { succeededAt: r.succeeded_at } : {}),
+    createdAt: r.created_at,
+  };
+}
+
+export class PostgresWebhookDeliveryStore implements WebhookDeliveryStore {
+  constructor(private readonly sql: Sql) {}
+
+  async record(delivery: WebhookDelivery): Promise<void> {
+    await this.sql`
+      INSERT INTO webhook_deliveries
+        (id, webhook_id, org_id, event_type, attempt_count, created_at)
+      VALUES
+        (${delivery.id}, ${delivery.webhookId}, ${delivery.orgId},
+         ${delivery.event}, ${delivery.attemptCount}, ${delivery.createdAt})
+    `;
+  }
+
+  async markSuccess(id: string, statusCode: number): Promise<void> {
+    await this.sql`
+      UPDATE webhook_deliveries
+      SET status_code = ${statusCode}, succeeded_at = now()
+      WHERE id = ${id}
+    `;
+  }
+
+  async markFailure(id: string, error: string, attemptCount: number): Promise<void> {
+    await this.sql`
+      UPDATE webhook_deliveries
+      SET error = ${error}, attempt_count = ${attemptCount}
+      WHERE id = ${id}
+    `;
+  }
+
+  async listByWebhook(webhookId: string, limit = 50): Promise<WebhookDelivery[]> {
+    const rows = await this.sql<DeliveryRow[]>`
+      SELECT * FROM webhook_deliveries
+      WHERE webhook_id = ${webhookId}
+      ORDER BY created_at DESC
+      LIMIT ${limit}
+    `;
+    return rows.map(rowToDelivery);
   }
 }

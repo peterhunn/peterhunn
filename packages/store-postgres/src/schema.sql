@@ -88,20 +88,19 @@ CREATE TABLE IF NOT EXISTS webhooks (
 
 CREATE INDEX IF NOT EXISTS idx_webhooks_org_id ON webhooks(org_id);
 
--- Persistent delivery log for retry infrastructure.
+-- Persistent delivery log — one row per delivery attempt sequence.
+-- attempt_count is updated in-place after retries; succeeded_at is set on success.
 CREATE TABLE IF NOT EXISTS webhook_deliveries (
   id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   webhook_id    UUID        NOT NULL REFERENCES webhooks(id) ON DELETE CASCADE,
+  org_id        UUID        NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
   event_type    TEXT        NOT NULL,
-  payload       JSONB       NOT NULL,
-  status        TEXT        NOT NULL DEFAULT 'pending'
-                            CHECK (status IN ('pending', 'delivered', 'failed')),
-  attempts      INT         NOT NULL DEFAULT 0,
-  last_error    TEXT,
-  next_retry_at TIMESTAMPTZ,
+  status_code   INT,
+  error         TEXT,
+  attempt_count INT         NOT NULL DEFAULT 1,
+  succeeded_at  TIMESTAMPTZ,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_pending
-  ON webhook_deliveries(next_retry_at)
-  WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_webhook
+  ON webhook_deliveries(webhook_id, created_at DESC);

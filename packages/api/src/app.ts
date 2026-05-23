@@ -6,8 +6,8 @@ import type { ContractStore } from "./store.js";
 import type { ApiKeyStore } from "./auth.js";
 import { hashApiKey } from "./auth.js";
 import type { AuditLog } from "./audit.js";
-import type { WebhookStore, WebhookEventType } from "./webhooks.js";
-import { fanOut } from "./webhooks.js";
+import type { WebhookStore, WebhookDeliveryStore, WebhookEventType } from "./webhooks.js";
+import { assertSafeWebhookUrl, fanOut } from "./webhooks.js";
 
 export interface AppOptions {
   registry: ContractRegistry;
@@ -16,6 +16,7 @@ export interface AppOptions {
   apiKeys: ApiKeyStore;
   audit: AuditLog;
   webhooks: WebhookStore;
+  deliveries?: WebhookDeliveryStore;
 }
 
 type AppVariables = {
@@ -55,9 +56,10 @@ type AppVariables = {
  *   POST /webhooks                          register webhook → { webhook, secret }
  *   GET  /webhooks                          list webhooks
  *   DELETE /webhooks/:id                    delete webhook
+ *   GET  /webhooks/:id/deliveries           list delivery attempts
  */
 export function createApp(options: AppOptions): Hono<{ Variables: AppVariables }> {
-  const { registry, store, llm, apiKeys, audit, webhooks } = options;
+  const { registry, store, llm, apiKeys, audit, webhooks, deliveries } = options;
   const app = new Hono<{ Variables: AppVariables }>();
 
   app.onError((err, c) => {
@@ -122,6 +124,11 @@ export function createApp(options: AppOptions): Hono<{ Variables: AppVariables }
       url: string;
       events: WebhookEventType[];
     }>();
+    try {
+      await assertSafeWebhookUrl(url);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : "Invalid webhook URL" }, 422);
+    }
     const hook = await webhooks.create(c.get("orgId"), url, events);
     // Secret is returned once here and never again
     return c.json({ webhook: hook }, 201);
@@ -140,6 +147,16 @@ export function createApp(options: AppOptions): Hono<{ Variables: AppVariables }
     }
     await webhooks.delete(c.req.param("id"));
     return c.json({ deleted: true });
+  });
+
+  app.get("/webhooks/:id/deliveries", async (c) => {
+    const hook = await webhooks.getById(c.req.param("id"));
+    if (!hook || hook.orgId !== c.get("orgId")) {
+      return c.json({ error: "Webhook not found" }, 404);
+    }
+    if (!deliveries) return c.json({ deliveries: [] });
+    const list = await deliveries.listByWebhook(hook.id);
+    return c.json({ deliveries: list });
   });
 
   // ── Discovery ────────────────────────────────────────────────────────────
@@ -236,7 +253,7 @@ export function createApp(options: AppOptions): Hono<{ Variables: AppVariables }
         contractId,
         contractType: type,
         state,
-      }),
+      }, deliveries),
     ]);
 
     return c.json({ contractId, state }, 201);
@@ -302,13 +319,13 @@ export function createApp(options: AppOptions): Hono<{ Variables: AppVariables }
         contractId,
         eventType: body.eventType,
         result: response.result,
-      }),
+      }, deliveries),
       statusChanged
         ? fanOut(webhooks, orgId, "contract.status.changed", {
             contractId,
             from: stored.state.status,
             to: response.state.status,
-          })
+          }, deliveries)
         : Promise.resolve(),
     ]);
 

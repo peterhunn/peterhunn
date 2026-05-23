@@ -5,7 +5,7 @@ import { createApp } from "../app.js";
 import { InMemoryStore } from "../store.js";
 import { InMemoryApiKeyStore } from "../auth.js";
 import { MerkleAuditLog } from "../audit.js";
-import { InMemoryWebhookStore } from "../webhooks.js";
+import { InMemoryWebhookStore, InMemoryWebhookDeliveryStore } from "../webhooks.js";
 import { ContractRegistry } from "../registry.js";
 import { initialState } from "@x490/core";
 import type {
@@ -314,6 +314,72 @@ describe("Webhook management", () => {
       headers: authHeader(rawOrg2),
     });
     assert.equal(delRes.status, 404);
+  });
+
+  it("POST /webhooks with private IP → 422 SSRF rejection", async () => {
+    const { app, apiKeys } = makeApp();
+    const { raw } = await bootstrap(apiKeys);
+    const res = await app.request("/webhooks", {
+      method: "POST",
+      headers: jsonHeaders(raw),
+      body: JSON.stringify({ url: "http://192.168.1.1/hook", events: ["contract.activated"] }),
+    });
+    assert.equal(res.status, 422);
+    const body = await res.json() as { error: string };
+    assert.ok(body.error.toLowerCase().includes("private"), "error should mention private address");
+  });
+
+  it("GET /webhooks/:id/deliveries → 200, empty array when no delivery store", async () => {
+    const { app, apiKeys } = makeApp();
+    const { raw } = await bootstrap(apiKeys);
+    const createRes = await app.request("/webhooks", {
+      method: "POST",
+      headers: jsonHeaders(raw),
+      body: JSON.stringify({ url: "https://example.com/hook", events: ["contract.activated"] }),
+    });
+    const { webhook } = await createRes.json() as { webhook: { id: string } };
+    const res = await app.request(`/webhooks/${webhook.id}/deliveries`, {
+      headers: authHeader(raw),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json() as { deliveries: unknown[] };
+    assert.ok(Array.isArray(body.deliveries));
+    assert.equal(body.deliveries.length, 0);
+  });
+
+  it("GET /webhooks/:id/deliveries with delivery store → returns recorded deliveries", async () => {
+    const deliveries = new InMemoryWebhookDeliveryStore();
+    const store = new InMemoryStore();
+    const apiKeys = new InMemoryApiKeyStore();
+    const audit = new MerkleAuditLog();
+    const webhooks = new InMemoryWebhookStore();
+    const registry = makeRegistry();
+    const app = createApp({ registry, store, llm: mockLlm, apiKeys, audit, webhooks, deliveries });
+    const { raw, orgId } = await bootstrap(apiKeys);
+
+    const createRes = await app.request("/webhooks", {
+      method: "POST",
+      headers: jsonHeaders(raw),
+      body: JSON.stringify({ url: "https://example.com/hook", events: ["contract.activated"] }),
+    });
+    const { webhook } = await createRes.json() as { webhook: { id: string } };
+
+    // Inject a delivery directly into the store
+    await deliveries.record({
+      id: crypto.randomUUID(),
+      webhookId: webhook.id,
+      orgId,
+      event: "contract.activated",
+      attemptCount: 1,
+      createdAt: new Date(),
+    });
+
+    const res = await app.request(`/webhooks/${webhook.id}/deliveries`, {
+      headers: authHeader(raw),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json() as { deliveries: unknown[] };
+    assert.equal(body.deliveries.length, 1);
   });
 });
 
