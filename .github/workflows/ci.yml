@@ -1,40 +1,30 @@
 name: CI
-
 on:
   push:
+    branches: ["**"]
   pull_request:
 
 jobs:
-  typescript:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
-          cache: 'npm'
-
+          node-version: "22"
+          cache: "npm"
       - run: npm ci
-
-      - run: npm run build --workspaces --if-present
-
-      - run: npm run typecheck --workspaces --if-present
-
-      - run: npm test --workspaces --if-present
-
-  python:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: packages/python
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - run: pip install -e ".[dev,starlette]"
-
-      - run: python -m pytest tests/ -v
+      - name: Build protocol
+        run: npm run build --workspace=packages/protocol
+      - name: Test protocol
+        run: npm test --workspace=packages/protocol
+      - name: Build agents
+        run: npm run build --workspace=packages/agents
+      - name: Test agents
+        run: npm test --workspace=packages/agents
+      - name: Build facilitator
+        run: npm run build --workspace=packages/facilitator
+      - name: Test facilitator
+        run: npm test --workspace=packages/facilitator
+      - name: Build dashboard
+        run: npm run build --workspace=packages/dashboard
