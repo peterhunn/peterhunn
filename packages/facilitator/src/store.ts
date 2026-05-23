@@ -458,11 +458,19 @@ export interface EventStore {
   listByContract(contractId: string): Promise<ContractEventRecord[]>;
   /** ID of the most recently appended event for this contract, or null. */
   latestEventId(contractId: string): Promise<string | null>;
+  /** List events across all contracts for a tenant (audit log). */
+  listByTenant(
+    tenantId: string,
+    opts: { limit: number; cursor?: string; resource?: string; type?: string },
+  ): Promise<{ events: ContractEventRecord[]; cursor?: string }>;
 }
 
 export class InMemoryEventStore implements EventStore {
   private readonly events = new Map<string, ContractEventRecord>(); // eventId → event
   private readonly byContract = new Map<string, string[]>();        // contractId → eventIds (ordered)
+  private readonly contractResource = new Map<string, string>();    // contractId → resource (for filter)
+
+  constructor(private readonly agreements?: AgreementStore) {}
 
   async append(event: ContractEventRecord): Promise<void> {
     this.events.set(event.eventId, event);
@@ -479,6 +487,49 @@ export class InMemoryEventStore implements EventStore {
   async latestEventId(contractId: string): Promise<string | null> {
     const ids = this.byContract.get(contractId) ?? [];
     return ids[ids.length - 1] ?? null;
+  }
+
+  async listByTenant(
+    tenantId: string,
+    opts: { limit: number; cursor?: string; resource?: string; type?: string },
+  ): Promise<{ events: ContractEventRecord[]; cursor?: string }> {
+    // Collect all events for this tenant, sorted by createdAt ASC then eventId ASC.
+    let records = [...this.events.values()]
+      .filter((e) => e.tenantId === tenantId)
+      .sort((a, b) => a.createdAt - b.createdAt || a.eventId.localeCompare(b.eventId));
+
+    // Apply type filter.
+    if (opts.type) {
+      records = records.filter((e) => e.type === opts.type);
+    }
+
+    // Apply resource filter — requires agreement lookup.
+    if (opts.resource && this.agreements) {
+      const resourceCache = new Map<string, string | null>();
+      const getResource = async (contractId: string): Promise<string | null> => {
+        if (resourceCache.has(contractId)) return resourceCache.get(contractId)!;
+        const agreement = await this.agreements!.findById(contractId);
+        const r = agreement?.resource ?? null;
+        resourceCache.set(contractId, r);
+        return r;
+      };
+      const filtered: ContractEventRecord[] = [];
+      for (const e of records) {
+        const r = await getResource(e.contractId);
+        if (r === opts.resource || r === "*") filtered.push(e);
+      }
+      records = filtered;
+    }
+
+    // Cursor-based pagination: cursor = last eventId seen.
+    if (opts.cursor) {
+      const cursorIdx = records.findIndex((e) => e.eventId === opts.cursor);
+      if (cursorIdx !== -1) records = records.slice(cursorIdx + 1);
+    }
+
+    const page = records.slice(0, opts.limit);
+    const nextCursor = records.length > opts.limit ? page[page.length - 1]?.eventId : undefined;
+    return { events: page, ...(nextCursor ? { cursor: nextCursor } : {}) };
   }
 }
 

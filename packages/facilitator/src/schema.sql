@@ -128,6 +128,10 @@ CREATE TABLE IF NOT EXISTS x490_contract_events (
 CREATE INDEX IF NOT EXISTS idx_x490_contract_events_contract
   ON x490_contract_events(contract_id, created_at ASC);
 
+-- Cross-contract audit log: list all events for a tenant (compliance/GDPR use case).
+CREATE INDEX IF NOT EXISTS idx_x490_contract_events_tenant
+  ON x490_contract_events(tenant_id, created_at ASC, event_id ASC);
+
 -- Pending multi-party contracts: accumulates acceptances until all required parties sign.
 CREATE TABLE IF NOT EXISTS x490_pending_contracts (
   contract_id      TEXT        PRIMARY KEY,

@@ -29,6 +29,15 @@ export interface FacilitatorAppOptions {
   auth0Domain?: string;
   /** Auth0 API audience identifier. Required when auth0Domain is set. */
   auth0Audience?: string;
+  /** Per-endpoint rate limits (requests per minute per IP). */
+  rateLimits?: {
+    /** POST /:tenantId/accept — default 30 */
+    accept?: number;
+    /** GET /:tenantId/verify — default 120 */
+    verify?: number;
+    /** POST /tenants (sign-up) — default 5 */
+    signup?: number;
+  };
 }
 
 type AuthEnv = { Variables: { tenant: Tenant } };
@@ -207,7 +216,7 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
 
   // ── Tenant sign-up (public — first call) ───────────────────────────────────
 
-  const signupLimiter = rateLimit({ windowMs: 60_000, max: 5 });
+  const signupLimiter = rateLimit({ windowMs: 60_000, max: opts.rateLimits?.signup ?? 5 });
   app.post("/v1/tenants", signupLimiter, async (c) => {
     const { name } = await c.req.json<{ name: string }>();
     if (!name?.trim()) return c.json({ error: "name is required" }, 400);
@@ -241,7 +250,7 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
 
   // ── Accept endpoint (agent-facing, public, rate limited) ───────────────────
 
-  const acceptLimiter = rateLimit({ windowMs: 60_000, max: 30 });
+  const acceptLimiter = rateLimit({ windowMs: 60_000, max: opts.rateLimits?.accept ?? 30 });
 
   app.post("/v1/:tenantId/accept", acceptLimiter, async (c) => {
     const tenantId = c.req.param("tenantId") ?? "";
@@ -561,7 +570,7 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
 
   // ── Verify endpoint (server-facing, public, rate limited) ─────────────────
 
-  const verifyLimiter = rateLimit({ windowMs: 60_000, max: 120 });
+  const verifyLimiter = rateLimit({ windowMs: 60_000, max: opts.rateLimits?.verify ?? 120 });
 
   app.get("/v1/:tenantId/verify", verifyLimiter, async (c) => {
     const tenantId = c.req.param("tenantId") ?? "";
@@ -898,6 +907,27 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     if (!pendingContracts) return c.json({ pendingContracts: [] });
     const contracts = await pendingContracts.listByTenant(tenant.tenantId);
     return c.json({ pendingContracts: contracts });
+  });
+
+  // ── Cross-contract event audit log (auth required) ────────────────────────────
+
+  authed.get("/v1/events", async (c) => {
+    const tenant = c.get("tenant");
+    if (!events) return c.json({ events: [] });
+
+    const limit = Math.min(Number(c.req.query("limit") ?? "50"), 200);
+    const cursor = c.req.query("cursor");
+    const resource = c.req.query("resource");
+    const type = c.req.query("type");
+
+    const result = await events.listByTenant(tenant.tenantId, {
+      limit,
+      ...(cursor ? { cursor } : {}),
+      ...(resource ? { resource } : {}),
+      ...(type ? { type } : {}),
+    });
+
+    return c.json(result);
   });
 
   // ── Custom contract events (auth required) ────────────────────────────────────

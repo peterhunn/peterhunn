@@ -71,6 +71,11 @@ const app = createFacilitatorApp({
   baseUrl: BASE_URL,
   ...(AUTH0_DOMAIN ? { auth0Domain: AUTH0_DOMAIN } : {}),
   ...(AUTH0_AUDIENCE ? { auth0Audience: AUTH0_AUDIENCE } : {}),
+  rateLimits: {
+    accept: process.env.RATE_LIMIT_ACCEPT ? Number(process.env.RATE_LIMIT_ACCEPT) : undefined,
+    verify: process.env.RATE_LIMIT_VERIFY ? Number(process.env.RATE_LIMIT_VERIFY) : undefined,
+    signup: process.env.RATE_LIMIT_SIGNUP ? Number(process.env.RATE_LIMIT_SIGNUP) : undefined,
+  },
 });
 
 serve({ fetch: app.fetch, port: PORT }, () => {

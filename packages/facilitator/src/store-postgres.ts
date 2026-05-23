@@ -601,6 +601,94 @@ export class PostgresEventStore implements EventStore {
     `;
     return rows[0]?.event_id ?? null;
   }
+
+  async listByTenant(
+    tenantId: string,
+    opts: { limit: number; cursor?: string; resource?: string; type?: string },
+  ): Promise<{ events: ContractEventRecord[]; cursor?: string }> {
+    const fetchLimit = opts.limit + 1;
+    let rows: EventRow[];
+
+    if (opts.resource && opts.type && opts.cursor) {
+      rows = await this.sql<EventRow[]>`
+        SELECT e.* FROM x490_contract_events e
+        JOIN x490_agreements a ON a.contract_id = e.contract_id
+        WHERE e.tenant_id = ${tenantId}
+          AND e.type = ${opts.type}
+          AND (a.resource = ${opts.resource} OR a.resource = '*')
+          AND e.event_id > ${opts.cursor}
+        ORDER BY e.created_at ASC, e.event_id ASC
+        LIMIT ${fetchLimit}
+      `;
+    } else if (opts.resource && opts.type) {
+      rows = await this.sql<EventRow[]>`
+        SELECT e.* FROM x490_contract_events e
+        JOIN x490_agreements a ON a.contract_id = e.contract_id
+        WHERE e.tenant_id = ${tenantId}
+          AND e.type = ${opts.type}
+          AND (a.resource = ${opts.resource} OR a.resource = '*')
+        ORDER BY e.created_at ASC, e.event_id ASC
+        LIMIT ${fetchLimit}
+      `;
+    } else if (opts.resource && opts.cursor) {
+      rows = await this.sql<EventRow[]>`
+        SELECT e.* FROM x490_contract_events e
+        JOIN x490_agreements a ON a.contract_id = e.contract_id
+        WHERE e.tenant_id = ${tenantId}
+          AND (a.resource = ${opts.resource} OR a.resource = '*')
+          AND e.event_id > ${opts.cursor}
+        ORDER BY e.created_at ASC, e.event_id ASC
+        LIMIT ${fetchLimit}
+      `;
+    } else if (opts.resource) {
+      rows = await this.sql<EventRow[]>`
+        SELECT e.* FROM x490_contract_events e
+        JOIN x490_agreements a ON a.contract_id = e.contract_id
+        WHERE e.tenant_id = ${tenantId}
+          AND (a.resource = ${opts.resource} OR a.resource = '*')
+        ORDER BY e.created_at ASC, e.event_id ASC
+        LIMIT ${fetchLimit}
+      `;
+    } else if (opts.type && opts.cursor) {
+      rows = await this.sql<EventRow[]>`
+        SELECT * FROM x490_contract_events
+        WHERE tenant_id = ${tenantId}
+          AND type = ${opts.type}
+          AND event_id > ${opts.cursor}
+        ORDER BY created_at ASC, event_id ASC
+        LIMIT ${fetchLimit}
+      `;
+    } else if (opts.type) {
+      rows = await this.sql<EventRow[]>`
+        SELECT * FROM x490_contract_events
+        WHERE tenant_id = ${tenantId}
+          AND type = ${opts.type}
+        ORDER BY created_at ASC, event_id ASC
+        LIMIT ${fetchLimit}
+      `;
+    } else if (opts.cursor) {
+      rows = await this.sql<EventRow[]>`
+        SELECT * FROM x490_contract_events
+        WHERE tenant_id = ${tenantId}
+          AND event_id > ${opts.cursor}
+        ORDER BY created_at ASC, event_id ASC
+        LIMIT ${fetchLimit}
+      `;
+    } else {
+      rows = await this.sql<EventRow[]>`
+        SELECT * FROM x490_contract_events
+        WHERE tenant_id = ${tenantId}
+        ORDER BY created_at ASC, event_id ASC
+        LIMIT ${fetchLimit}
+      `;
+    }
+
+    const hasMore = rows.length > opts.limit;
+    const page = hasMore ? rows.slice(0, opts.limit) : rows;
+    const events = page.map(rowToEvent);
+    const cursor = hasMore ? page[page.length - 1]?.event_id : undefined;
+    return { events, ...(cursor ? { cursor } : {}) };
+  }
 }
 
 // ── Pending contract store ─────────────────────────────────────────────────────
