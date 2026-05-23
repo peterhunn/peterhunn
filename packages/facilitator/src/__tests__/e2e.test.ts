@@ -61,26 +61,29 @@ function patchFetch(app: Hono, resourceHandler: (headers: Headers) => Response |
 }
 
 async function bootstrap(app: Hono, opts: { expiresIn?: number } = {}) {
-  const { tenantId, apiKey } = await app.request("/v1/tenants", {
+  const signupRes = await app.request("/v1/tenants", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name: "E2E Tenant" }),
-  }).then((r) => r.json() as Promise<{ tenantId: string; apiKey: string }>);
+  });
+  const { tenantId, apiKey } = await signupRes.json() as { tenantId: string; apiKey: string };
 
-  const { hash: templateHash } = await app.request("/v1/templates", {
+  const tplRes = await app.request("/v1/templates", {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
     body: JSON.stringify({ content: "E2E NDA: {{name}}", title: "E2E NDA" }),
-  }).then((r) => r.json() as Promise<{ hash: string }>);
+  });
+  const { hash: templateHash } = await tplRes.json() as { hash: string };
 
-  const reqs = await app.request("/v1/requirements", {
+  const reqRes = await app.request("/v1/requirements", {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
     body: JSON.stringify({
       templateHash, requiredPartyFields: ["name"], resource: "*",
       description: "E2E", expiresIn: opts.expiresIn ?? 3600,
     }),
-  }).then((r) => r.json() as Promise<Record<string, unknown>>);
+  });
+  const reqs = await reqRes.json() as Record<string, unknown>;
 
   return { tenantId, apiKey, templateHash, reqs };
 }
