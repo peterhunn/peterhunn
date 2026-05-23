@@ -1,0 +1,662 @@
+{
+  "info": {
+    "name": "x490 Facilitator API",
+    "_postman_id": "x490-facilitator-api-v1",
+    "description": "Postman collection for the x490 Facilitator API — managed token issuance, template registry, and agreement tracking for the x490 smart-legal-contract protocol.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://facilitator.x490.dev",
+      "type": "string"
+    },
+    {
+      "key": "tenantId",
+      "value": "{{tenantId}}",
+      "type": "string"
+    },
+    {
+      "key": "apiKey",
+      "value": "{{apiKey}}",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Public",
+      "description": "Unauthenticated routes — health, tenant signup, template lookup, contract accept/negotiate/verify.",
+      "item": [
+        {
+          "name": "Health check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["health"]
+            },
+            "description": "Returns {ok: true} when the service is healthy."
+          },
+          "response": []
+        },
+        {
+          "name": "OpenAPI spec (JSON)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/openapi.json",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "openapi.json"]
+            },
+            "description": "Returns the OpenAPI 3.1 specification document as JSON."
+          },
+          "response": []
+        },
+        {
+          "name": "Swagger UI",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/docs",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "docs"]
+            },
+            "description": "HTML page with embedded Swagger UI."
+          },
+          "response": []
+        },
+        {
+          "name": "Create tenant (sign up)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Acme Corp\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/tenants",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "tenants"]
+            },
+            "description": "Create a new tenant. Returns tenantId and initial API key (shown once — store securely)."
+          },
+          "response": []
+        },
+        {
+          "name": "Get template by hash",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/templates/:hash",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "templates", ":hash"],
+              "variable": [
+                {
+                  "key": "hash",
+                  "value": "{{templateHash}}",
+                  "description": "SHA-256 hex digest of the template content"
+                }
+              ]
+            },
+            "description": "Retrieve a template by its SHA-256 hash. Public endpoint — no authentication required."
+          },
+          "response": []
+        },
+        {
+          "name": "Accept contract",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "550e8400-e29b-41d4-a716-446655440000",
+                "description": "Optional idempotency key (UUID). Re-sending the same key within 24 h returns the cached response.",
+                "disabled": true
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"templateId\": \"org.example.nda\",\n  \"templateHash\": \"{{templateHash}}\",\n  \"partyData\": {\n    \"name\": \"Alice Corp\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/:tenantId/accept",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", ":tenantId", "accept"],
+              "variable": [
+                {
+                  "key": "tenantId",
+                  "value": "{{tenantId}}",
+                  "description": "Tenant identifier"
+                }
+              ]
+            },
+            "description": "Agent-facing endpoint. Accepts a contract and returns a signed token. For multi-party contracts, pass pendingContractId on subsequent acceptances."
+          },
+          "response": []
+        },
+        {
+          "name": "Negotiate contract",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"templateId\": \"org.example.nda\",\n  \"templateHash\": \"{{templateHash}}\",\n  \"partyData\": {\n    \"name\": \"Alice Corp\"\n  },\n  \"negotiationTerms\": {\n    \"jurisdiction\": \"US\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/:tenantId/negotiate",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", ":tenantId", "negotiate"],
+              "variable": [
+                {
+                  "key": "tenantId",
+                  "value": "{{tenantId}}",
+                  "description": "Tenant identifier"
+                }
+              ]
+            },
+            "description": "Agent-facing endpoint. Proposes negotiation terms. Returns accepted or counter_offer with acceptable terms."
+          },
+          "response": []
+        },
+        {
+          "name": "Verify contract token",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/:tenantId/verify?token={{contractToken}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", ":tenantId", "verify"],
+              "query": [
+                {
+                  "key": "token",
+                  "value": "{{contractToken}}",
+                  "description": "Signed contract token to verify"
+                },
+                {
+                  "key": "resource",
+                  "value": "*",
+                  "description": "Resource scope to validate against; defaults to \"*\"",
+                  "disabled": true
+                }
+              ],
+              "variable": [
+                {
+                  "key": "tenantId",
+                  "value": "{{tenantId}}",
+                  "description": "Tenant identifier"
+                }
+              ]
+            },
+            "description": "Verify a contract token. Always returns 200; check the `valid` field in the response body."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Authenticated",
+      "description": "Operator-facing routes requiring API key (X-API-Key header) or Auth0 JWT (Authorization: Bearer).",
+      "auth": {
+        "type": "apikey",
+        "apikey": [
+          {
+            "key": "key",
+            "value": "X-API-Key",
+            "type": "string"
+          },
+          {
+            "key": "value",
+            "value": "{{apiKey}}",
+            "type": "string"
+          },
+          {
+            "key": "in",
+            "value": "header",
+            "type": "string"
+          }
+        ]
+      },
+      "item": [
+        {
+          "name": "Tenants",
+          "item": [
+            {
+              "name": "Get current tenant (me)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/me",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["v1", "me"]
+                },
+                "description": "Returns the tenantId and name of the authenticated tenant."
+              },
+              "response": []
+            },
+            {
+              "name": "Delete tenant (GDPR erasure)",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/tenants/:tenantId",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["v1", "tenants", ":tenantId"],
+                  "variable": [
+                    {
+                      "key": "tenantId",
+                      "value": "{{tenantId}}",
+                      "description": "Tenant identifier — must match the authenticated tenant"
+                    }
+                  ]
+                },
+                "description": "Permanently deletes the tenant and all associated data. The tenantId in the path must match the authenticated tenant."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Templates",
+          "item": [
+            {
+              "name": "Upload template",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"content\": \"This NDA is between {{name}} and...\",\n  \"title\": \"Standard NDA\",\n  \"description\": \"A mutual NDA\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/v1/templates",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["v1", "templates"]
+                },
+                "description": "Register a new template. Returns the template record including its SHA-256 hash."
+              },
+              "response": []
+            },
+            {
+              "name": "List templates",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/templates",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["v1", "templates"],
+                  "query": [
+                    {
+                      "key": "limit",
+                      "value": "50",
+                      "description": "Page size (1–200, default 50)",
+                      "disabled": true
+                    },
+                    {
+                      "key": "cursor",
+                      "value": "",
+                      "description": "Opaque pagination cursor from a previous response",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "description": "Paginated list of templates belonging to the authenticated tenant."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Requirements",
+          "item": [
+            {
+              "name": "Upsert requirements",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"templateHash\": \"{{templateHash}}\",\n  \"resource\": \"*\",\n  \"requiredPartyFields\": [\"name\"],\n  \"expiresIn\": 86400,\n  \"description\": \"NDA required for API access\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/v1/requirements",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["v1", "requirements"]
+                },
+                "description": "Create or update contract requirements for a template. Returns the computed ContractRequirements object that agents will receive."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Contracts",
+          "item": [
+            {
+              "name": "Revoke contract",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"contractId\": \"{{contractId}}\",\n  \"reason\": \"Terms violation\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/v1/:tenantId/revoke",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["v1", ":tenantId", "revoke"],
+                  "variable": [
+                    {
+                      "key": "tenantId",
+                      "value": "{{tenantId}}",
+                      "description": "Tenant identifier — must match the authenticated tenant"
+                    }
+                  ]
+                },
+                "description": "Revoke a contract. The token will fail verification after revocation."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Agreements",
+          "item": [
+            {
+              "name": "List agreements",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/agreements",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["v1", "agreements"],
+                  "query": [
+                    {
+                      "key": "resource",
+                      "value": "*",
+                      "description": "Filter by resource scope",
+                      "disabled": true
+                    },
+                    {
+                      "key": "limit",
+                      "value": "50",
+                      "description": "Page size (1–200, default 50)",
+                      "disabled": true
+                    },
+                    {
+                      "key": "cursor",
+                      "value": "",
+                      "description": "Opaque pagination cursor from a previous response",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "description": "Paginated list of agreements for the authenticated tenant. Token field is omitted."
+              },
+              "response": []
+            },
+            {
+              "name": "Get agreement",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/agreements/:contractId",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["v1", "agreements", ":contractId"],
+                  "variable": [
+                    {
+                      "key": "contractId",
+                      "value": "{{contractId}}",
+                      "description": "UUID of the contract"
+                    }
+                  ]
+                },
+                "description": "Retrieve a single agreement record by contractId. Token field is omitted."
+              },
+              "response": []
+            },
+            {
+              "name": "List contract events",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/agreements/:contractId/events",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["v1", "agreements", ":contractId", "events"],
+                  "variable": [
+                    {
+                      "key": "contractId",
+                      "value": "{{contractId}}",
+                      "description": "UUID of the contract"
+                    }
+                  ]
+                },
+                "description": "Returns the ordered event DAG for a contract."
+              },
+              "response": []
+            },
+            {
+              "name": "Append contract event",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"type\": \"document.signed\",\n  \"payload\": {\n    \"signerName\": \"Alice\"\n  }\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/v1/agreements/:contractId/events",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["v1", "agreements", ":contractId", "events"],
+                  "variable": [
+                    {
+                      "key": "contractId",
+                      "value": "{{contractId}}",
+                      "description": "UUID of the contract"
+                    }
+                  ]
+                },
+                "description": "Append a custom event to a contract's DAG. Event type must NOT start with \"agreement.\" — that prefix is reserved for system events."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "API Keys",
+          "item": [
+            {
+              "name": "List API keys",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/apikeys",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["v1", "apikeys"]
+                },
+                "description": "List all API keys for the authenticated tenant. Raw key values are never returned."
+              },
+              "response": []
+            },
+            {
+              "name": "Create API key",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Production key\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/v1/apikeys",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["v1", "apikeys"]
+                },
+                "description": "Create a new API key. The raw key value is shown once — store securely."
+              },
+              "response": []
+            },
+            {
+              "name": "Revoke API key",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/apikeys/:keyId",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["v1", "apikeys", ":keyId"],
+                  "variable": [
+                    {
+                      "key": "keyId",
+                      "value": "{{keyId}}",
+                      "description": "ID of the API key to revoke"
+                    }
+                  ]
+                },
+                "description": "Permanently revoke an API key. Any requests using this key will return 401 immediately."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Webhooks",
+          "item": [
+            {
+              "name": "List webhooks",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/webhooks",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["v1", "webhooks"]
+                },
+                "description": "List all registered webhooks. Signing secrets are never returned."
+              },
+              "response": []
+            },
+            {
+              "name": "Register webhook",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"url\": \"https://hooks.example.com/x490\",\n  \"secret\": \"whsec_...\",\n  \"events\": [\"agreement.created\", \"agreement.revoked\"]\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/v1/webhooks",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["v1", "webhooks"]
+                },
+                "description": "Register a new webhook endpoint. The signing secret is shown once — store securely. Omit `secret` to have one auto-generated."
+              },
+              "response": []
+            },
+            {
+              "name": "Delete webhook",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/webhooks/:webhookId",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["v1", "webhooks", ":webhookId"],
+                  "variable": [
+                    {
+                      "key": "webhookId",
+                      "value": "{{webhookId}}",
+                      "description": "ID of the webhook to delete"
+                    }
+                  ]
+                },
+                "description": "Disable and remove a webhook endpoint."
+              },
+              "response": []
+            },
+            {
+              "name": "List webhook deliveries",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/webhooks/:webhookId/deliveries",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["v1", "webhooks", ":webhookId", "deliveries"],
+                  "variable": [
+                    {
+                      "key": "webhookId",
+                      "value": "{{webhookId}}",
+                      "description": "ID of the webhook"
+                    }
+                  ]
+                },
+                "description": "List recent delivery attempts (last 50) for a webhook, including status codes and error messages."
+              },
+              "response": []
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
