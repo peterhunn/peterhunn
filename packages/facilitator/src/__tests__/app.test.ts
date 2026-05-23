@@ -6,6 +6,9 @@ import {
   InMemoryRequirementsStore,
   InMemoryAgreementStore,
   InMemoryWebhookStore,
+  InMemoryEventStore,
+  InMemoryPendingContractStore,
+  InMemoryWebhookDeliveryStore,
 } from "../store.js";
 import { createFacilitatorApp } from "../app.js";
 
@@ -18,6 +21,9 @@ function makeStores() {
     requirements: new InMemoryRequirementsStore(),
     agreements: new InMemoryAgreementStore(),
     webhooks: new InMemoryWebhookStore(),
+    events: new InMemoryEventStore(),
+    pendingContracts: new InMemoryPendingContractStore(),
+    deliveries: new InMemoryWebhookDeliveryStore(),
   };
 }
 
@@ -574,5 +580,396 @@ describe("DELETE /v1/apikeys/:keyId", () => {
       headers: { "X-API-Key": apiKey },
     });
     assert.strictEqual(res.status, 401);
+  });
+});
+
+// ── GET /v1/templates (list) ───────────────────────────────────────────────────
+
+describe("GET /v1/templates (list)", () => {
+  it("401 without API key", async () => {
+    const { app } = makeApp();
+    const res = await app.request("/v1/templates");
+    assert.strictEqual(res.status, 401);
+  });
+
+  it("200 empty list initially", async () => {
+    const { app } = makeApp();
+    const { apiKey } = await signUp(app);
+    const res = await app.request("/v1/templates", {
+      headers: { "X-API-Key": apiKey },
+    });
+    assert.strictEqual(res.status, 200);
+    const body = await res.json() as { templates: unknown[]; nextCursor: string | null };
+    assert.deepStrictEqual(body.templates, []);
+    assert.strictEqual(body.nextCursor, null);
+  });
+
+  it("200 with results after registering templates", async () => {
+    const { app } = makeApp();
+    const { apiKey } = await signUp(app);
+    await registerTemplate(app, apiKey, "Template content A");
+    await registerTemplate(app, apiKey, "Template content B");
+    const res = await app.request("/v1/templates", {
+      headers: { "X-API-Key": apiKey },
+    });
+    assert.strictEqual(res.status, 200);
+    const body = await res.json() as { templates: unknown[] };
+    assert.strictEqual(body.templates.length, 2);
+  });
+
+  it("pagination via limit", async () => {
+    const { app } = makeApp();
+    const { apiKey } = await signUp(app);
+    await registerTemplate(app, apiKey, "Template content 1");
+    await registerTemplate(app, apiKey, "Template content 2");
+    await registerTemplate(app, apiKey, "Template content 3");
+    const res = await app.request("/v1/templates?limit=2", {
+      headers: { "X-API-Key": apiKey },
+    });
+    assert.strictEqual(res.status, 200);
+    const body = await res.json() as { templates: unknown[]; nextCursor: string | null };
+    assert.strictEqual(body.templates.length, 2);
+    assert.ok(body.nextCursor !== null);
+  });
+});
+
+// ── POST /v1/:tenantId/negotiate ───────────────────────────────────────────────
+
+describe("POST /v1/:tenantId/negotiate", () => {
+  it("200 success with negotiation terms", async () => {
+    const { app } = makeApp();
+    const { apiKey, tenantId } = await signUp(app);
+    const { hash } = await registerTemplate(app, apiKey);
+
+    // Register requirements with negotiable: true and allowed jurisdictions
+    await app.request("/v1/requirements", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+      body: JSON.stringify({
+        templateHash: hash,
+        requiredPartyFields: ["name"],
+        resource: "*",
+        description: "Negotiable NDA",
+        expiresIn: 3600,
+        negotiable: true,
+        negotiableFields: [{ field: "jurisdiction", allowedValues: ["US", "UK"] }],
+      }),
+    });
+
+    const res = await app.request(`/v1/${tenantId}/negotiate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        templateHash: hash,
+        partyData: { name: "Alice" },
+        negotiationTerms: { jurisdiction: "US" },
+      }),
+    });
+    assert.strictEqual(res.status, 200);
+    const body = await res.json() as { status: string; contractId: string; token: string };
+    assert.strictEqual(body.status, "accepted");
+    assert.ok(body.contractId.length > 0);
+    assert.ok(body.token.length > 0);
+  });
+});
+
+// ── Multi-party accept flow ────────────────────────────────────────────────────
+
+describe("Multi-party accept (requiredParties: 2)", () => {
+  it("first accept returns pending; second returns accepted", async () => {
+    const { app } = makeApp();
+    const { apiKey, tenantId } = await signUp(app);
+    const { hash } = await registerTemplate(app, apiKey);
+
+    // Set up requirements with requiredParties: 2
+    await app.request("/v1/requirements", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+      body: JSON.stringify({
+        templateHash: hash,
+        requiredPartyFields: ["name"],
+        resource: "*",
+        description: "Multi-party NDA",
+        expiresIn: 3600,
+        requiredParties: 2,
+      }),
+    });
+
+    // First accept
+    const res1 = await app.request(`/v1/${tenantId}/accept`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        templateHash: hash,
+        partyData: { name: "Alice", partyId: "alice-001" },
+      }),
+    });
+    assert.strictEqual(res1.status, 200);
+    const body1 = await res1.json() as {
+      status: string;
+      contractId: string;
+      pendingAcceptances: number;
+      requiredAcceptances: number;
+    };
+    assert.strictEqual(body1.status, "pending");
+    assert.strictEqual(body1.pendingAcceptances, 1);
+    assert.strictEqual(body1.requiredAcceptances, 2);
+    assert.ok(body1.contractId.length > 0);
+
+    // Second accept with pendingContractId
+    const res2 = await app.request(`/v1/${tenantId}/accept`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        templateHash: hash,
+        partyData: { name: "Bob", partyId: "bob-002" },
+        pendingContractId: body1.contractId,
+      }),
+    });
+    assert.strictEqual(res2.status, 200);
+    const body2 = await res2.json() as { status: string; token: string; contractId: string };
+    assert.strictEqual(body2.status, "accepted");
+    assert.ok(body2.token.length > 0);
+    assert.strictEqual(body2.contractId, body1.contractId);
+  });
+});
+
+// ── GET /v1/agreements/:contractId ────────────────────────────────────────────
+
+describe("GET /v1/agreements/:contractId", () => {
+  it("404 for unknown contractId", async () => {
+    const { app } = makeApp();
+    const { apiKey } = await signUp(app);
+    const res = await app.request("/v1/agreements/no-such-contract", {
+      headers: { "X-API-Key": apiKey },
+    });
+    assert.strictEqual(res.status, 404);
+  });
+
+  it("200 returns the agreement after accepting", async () => {
+    const { app } = makeApp();
+    const { apiKey, tenantId } = await signUp(app);
+    const { hash } = await registerTemplate(app, apiKey);
+    const { contractId } = await acceptContract(app, tenantId, hash);
+
+    const res = await app.request(`/v1/agreements/${contractId}`, {
+      headers: { "X-API-Key": apiKey },
+    });
+    assert.strictEqual(res.status, 200);
+    const body = await res.json() as { contractId: string; templateHash: string };
+    assert.strictEqual(body.contractId, contractId);
+    assert.strictEqual(body.templateHash, hash);
+  });
+});
+
+// ── Contract events ────────────────────────────────────────────────────────────
+
+describe("Contract events", () => {
+  it("GET /v1/agreements/:contractId/events returns 200 with events array after accepting", async () => {
+    const { app } = makeApp();
+    const { apiKey, tenantId } = await signUp(app);
+    const { hash } = await registerTemplate(app, apiKey);
+    const { contractId } = await acceptContract(app, tenantId, hash);
+
+    const res = await app.request(`/v1/agreements/${contractId}/events`, {
+      headers: { "X-API-Key": apiKey },
+    });
+    assert.strictEqual(res.status, 200);
+    const body = await res.json() as { events: Array<{ type: string }> };
+    assert.ok(Array.isArray(body.events));
+    assert.ok(body.events.length > 0);
+    assert.ok(body.events.some((e) => e.type === "agreement.accepted"));
+  });
+
+  it("POST /v1/agreements/:contractId/events appends a custom event (201)", async () => {
+    const { app } = makeApp();
+    const { apiKey, tenantId } = await signUp(app);
+    const { hash } = await registerTemplate(app, apiKey);
+    const { contractId } = await acceptContract(app, tenantId, hash);
+
+    const res = await app.request(`/v1/agreements/${contractId}/events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+      body: JSON.stringify({ type: "custom.signed", payload: { note: "signed by notary" } }),
+    });
+    assert.strictEqual(res.status, 201);
+    const body = await res.json() as { eventId: string; type: string; contractId: string };
+    assert.strictEqual(body.type, "custom.signed");
+    assert.strictEqual(body.contractId, contractId);
+    assert.ok(body.eventId.length > 0);
+  });
+
+  it("POST /v1/agreements/:contractId/events rejects agreement.* type with 400", async () => {
+    const { app } = makeApp();
+    const { apiKey, tenantId } = await signUp(app);
+    const { hash } = await registerTemplate(app, apiKey);
+    const { contractId } = await acceptContract(app, tenantId, hash);
+
+    const res = await app.request(`/v1/agreements/${contractId}/events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+      body: JSON.stringify({ type: "agreement.custom" }),
+    });
+    assert.strictEqual(res.status, 400);
+    const body = await res.json() as { error: string };
+    assert.ok(body.error.includes("reserved"));
+  });
+
+  it("POST /v1/agreements/:contractId/events returns 409 on a revoked contract", async () => {
+    const { app } = makeApp();
+    const { apiKey, tenantId } = await signUp(app);
+    const { hash } = await registerTemplate(app, apiKey);
+    const { contractId } = await acceptContract(app, tenantId, hash);
+
+    // Revoke the contract first
+    await app.request(`/v1/${tenantId}/revoke`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+      body: JSON.stringify({ contractId }),
+    });
+
+    const res = await app.request(`/v1/agreements/${contractId}/events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+      body: JSON.stringify({ type: "custom.note" }),
+    });
+    assert.strictEqual(res.status, 409);
+  });
+});
+
+// ── Webhooks ────────────────────────────────────────────────────────────────────
+
+describe("Webhooks", () => {
+  it("GET /v1/webhooks — 401 without key", async () => {
+    const { app } = makeApp();
+    const res = await app.request("/v1/webhooks");
+    assert.strictEqual(res.status, 401);
+  });
+
+  it("GET /v1/webhooks — 200 empty list", async () => {
+    const { app } = makeApp();
+    const { apiKey } = await signUp(app);
+    const res = await app.request("/v1/webhooks", {
+      headers: { "X-API-Key": apiKey },
+    });
+    assert.strictEqual(res.status, 200);
+    const body = await res.json() as { webhooks: unknown[] };
+    assert.deepStrictEqual(body.webhooks, []);
+  });
+
+  it("POST /v1/webhooks — 201 creates webhook; GET then shows it", async () => {
+    const { app } = makeApp();
+    const { apiKey } = await signUp(app);
+
+    const createRes = await app.request("/v1/webhooks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+      body: JSON.stringify({
+        url: "https://example.com/webhook",
+        events: ["agreement.created"],
+      }),
+    });
+    assert.strictEqual(createRes.status, 201);
+    const created = await createRes.json() as { webhookId: string; url: string; secret: string };
+    assert.ok(created.webhookId.length > 0);
+    assert.ok(created.secret.length > 0);
+
+    const listRes = await app.request("/v1/webhooks", {
+      headers: { "X-API-Key": apiKey },
+    });
+    assert.strictEqual(listRes.status, 200);
+    const list = await listRes.json() as { webhooks: Array<{ webhookId: string }> };
+    assert.strictEqual(list.webhooks.length, 1);
+    assert.strictEqual(list.webhooks[0]!.webhookId, created.webhookId);
+  });
+
+  it("DELETE /v1/webhooks/:webhookId — 200; subsequent GET list excludes it", async () => {
+    const { app } = makeApp();
+    const { apiKey } = await signUp(app);
+
+    const createRes = await app.request("/v1/webhooks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+      body: JSON.stringify({
+        url: "https://example.com/webhook",
+        events: ["agreement.created"],
+      }),
+    });
+    const { webhookId } = await createRes.json() as { webhookId: string };
+
+    const deleteRes = await app.request(`/v1/webhooks/${webhookId}`, {
+      method: "DELETE",
+      headers: { "X-API-Key": apiKey },
+    });
+    assert.strictEqual(deleteRes.status, 200);
+    const deleteBody = await deleteRes.json() as { disabled: boolean; webhookId: string };
+    assert.strictEqual(deleteBody.disabled, true);
+    assert.strictEqual(deleteBody.webhookId, webhookId);
+
+    const listRes = await app.request("/v1/webhooks", {
+      headers: { "X-API-Key": apiKey },
+    });
+    const list = await listRes.json() as { webhooks: Array<{ webhookId: string; active: boolean }> };
+    // The webhook is disabled, not deleted — it may still appear in list but active=false
+    const found = list.webhooks.find((h) => h.webhookId === webhookId);
+    if (found) assert.strictEqual(found.active, false);
+  });
+
+  it("GET /v1/webhooks/:webhookId/deliveries — 200 returns { deliveries: [] }", async () => {
+    const { app } = makeApp();
+    const { apiKey } = await signUp(app);
+
+    const createRes = await app.request("/v1/webhooks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+      body: JSON.stringify({
+        url: "https://example.com/webhook",
+        events: ["agreement.created"],
+      }),
+    });
+    const { webhookId } = await createRes.json() as { webhookId: string };
+
+    const res = await app.request(`/v1/webhooks/${webhookId}/deliveries`, {
+      headers: { "X-API-Key": apiKey },
+    });
+    assert.strictEqual(res.status, 200);
+    const body = await res.json() as { deliveries: unknown[] };
+    assert.deepStrictEqual(body.deliveries, []);
+  });
+});
+
+// ── DELETE /v1/tenants/:tenantId ──────────────────────────────────────────────
+
+describe("DELETE /v1/tenants/:tenantId", () => {
+  it("403 when tenantId in path does not match authenticated tenant", async () => {
+    const { app } = makeApp();
+    const tenant1 = await signUp(app, "Tenant 1");
+    const tenant2 = await signUp(app, "Tenant 2");
+
+    const res = await app.request(`/v1/tenants/${tenant1.tenantId}`, {
+      method: "DELETE",
+      headers: { "X-API-Key": tenant2.apiKey },
+    });
+    assert.strictEqual(res.status, 403);
+  });
+
+  it("200 deletes own tenant; subsequent GET /v1/me returns 401", async () => {
+    const { app } = makeApp();
+    const { apiKey, tenantId } = await signUp(app);
+
+    const deleteRes = await app.request(`/v1/tenants/${tenantId}`, {
+      method: "DELETE",
+      headers: { "X-API-Key": apiKey },
+    });
+    assert.strictEqual(deleteRes.status, 200);
+    const deleteBody = await deleteRes.json() as { deleted: boolean; tenantId: string };
+    assert.strictEqual(deleteBody.deleted, true);
+    assert.strictEqual(deleteBody.tenantId, tenantId);
+
+    // After deletion the API key should no longer authenticate
+    const meRes = await app.request("/v1/me", {
+      headers: { "X-API-Key": apiKey },
+    });
+    assert.strictEqual(meRes.status, 401);
   });
 });
