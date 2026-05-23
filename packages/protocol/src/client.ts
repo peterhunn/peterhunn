@@ -29,6 +29,12 @@ export interface ContractClientOptions {
    * Throw to abort; return to accept.
    */
   onRequirements?: (requirements: ContractRequirements) => Promise<void>;
+  /**
+   * Called when a previously cached contract token is rejected by the server
+   * (server returns 490 even though a token was presented). Receives the
+   * contractId of the evicted token — useful for logging or alerting.
+   */
+  onRevoked?: (contractId: string) => void | Promise<void>;
   /** External token cache — useful for sharing across ContractClient instances */
   cache?: Map<string, string>;
   /** Max negotiation round-trips before giving up (default: 3) */
@@ -83,6 +89,15 @@ export class ContractClient {
       if (!reqHeader) return response;
 
       const requirements = JSON.parse(b64decode(reqHeader)) as ContractRequirements;
+
+      // If we presented a cached token that the server rejected, evict it and
+      // notify the caller — the contract may have been revoked server-side.
+      if (cached) {
+        const decoded = decodeToken(cached);
+        if (decoded) void this.opts.onRevoked?.(decoded.payload.contractId);
+        this.cache.delete(requirements.templateHash);
+      }
+
       const token = await this.establishAgreement(requirements);
 
       const retryHeaders = new Headers(init?.headers);

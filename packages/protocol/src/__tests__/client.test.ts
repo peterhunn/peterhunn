@@ -486,3 +486,100 @@ describe("ContractClient partyData as function", () => {
     assert.equal(callCount, 2); // once per round (initial + after counter)
   });
 });
+
+describe("ContractClient cache invalidation on server rejection", () => {
+  it("evicts the cached token and re-establishes when server returns 490 with a token already presented", async () => {
+    const staleToken = await signToken(
+      { contractId: "cid-stale", templateHash: requirements.templateHash, partyId: "p", resource: "/resource", iat: NOW, exp: NOW + 7200 },
+      SECRET,
+    );
+    const freshTok = await freshToken();
+    const reqHeader = b64encode(JSON.stringify(requirements));
+    let acceptCalls = 0;
+    let resourceCalls = 0;
+
+    mockFetch(async (url, init) => {
+      if (url.includes("/accept")) {
+        acceptCalls++;
+        const resp: AcceptResponse = { status: "accepted", contractId: "cid-new", token: freshTok };
+        return new Response(JSON.stringify(resp), { status: 200 });
+      }
+      resourceCalls++;
+      // Return 490 on first resource call (even if token was presented), then 200
+      if (resourceCalls === 1) {
+        return new Response(null, { status: 490, headers: { "X-490-Requirements": reqHeader } });
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
+
+    // Pre-populate cache with the stale token
+    const sharedCache = new Map<string, string>([[requirements.templateHash, staleToken]]);
+    const client = new ContractClient({ partyData: { name: "Test" }, skipTemplateVerification: true, cache: sharedCache });
+
+    const res = await client.fetch("https://api.example.com/resource");
+    assert.equal(res.status, 200);
+    assert.equal(acceptCalls, 1, "should have re-established after stale token rejection");
+  });
+
+  it("calls onRevoked with the contractId of the evicted token", async () => {
+    const staleToken = await signToken(
+      { contractId: "cid-revoked", templateHash: requirements.templateHash, partyId: "p", resource: "/resource", iat: NOW, exp: NOW + 7200 },
+      SECRET,
+    );
+    const freshTok = await freshToken();
+    const reqHeader = b64encode(JSON.stringify(requirements));
+    let revokedId: string | null = null;
+    let resourceCalls = 0;
+
+    mockFetch(async (url) => {
+      if (url.includes("/accept")) {
+        const resp: AcceptResponse = { status: "accepted", contractId: "cid-new2", token: freshTok };
+        return new Response(JSON.stringify(resp), { status: 200 });
+      }
+      resourceCalls++;
+      if (resourceCalls === 1) {
+        return new Response(null, { status: 490, headers: { "X-490-Requirements": reqHeader } });
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
+
+    const sharedCache = new Map<string, string>([[requirements.templateHash, staleToken]]);
+    const client = new ContractClient({
+      partyData: { name: "Test" },
+      skipTemplateVerification: true,
+      cache: sharedCache,
+      onRevoked: (id) => { revokedId = id; },
+    });
+
+    await client.fetch("https://api.example.com/resource");
+    assert.equal(revokedId, "cid-revoked");
+  });
+
+  it("does not call onRevoked when 490 is a fresh gate (no token was presented)", async () => {
+    const freshTok = await freshToken();
+    const reqHeader = b64encode(JSON.stringify(requirements));
+    let revokedCalled = false;
+    let resourceCalls = 0;
+
+    mockFetch(async (url) => {
+      if (url.includes("/accept")) {
+        const resp: AcceptResponse = { status: "accepted", contractId: "cid-fresh2", token: freshTok };
+        return new Response(JSON.stringify(resp), { status: 200 });
+      }
+      resourceCalls++;
+      if (resourceCalls === 1) {
+        return new Response(null, { status: 490, headers: { "X-490-Requirements": reqHeader } });
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
+
+    const client = new ContractClient({
+      partyData: { name: "Test" },
+      skipTemplateVerification: true,
+      onRevoked: () => { revokedCalled = true; },
+    });
+
+    await client.fetch("https://api.example.com/resource");
+    assert.ok(!revokedCalled, "onRevoked should not fire on a fresh 490 with no prior token");
+  });
+});
