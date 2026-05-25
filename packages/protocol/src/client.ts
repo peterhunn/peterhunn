@@ -55,6 +55,11 @@ export interface ContractClientOptions {
    * per request. Default: false.
    */
   checkRevocationOnUse?: boolean;
+  /**
+   * Extract text from binary documents (e.g. .docx, .pdf) for hash verification.
+   * Receives the raw bytes, content-type header, and URL. Falls back to UTF-8 decode.
+   */
+  extractText?: (content: ArrayBuffer, contentType: string, url: string) => Promise<string>;
 }
 
 /**
@@ -229,8 +234,12 @@ export class ContractClient {
     if (!res.ok) {
       throw new Error(`x490: failed to fetch template at ${requirements.templateUrl}: ${res.status}`);
     }
-    const content = await res.text();
-    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(content));
+    const bytes = await res.arrayBuffer();
+    const contentType = res.headers.get("content-type") ?? "text/plain";
+    const text = this.opts.extractText
+      ? await this.opts.extractText(bytes, contentType, requirements.templateUrl)
+      : new TextDecoder().decode(bytes);
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
     const hex = [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
     if (hex !== requirements.templateHash) {
       throw new Error(

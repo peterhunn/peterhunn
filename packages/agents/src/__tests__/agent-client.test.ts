@@ -1,7 +1,8 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import Anthropic from "@anthropic-ai/sdk";
 import { AgentContractClient } from "../agent-client.js";
+import { AnthropicClient } from "../llm.js";
+import type { LLMClient } from "../llm.js";
 import type { ContractRequirements, AcceptResponse } from "@x490/protocol";
 import { signToken } from "@x490/protocol";
 
@@ -42,20 +43,10 @@ function b64encode(str: string): string {
   return Buffer.from(str).toString("base64");
 }
 
-// ── Mock Anthropic ─────────────────────────────────────────────────────────────
+// ── Mock LLM ──────────────────────────────────────────────────────────────────
 
-function makeMockAnthropic(responseJson: object): Anthropic {
-  return {
-    beta: {
-      promptCaching: {
-        messages: {
-          create: async () => ({
-            content: [{ type: "text", text: JSON.stringify(responseJson) }],
-          }),
-        },
-      },
-    },
-  } as unknown as Anthropic;
+function makeMockLLM(response: object): LLMClient {
+  return { complete: async () => ({ content: JSON.stringify(response), stopReason: "end_turn" }) };
 }
 
 // ── fetch mock infrastructure ──────────────────────────────────────────────────
@@ -84,10 +75,9 @@ describe("AgentContractClient.fetch — 200 passthrough", () => {
   it("returns 200 response unchanged", async () => {
     mockFetch(() => new Response(JSON.stringify({ ok: true }), { status: 200 }));
 
-    const mockAnthropic = makeMockAnthropic({ decision: "accept", reason: "OK" });
     const client = new AgentContractClient({
       partyData: { name: "Test" },
-      _anthropic: mockAnthropic,
+      llm: makeMockLLM({ decision: "accept", reason: "OK" }),
     });
     const res = await client.fetch("https://api.example.com/resource");
     assert.equal(res.status, 200);
@@ -117,11 +107,10 @@ describe("AgentContractClient.fetch — 490 triggers Claude review then retry", 
       return new Response(JSON.stringify({ data: "success" }), { status: 200 });
     });
 
-    const mockAnthropic = makeMockAnthropic({ decision: "accept", reason: "Looks good" });
     const client = new AgentContractClient({
       partyData: { name: "Test" },
       skipTemplateVerification: true,
-      _anthropic: mockAnthropic,
+      llm: makeMockLLM({ decision: "accept", reason: "Looks good" }),
     });
     const res = await client.fetch("https://api.example.com/resource");
     assert.equal(res.status, 200);
@@ -141,14 +130,10 @@ describe("AgentContractClient — Claude reject throws", () => {
       return new Response(JSON.stringify({ ok: true }), { status: 200 });
     });
 
-    const mockAnthropic = makeMockAnthropic({
-      decision: "reject",
-      reason: "Terms are unacceptable",
-    });
     const client = new AgentContractClient({
       partyData: { name: "Test" },
       skipTemplateVerification: true,
-      _anthropic: mockAnthropic,
+      llm: makeMockLLM({ decision: "reject", reason: "Terms are unacceptable" }),
     });
     await assert.rejects(
       () => client.establishAgreement(requirements),
@@ -171,14 +156,10 @@ describe("AgentContractClient — onReview callback", () => {
       return new Response(JSON.stringify({ ok: true }), { status: 200 });
     });
 
-    const mockAnthropic = makeMockAnthropic({
-      decision: "reject",
-      reason: "Terms look bad",
-    });
     const client = new AgentContractClient({
       partyData: { name: "Test" },
       skipTemplateVerification: true,
-      _anthropic: mockAnthropic,
+      llm: makeMockLLM({ decision: "reject", reason: "Terms look bad" }),
       onReview: async (decision, _reqs) => {
         reviewCalled = true;
         // Caller decides not to throw — allows the flow to continue
@@ -213,15 +194,10 @@ describe("AgentContractClient — negotiate decision returns proposedTerms", () 
       return new Response(JSON.stringify(resp), { status: 200 });
     });
 
-    const mockAnthropic = makeMockAnthropic({
-      decision: "negotiate",
-      reason: "Jurisdiction should be US",
-      proposedTerms: { jurisdiction: "US" },
-    });
     const client = new AgentContractClient({
       partyData: { name: "Test" },
       skipTemplateVerification: true,
-      _anthropic: mockAnthropic,
+      llm: makeMockLLM({ decision: "negotiate", reason: "Jurisdiction should be US", proposedTerms: { jurisdiction: "US" } }),
     });
     await client.establishAgreement(negotiableReqs);
     // Should have used negotiateEndpoint because proposedTerms were returned
@@ -242,15 +218,10 @@ describe("AgentContractClient — non-negotiable contract skips Claude negotiati
       return new Response(JSON.stringify(resp), { status: 200 });
     });
 
-    const mockAnthropic = makeMockAnthropic({
-      decision: "negotiate",
-      reason: "Want to negotiate",
-      proposedTerms: { jurisdiction: "US" },
-    });
     const client = new AgentContractClient({
       partyData: { name: "Test" },
       skipTemplateVerification: true,
-      _anthropic: mockAnthropic,
+      llm: makeMockLLM({ decision: "negotiate", reason: "Want to negotiate", proposedTerms: { jurisdiction: "US" } }),
     });
     // requirements.negotiable is false — should use acceptEndpoint
     await client.establishAgreement(requirements);
@@ -271,22 +242,10 @@ describe("AgentContractClient — invalid Claude JSON falls back to accept", () 
       return new Response(JSON.stringify({ ok: true }), { status: 200 });
     });
 
-    const badAnthropic = {
-      beta: {
-        promptCaching: {
-          messages: {
-            create: async () => ({
-              content: [{ type: "text", text: "not valid json {{{" }],
-            }),
-          },
-        },
-      },
-    } as unknown as Anthropic;
-
     const client = new AgentContractClient({
       partyData: { name: "Test" },
       skipTemplateVerification: true,
-      _anthropic: badAnthropic,
+      llm: { complete: async () => ({ content: "not valid json {{{", stopReason: "end_turn" }) },
     });
     // Should not throw — defaults to accept
     const result = await client.establishAgreement(requirements);
@@ -309,32 +268,28 @@ describe("AgentContractClient — prompt caching on system prompt", () => {
       return new Response(JSON.stringify({ ok: true }), { status: 200 });
     });
 
-    const capturingAnthropic = {
+    // Verify that AnthropicClient passes cache_control ephemeral on the system prompt
+    const capturingSdk = {
       beta: {
         promptCaching: {
           messages: {
-            create: async (params: {
-              system?: unknown;
-              messages?: unknown[];
-              model?: string;
-              max_tokens?: number;
-            }) => {
+            create: async (params: { system?: unknown }) => {
               capturedSystemArg = params.system;
               return {
-                content: [
-                  { type: "text", text: JSON.stringify({ decision: "accept", reason: "OK" }) },
-                ],
+                content: [{ type: "text", text: JSON.stringify({ decision: "accept", reason: "OK" }) }],
+                stop_reason: "end_turn",
               };
             },
           },
         },
       },
-    } as unknown as Anthropic;
+    };
+    const capturingLLM: LLMClient = new AnthropicClient(capturingSdk);
 
     const client = new AgentContractClient({
       partyData: { name: "Test" },
       skipTemplateVerification: true,
-      _anthropic: capturingAnthropic,
+      llm: capturingLLM,
     });
     await client.establishAgreement(requirements);
 

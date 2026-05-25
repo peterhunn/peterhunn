@@ -1,3 +1,5 @@
+import type { LLMClient } from "./llm.js";
+
 export interface ReviewDecision {
   decision: "accept" | "reject" | "negotiate";
   reason: string;
@@ -30,8 +32,8 @@ export interface AgentContractServerOptions {
    * If not provided, Claude's "reject" decision throws automatically.
    */
   onReview?: (decision: ServerReviewDecision, request: import("@x490/protocol").AcceptRequest) => Promise<void>;
-  /** @internal — for testing only */
-  _anthropic?: import("@anthropic-ai/sdk").default;
+  /** LLM client for driving negotiation decisions. Defaults to AnthropicClient. */
+  llm?: LLMClient;
 }
 
 export interface AgentContractClientOptions {
@@ -58,6 +60,8 @@ export interface AgentContractClientOptions {
   maxNegotiationRounds?: number;
   /** Skip template hash verification. Default: false */
   skipTemplateVerification?: boolean;
-  /** @internal — for testing only */
-  _anthropic?: import("@anthropic-ai/sdk").default;
+  /** LLM client for driving negotiation decisions. Defaults to AnthropicClient. */
+  llm?: LLMClient;
+  /** Extract text from binary documents (e.g. .docx, .pdf) for hash verification and LLM review. */
+  extractText?: (content: ArrayBuffer, contentType: string, url: string) => Promise<string>;
 }

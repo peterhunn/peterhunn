@@ -42,17 +42,21 @@ export interface LLMClient {
 export class AnthropicClient implements LLMClient {
   constructor(
     private readonly sdk: {
-      messages: {
-        create(params: unknown): Promise<{
-          content: Array<{
-            type: string;
-            text?: string;
-            id?: string;
-            name?: string;
-            input?: unknown;
-          }>;
-          stop_reason: string | null;
-        }>;
+      beta: {
+        promptCaching: {
+          messages: {
+            create(params: unknown): Promise<{
+              content: Array<{
+                type: string;
+                text?: string;
+                id?: string;
+                name?: string;
+                input?: unknown;
+              }>;
+              stop_reason: string | null;
+            }>;
+          };
+        };
       };
     },
     private readonly model: string = "claude-opus-4-7",
@@ -67,14 +71,14 @@ export class AnthropicClient implements LLMClient {
     const params: Record<string, unknown> = {
       model: this.model,
       max_tokens: this.maxTokens,
-      system: systemPrompt,
+      system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
       messages,
     };
     if (tools && tools.length > 0) {
       params["tools"] = tools;
     }
 
-    const response = await this.sdk.messages.create(params);
+    const response = await this.sdk.beta.promptCaching.messages.create(params);
 
     const textBlock = response.content.find((b) => b.type === "text");
     const toolBlocks = response.content.filter((b) => b.type === "tool_use");

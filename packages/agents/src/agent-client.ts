@@ -2,17 +2,17 @@ import Anthropic from "@anthropic-ai/sdk";
 import { ContractClient } from "@x490/protocol";
 import type { ContractRequirements, NegotiableField } from "@x490/protocol";
 import type { AgentContractClientOptions, ReviewDecision } from "./types.js";
+import { AnthropicClient } from "./llm.js";
+import type { LLMClient } from "./llm.js";
 
 export class AgentContractClient {
   private readonly inner: ContractClient;
-  private readonly anthropic: Anthropic;
-  private readonly model: string;
+  private readonly llm: LLMClient;
   private readonly opts: AgentContractClientOptions;
 
   constructor(opts: AgentContractClientOptions) {
     this.opts = opts;
-    this.model = opts.model ?? "claude-sonnet-4-6";
-    this.anthropic = opts._anthropic ?? new Anthropic({ apiKey: opts.apiKey });
+    this.llm = opts.llm ?? new AnthropicClient(new Anthropic({ apiKey: opts.apiKey }), opts.model ?? "claude-sonnet-4-6");
 
     this.inner = new ContractClient({
       partyData: opts.partyData,
@@ -23,6 +23,7 @@ export class AgentContractClient {
       ...(opts.maxNegotiationRounds !== undefined ? { maxNegotiationRounds: opts.maxNegotiationRounds } : {}),
       ...(opts.skipTemplateVerification !== undefined ? { skipTemplateVerification: opts.skipTemplateVerification } : {}),
       ...(opts.onRevoked !== undefined ? { onRevoked: opts.onRevoked } : {}),
+      ...(opts.extractText ? { extractText: opts.extractText } : {}),
     });
   }
 
@@ -67,22 +68,10 @@ proposedTerms is only needed when decision is "negotiate" — use field names fr
 
     const userContent = `Contract requirements:\n${JSON.stringify(requirements, null, 2)}`;
 
-    const message = await this.anthropic.beta.promptCaching.messages.create({
-      model: this.model,
-      max_tokens: 512,
-      system: [
-        {
-          type: "text",
-          text: systemPrompt,
-          cache_control: { type: "ephemeral" },
-        },
-      ],
-      messages: [{ role: "user", content: userContent }],
-    });
+    const result = await this.llm.complete(systemPrompt, [{ role: "user", content: userContent }]);
 
-    const text = message.content.find((b) => b.type === "text")?.text ?? "{}";
     try {
-      return JSON.parse(text) as ReviewDecision;
+      return JSON.parse(result.content) as ReviewDecision;
     } catch {
       return { decision: "accept", reason: "Could not parse Claude response — defaulting to accept" };
     }

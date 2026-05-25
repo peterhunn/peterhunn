@@ -12,7 +12,9 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.26.0",
-    "@x490/protocol": "*"
+    "@x490/protocol": "*",
+    "mammoth": "^1.8.0",
+    "pdfjs-dist": "^4.4.168"
   },
   "devDependencies": {
     "tsx": "^4.7.0",

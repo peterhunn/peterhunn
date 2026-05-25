@@ -1,8 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import Anthropic from "@anthropic-ai/sdk";
 import { AgentContractServer } from "../agent-server.js";
 import { AgentContractClient } from "../agent-client.js";
+import type { LLMClient } from "../llm.js";
 import type { ContractRequirements, AcceptRequest, AcceptResponse } from "@x490/protocol";
 import { signToken } from "@x490/protocol";
 
@@ -35,25 +35,15 @@ async function freshToken(contractId = "cid-1"): Promise<string> {
   );
 }
 
-function makeMockAnthropic(response: object): Anthropic {
-  return {
-    beta: {
-      promptCaching: {
-        messages: {
-          create: async () => ({
-            content: [{ type: "text", text: JSON.stringify(response) }],
-          }),
-        },
-      },
-    },
-  } as unknown as Anthropic;
+function makeMockLLM(response: object): LLMClient {
+  return { complete: async () => ({ content: JSON.stringify(response), stopReason: "end_turn" }) };
 }
 
 function makeServer(claudeResponse: object, overrides: Partial<ContractRequirements> = {}) {
   return new AgentContractServer({
     requirements: { ...baseRequirements, ...overrides },
     issueToken: async (contractId, _partyData) => freshToken(contractId),
-    _anthropic: makeMockAnthropic(claudeResponse),
+    llm: makeMockLLM(claudeResponse),
   });
 }
 
@@ -65,18 +55,12 @@ describe("AgentContractServer", () => {
     const server = new AgentContractServer({
       requirements: baseRequirements,
       issueToken: async (id) => freshToken(id),
-      _anthropic: {
-        beta: {
-          promptCaching: {
-            messages: {
-              create: async () => {
-                claudeCalled = true;
-                return { content: [{ type: "text", text: '{"decision":"accept","reason":"ok"}' }] };
-              },
-            },
-          },
+      llm: {
+        complete: async () => {
+          claudeCalled = true;
+          return { content: '{"decision":"accept","reason":"ok"}', stopReason: "end_turn" };
         },
-      } as unknown as Anthropic,
+      },
     });
 
     const req: AcceptRequest = { templateId: "org.accordproject.test", templateHash: "testhash", partyData: { name: "Alice" } };
@@ -138,7 +122,7 @@ describe("AgentContractServer", () => {
       requirements: baseRequirements,
       issueToken: async (id) => freshToken(id),
       onReview: async (decision) => { calls.push(decision); },
-      _anthropic: makeMockAnthropic({ decision: "accept", reason: "ok" }),
+      llm: makeMockLLM({ decision: "accept", reason: "ok" }),
     });
     const req: AcceptRequest = {
       templateId: "org.accordproject.test",
@@ -154,9 +138,7 @@ describe("AgentContractServer", () => {
     const server = new AgentContractServer({
       requirements: baseRequirements,
       issueToken: async (id) => freshToken(id),
-      _anthropic: {
-        beta: { promptCaching: { messages: { create: async () => ({ content: [{ type: "text", text: "not json" }] }) } } },
-      } as unknown as Anthropic,
+      llm: { complete: async () => ({ content: "not json", stopReason: "end_turn" }) },
     });
     const req: AcceptRequest = {
       templateId: "org.accordproject.test",
@@ -182,17 +164,7 @@ describe("A2A negotiation loop", () => {
     const server = new AgentContractServer({
       requirements: baseRequirements,
       issueToken: async (id) => freshToken(id),
-      _anthropic: {
-        beta: {
-          promptCaching: {
-            messages: {
-              create: async () => ({
-                content: [{ type: "text", text: JSON.stringify(serverResponses[serverCallCount++]) }],
-              }),
-            },
-          },
-        },
-      } as unknown as Anthropic,
+      llm: { complete: async () => ({ content: JSON.stringify(serverResponses[serverCallCount++]), stopReason: "end_turn" }) },
     });
 
     // Client: reviewRequirements → accept; proposeNegotiation round 0 → negotiate 86400;
@@ -241,17 +213,7 @@ describe("A2A negotiation loop", () => {
       partyData: { name: "ClientAgent" },
       skipTemplateVerification: true,
       maxNegotiationRounds: 3,
-      _anthropic: {
-        beta: {
-          promptCaching: {
-            messages: {
-              create: async () => ({
-                content: [{ type: "text", text: JSON.stringify(clientResponses[Math.min(clientCallCount++, clientResponses.length - 1)]) }],
-              }),
-            },
-          },
-        },
-      } as unknown as Anthropic,
+      llm: { complete: async () => ({ content: JSON.stringify(clientResponses[Math.min(clientCallCount++, clientResponses.length - 1)]), stopReason: "end_turn" }) },
     });
 
     // Patch global fetch

@@ -1,6 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { ContractRequirements, AcceptRequest, AcceptResponse } from "@x490/protocol";
 import type { AgentContractServerOptions, ServerReviewDecision } from "./types.js";
+import { AnthropicClient } from "./llm.js";
+import type { LLMClient } from "./llm.js";
 
 /**
  * AgentContractServer — the issuing side of an agent-to-agent negotiation.
@@ -18,14 +20,12 @@ import type { AgentContractServerOptions, ServerReviewDecision } from "./types.j
  *   … up to maxNegotiationRounds on the client side
  */
 export class AgentContractServer {
-  private readonly anthropic: Anthropic;
-  private readonly model: string;
+  private readonly llm: LLMClient;
   private readonly opts: AgentContractServerOptions;
 
   constructor(opts: AgentContractServerOptions) {
     this.opts = opts;
-    this.model = opts.model ?? "claude-sonnet-4-6";
-    this.anthropic = opts._anthropic ?? new Anthropic({ apiKey: opts.apiKey });
+    this.llm = opts.llm ?? new AnthropicClient(new Anthropic({ apiKey: opts.apiKey }), opts.model ?? "claude-sonnet-4-6");
   }
 
   /**
@@ -94,16 +94,10 @@ counterOffer is only needed when decision is "counter_offer".`;
     );
     sections.push(`ACCEPTING AGENT PARTY DATA:\n${JSON.stringify(request.partyData, null, 2)}`);
 
-    const message = await this.anthropic.beta.promptCaching.messages.create({
-      model: this.model,
-      max_tokens: 512,
-      system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
-      messages: [{ role: "user", content: sections.join("\n\n") }],
-    });
+    const result = await this.llm.complete(systemPrompt, [{ role: "user", content: sections.join("\n\n") }]);
 
-    const text = message.content.find((b) => b.type === "text")?.text ?? "{}";
     try {
-      return JSON.parse(text) as ServerReviewDecision;
+      return JSON.parse(result.content) as ServerReviewDecision;
     } catch {
       return { decision: "accept", reason: "Could not parse Claude response — defaulting to accept" };
     }
