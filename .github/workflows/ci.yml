@@ -22,6 +22,10 @@ jobs:
         run: npm run build --workspace=packages/agents
       - name: Test agents
         run: npm test --workspace=packages/agents
+      - name: Build mcp
+        run: npm run build --workspace=packages/mcp
+      - name: Test mcp
+        run: npm test --workspace=packages/mcp
       - name: Build api
         run: |
           rm -rf packages/api/dist
