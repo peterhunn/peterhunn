@@ -99,6 +99,13 @@ export interface ContractRequirements {
    * The server validates values against allowedValues and renders the final document.
    */
   templateVariables?: Record<string, TemplateVariable>;
+  /**
+   * When true, agents may propose free-form edits to specific document clauses
+   * via negotiationTerms.clauses. The server reviews changes with an LLM and
+   * applies accepted edits using clause markers in the template.
+   * Clause markers: <!-- clause:id -->text<!-- /clause:id -->
+   */
+  clauseEditing?: boolean;
 }
 
 /** Payload embedded inside an AgreementToken. */
@@ -151,6 +158,12 @@ export interface AcceptResponse {
   pendingAcceptances?: number;
   /** Total parties required (present when status === "pending") */
   requiredAcceptances?: number;
+  /**
+   * Hex SHA-256 of the agreed document after clause edits have been applied.
+   * Present when clauseEditing is true and clause changes were accepted.
+   * Clients may fetch and verify the document independently using this hash.
+   */
+  agreementHash?: string;
 }
 
 /** Posted to verifyEndpoint by servers using the facilitator pattern. */

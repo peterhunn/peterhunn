@@ -4,6 +4,7 @@ import type { AgentContractServerOptions, ServerReviewDecision } from "./types.j
 import { AnthropicClient } from "./llm.js";
 import type { LLMClient } from "./llm.js";
 import { renderTemplate } from "./render-template.js";
+import { applyAndHash, extractClauses } from "./apply-clauses.js";
 
 /**
  * AgentContractServer — the issuing side of an agent-to-agent negotiation.
@@ -36,6 +37,20 @@ export class AgentContractServer {
    * - With negotiationTerms → Claude reviews → accept, counter-propose, or reject.
    */
   async handleAccept(request: AcceptRequest): Promise<AcceptResponse> {
+    // Enforce clauseEditing feature flag
+    const proposedClauses = request.negotiationTerms?.clauses;
+    if (proposedClauses !== undefined) {
+      if (!this.opts.requirements.clauseEditing) {
+        throw new Error(
+          "AgentContractServer: clause editing is not enabled for this contract. " +
+          "Set clauseEditing: true in ContractRequirements to allow clause proposals.",
+        );
+      }
+      if (typeof proposedClauses !== "object" || proposedClauses === null || Array.isArray(proposedClauses)) {
+        throw new Error("AgentContractServer: negotiationTerms.clauses must be a Record<string, string>");
+      }
+    }
+
     // Validate selected variant
     if (typeof request.negotiationTerms?.variant === "string") {
       const key = request.negotiationTerms.variant;
@@ -78,7 +93,13 @@ export class AgentContractServer {
     }
 
     if (decision.decision === "accept") {
-      return this.issueToken(request.partyData);
+      const response = await this.issueToken(request.partyData);
+      if (proposedClauses && this.opts.templateContent) {
+        const applyFn = this.opts.applyClauseEdits ?? applyAndHash;
+        const { hash } = await applyFn(this.opts.templateContent, proposedClauses as Record<string, string>);
+        return { ...response, agreementHash: hash };
+      }
+      return response;
     }
 
     // counter_offer — merge Claude's suggested changes onto the current requirements
@@ -144,6 +165,21 @@ counterOffer is only needed when decision is "counter_offer".`;
     if (templateContent) {
       sections.push(`TEMPLATE${selectedVariant ? ` (${selectedVariant})` : ""}:\n${templateContent}`);
     }
+    // Show current vs proposed clause text side-by-side for LLM review
+    const clauses = request.negotiationTerms?.clauses;
+    if (clauses && typeof clauses === "object" && !Array.isArray(clauses) && templateContent) {
+      const current = extractClauses(templateContent);
+      const comparison = Object.entries(clauses as Record<string, string>)
+        .map(([id, proposed]) => {
+          const existing = current[id];
+          return existing !== undefined
+            ? `Clause "${id}":\n  CURRENT: ${existing}\n  PROPOSED: ${proposed}`
+            : `Clause "${id}" (unmarked):\n  PROPOSED: ${proposed}`;
+        })
+        .join("\n\n");
+      sections.push(`PROPOSED CLAUSE EDITS:\n${comparison}`);
+    }
+
     sections.push(
       `PROPOSED TERMS FROM ACCEPTING AGENT:\n${JSON.stringify(request.negotiationTerms, null, 2)}`,
     );

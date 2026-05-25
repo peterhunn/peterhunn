@@ -58,6 +58,10 @@ export class AgentContractClient {
   }
 
   private async claudeReview(requirements: ContractRequirements): Promise<ReviewDecision> {
+    const clauseNote = requirements.clauseEditing
+      ? '\nWhen proposing clause changes, include them as: { "clauses": { "clause-id": "new text" } } in proposedTerms. Use clause IDs matching <!-- clause:id --> markers in the document.'
+      : "";
+
     const systemPrompt = `You are a legal contract review agent for an automated system.
 Review the contract requirements and decide: accept, reject, or negotiate.
 - Accept if terms are standard and fair.
@@ -66,7 +70,7 @@ Review the contract requirements and decide: accept, reject, or negotiate.
 Respond with JSON only: { "decision": "accept"|"reject"|"negotiate", "reason": "...", "proposedTerms": {...} }
 proposedTerms is only needed when decision is "negotiate" — use field names from negotiableFields.
 When variants are available, propose { "variant": "<key>" } in proposedTerms to select one.
-When templateVariables are present, propose their values in proposedTerms.`;
+When templateVariables are present, propose their values in proposedTerms.${clauseNote}`;
 
     const sections: string[] = [
       `Contract requirements:\n${JSON.stringify(requirements, null, 2)}`,

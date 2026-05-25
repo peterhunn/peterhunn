@@ -7,3 +7,4 @@ export type { LLMClient, Message, CompletionResult, ToolCall } from "./llm.js";
 export { createExtractor } from "./extractor.js";
 export { hashTemplate } from "./hash-template.js";
 export { renderTemplate } from "./render-template.js";
+export { applyClauseEdits, extractClauses, applyAndHash } from "./apply-clauses.js";

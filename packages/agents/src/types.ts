@@ -39,6 +39,16 @@ export interface AgentContractServerOptions {
    * Only used when no templateContent is provided. Default: false.
    */
   fetchVariantTemplates?: boolean;
+  /**
+   * Called when clause edits are accepted to apply them to the document.
+   * Receives the current template content and the proposed clause edits map
+   * (clause id → proposed text). Must return the modified document and its
+   * hex SHA-256 hash. Defaults to the built-in marker-based applyAndHash().
+   */
+  applyClauseEdits?: (
+    templateContent: string,
+    edits: Record<string, string>,
+  ) => Promise<{ document: string; hash: string }>;
 }
 
 export interface AgentContractClientOptions {
