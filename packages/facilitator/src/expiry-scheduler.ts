@@ -104,8 +104,8 @@ export class ExpiryScheduler {
 
         try {
           const { status } = await this.deliver(hook.url, hook.secret, payload);
+          const ok = status >= 200 && status < 300;
           if (this.deliveries) {
-              const ok = status >= 200 && status < 300;
             const delivery = {
               deliveryId: crypto.randomUUID(),
               webhookId: hook.webhookId,
@@ -121,6 +121,9 @@ export class ExpiryScheduler {
             if (ok) {
               await this.deliveries.markSuccess(delivery.deliveryId, status);
             }
+          }
+          if (ok) {
+            await this.agreements.markWarned(agreement.contractId);
           }
         } catch (err) {
           console.error(`[ExpiryScheduler] delivery failed for webhook ${hook.webhookId}:`, err);

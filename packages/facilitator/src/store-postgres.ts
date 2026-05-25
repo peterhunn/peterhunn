@@ -387,6 +387,7 @@ interface AgreementRow {
   external_source: string | null;
   external_id: string | null;
   parent_contract_id: string | null;
+  warned_at: Date | null;
 }
 
 function rowToAgreement(r: AgreementRow): AgreementRecord {
@@ -410,6 +411,7 @@ function rowToAgreement(r: AgreementRow): AgreementRecord {
   if (r.external_source !== null) record.externalSource = r.external_source;
   if (r.external_id !== null) record.externalId = r.external_id;
   if (r.parent_contract_id !== null) record.parentContractId = r.parent_contract_id;
+  if (r.warned_at !== null) record.warnedAt = Math.floor(r.warned_at.getTime() / 1000);
   return record;
 }
 
@@ -422,7 +424,7 @@ export class PostgresAgreementStore implements AgreementStore {
         contract_id, tenant_id, template_hash, party_id, resource,
         party_data, token, issued_at, expires_at,
         wallet_address, eip712_credential, nft_token_id, nft_tx_hash,
-        external_source, external_id, parent_contract_id
+        external_source, external_id, parent_contract_id, warned_at
       ) VALUES (
         ${a.contractId}, ${a.tenantId}, ${a.templateHash}, ${a.partyId}, ${a.resource},
         ${this.sql.json(a.partyData as never)}, ${a.token},
@@ -430,7 +432,7 @@ export class PostgresAgreementStore implements AgreementStore {
         ${a.walletAddress ?? null}, ${a.eip712Credential ?? null},
         ${a.nftTokenId ?? null}, ${a.nftTxHash ?? null},
         ${a.externalSource ?? null}, ${a.externalId ?? null},
-        ${a.parentContractId ?? null}
+        ${a.parentContractId ?? null}, ${a.warnedAt ? new Date(a.warnedAt * 1000) : null}
       )
       ON CONFLICT (contract_id) DO NOTHING
     `;
@@ -561,12 +563,21 @@ export class PostgresAgreementStore implements AgreementStore {
     const rows = await this.sql<AgreementRow[]>`
       SELECT * FROM x490_agreements
       WHERE revoked_at IS NULL
+        AND warned_at IS NULL
         AND expires_at > ${afterDate}
         AND expires_at <= ${beforeDate}
       ORDER BY expires_at ASC
       LIMIT ${limit}
     `;
     return rows.map(rowToAgreement);
+  }
+
+  async markWarned(contractId: string): Promise<void> {
+    await this.sql`
+      UPDATE x490_agreements
+      SET warned_at = now()
+      WHERE contract_id = ${contractId} AND warned_at IS NULL
+    `;
   }
 }
 

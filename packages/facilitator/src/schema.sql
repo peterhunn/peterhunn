@@ -85,6 +85,7 @@ ALTER TABLE x490_agreements ADD COLUMN IF NOT EXISTS nft_tx_hash         TEXT;
 ALTER TABLE x490_agreements ADD COLUMN IF NOT EXISTS external_source      TEXT;
 ALTER TABLE x490_agreements ADD COLUMN IF NOT EXISTS external_id          TEXT;
 ALTER TABLE x490_agreements ADD COLUMN IF NOT EXISTS parent_contract_id   TEXT;
+ALTER TABLE x490_agreements ADD COLUMN IF NOT EXISTS warned_at             TIMESTAMPTZ;
 
 -- Agreements: one row per accepted contract.
 CREATE TABLE IF NOT EXISTS x490_agreements (
@@ -108,7 +109,9 @@ CREATE TABLE IF NOT EXISTS x490_agreements (
   external_source   TEXT,
   external_id       TEXT,
   -- Renewal chain: references the contractId this agreement renews
-  parent_contract_id TEXT
+  parent_contract_id TEXT,
+  -- Set by ExpiryScheduler after warning delivery; prevents re-delivery on restart
+  warned_at          TIMESTAMPTZ
 );
 
 CREATE INDEX IF NOT EXISTS idx_x490_agreements_external
@@ -216,7 +219,20 @@ CREATE INDEX IF NOT EXISTS idx_x490_amendments_contract
 -- Expiry index: efficiently find agreements expiring in a time window.
 CREATE INDEX IF NOT EXISTS idx_x490_agreements_expiry
   ON x490_agreements(expires_at ASC)
-  WHERE revoked_at IS NULL;
+  WHERE revoked_at IS NULL AND warned_at IS NULL;
+
+-- Integration configs: per-tenant CLM platform credentials.
+CREATE TABLE IF NOT EXISTS x490_integration_configs (
+  id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id     UUID        NOT NULL REFERENCES x490_tenants(tenant_id) ON DELETE CASCADE,
+  source        TEXT        NOT NULL,
+  credentials   JSONB       NOT NULL DEFAULT '{}',
+  webhook_secret TEXT       NOT NULL,
+  enabled       BOOLEAN     NOT NULL DEFAULT true,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (tenant_id, source)
+);
 
 -- Renewal chain index: find all renewals of a given agreement.
 CREATE INDEX IF NOT EXISTS idx_x490_agreements_parent

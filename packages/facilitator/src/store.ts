@@ -79,10 +79,12 @@ export interface AgreementStore {
   /** List all amendments for a contract, oldest first. */
   listAmendments(contractId: string): Promise<AmendmentRecord[]>;
   /**
-   * Find active (non-revoked) agreements expiring between afterUnix and beforeUnix.
+   * Find active (non-revoked, not-yet-warned) agreements expiring between afterUnix and beforeUnix.
    * Used by the expiry scheduler to send warning notifications.
    */
   findExpiringBetween(afterUnix: number, beforeUnix: number, limit?: number): Promise<AgreementRecord[]>;
+  /** Mark that a contract.expiring warning has been delivered. Prevents duplicate notifications. */
+  markWarned(contractId: string): Promise<void>;
 }
 
 // ── In-memory implementations ──────────────────────────────────────────────────
@@ -385,12 +387,19 @@ export class InMemoryAgreementStore implements AgreementStore {
   async findExpiringBetween(afterUnix: number, beforeUnix: number, limit = 200): Promise<AgreementRecord[]> {
     const results: AgreementRecord[] = [];
     for (const a of this.agreements.values()) {
-      if (!a.revokedAt && a.expiresAt > afterUnix && a.expiresAt <= beforeUnix) {
+      if (!a.revokedAt && !a.warnedAt && a.expiresAt > afterUnix && a.expiresAt <= beforeUnix) {
         results.push(a);
         if (results.length >= limit) break;
       }
     }
     return results;
+  }
+
+  async markWarned(contractId: string): Promise<void> {
+    const record = this.agreements.get(contractId);
+    if (record) {
+      this.agreements.set(contractId, { ...record, warnedAt: Math.floor(Date.now() / 1000) });
+    }
   }
 }
 

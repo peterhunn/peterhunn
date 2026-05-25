@@ -20,6 +20,7 @@ import { IroncladClient, IroncladWebhookAdapter as IroncladAdapter, verifyIroncl
 import type { DocuSignWebhookAdapter } from "./adapters/docusign.js";
 import { DocuSignClient, DocuSignWebhookAdapter as DocuSignAdapter, verifyDocuSignSignature, type DocuSignConnectEvent } from "./adapters/docusign.js";
 import { renderReviewPage } from "./review-page.js";
+import { extractDocumentText, isSupportedMimeType } from "./document-extractor.js";
 import { renderDashboard } from "./dashboard.js";
 import type { IntegrationConfigStore } from "./integration-config-store.js";
 import type { IntegrationSource } from "./integration-config-store.js";
@@ -48,6 +49,10 @@ export interface FacilitatorAppOptions {
     verify?: number;
     /** POST /tenants (sign-up) — default 5 */
     signup?: number;
+    /** POST /v1/agreements/:id/amend — default 20 */
+    amend?: number;
+    /** POST /v1/agreements/:id/renew — default 10 */
+    renew?: number;
   };
   /**
    * Called after every agreement is recorded (any platform). Use this to
@@ -788,6 +793,69 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     );
   });
 
+  // ── Template upload — PDF/DOCX/text → extract → register (auth required) ────
+
+  authed.post("/v1/templates/upload", async (c) => {
+    const tenant = c.get("tenant");
+
+    const formData = await c.req.formData().catch(() => null);
+    if (!formData) return c.json({ error: "Expected multipart/form-data" }, 400);
+
+    const file = formData.get("file");
+    if (!(file instanceof File)) return c.json({ error: "file field is required" }, 400);
+
+    const mimeType = file.type || "application/octet-stream";
+    if (!isSupportedMimeType(mimeType)) {
+      return c.json({
+        error: `Unsupported file type: ${mimeType}`,
+        supported: ["application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "text/plain", "text/markdown"],
+      }, 415);
+    }
+
+    const title = (formData.get("title") as string | null) ?? file.name ?? undefined;
+    const description = (formData.get("description") as string | null) ?? undefined;
+    const changeNote = (formData.get("changeNote") as string | null) ?? undefined;
+    const parentHash = (formData.get("parentHash") as string | null) ?? undefined;
+
+    let extracted;
+    try {
+      extracted = await extractDocumentText(await file.arrayBuffer(), mimeType);
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 422);
+    }
+
+    if (!extracted.text.trim()) {
+      return c.json({ error: "Document appears to be empty or contains no extractable text" }, 422);
+    }
+
+    const meta: RegisteredTemplate["meta"] = {};
+    if (title) meta.title = title;
+    if (description) meta.description = description;
+
+    const tmpl = await templates.register(
+      tenant.tenantId,
+      extracted.text,
+      meta,
+      undefined,
+      parentHash,
+      changeNote,
+    );
+
+    return c.json(
+      {
+        hash: tmpl.hash,
+        url: `${baseUrl}/v1/templates/${tmpl.hash}`,
+        format: extracted.format,
+        pages: extracted.pages,
+        title: tmpl.meta.title,
+        description: tmpl.meta.description,
+        warnings: extracted.warnings,
+        ...(parentHash ? { parentHash } : {}),
+      },
+      201,
+    );
+  });
+
   // ── Build ContractRequirements (auth required) ────────────────────────────
 
   authed.post("/v1/requirements", async (c) => {
@@ -1125,9 +1193,12 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
 
   // ── Amendments (auth required) ────────────────────────────────────────────────
 
-  authed.post("/v1/agreements/:contractId/amend", async (c) => {
+  const amendLimiter = rateLimit({ windowMs: 60_000, max: opts.rateLimits?.amend ?? 20 });
+  const renewLimiter = rateLimit({ windowMs: 60_000, max: opts.rateLimits?.renew ?? 10 });
+
+  authed.post("/v1/agreements/:contractId/amend", amendLimiter, async (c) => {
     const tenant = c.get("tenant");
-    const contractId = c.req.param("contractId");
+    const contractId = c.req.param("contractId") ?? "";
 
     const record = await agreements.findById(contractId);
     if (!record || record.tenantId !== tenant.tenantId) {
@@ -1209,7 +1280,7 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
 
   authed.get("/v1/agreements/:contractId/amendments", async (c) => {
     const tenant = c.get("tenant");
-    const contractId = c.req.param("contractId");
+    const contractId = c.req.param("contractId") ?? "";
 
     const record = await agreements.findById(contractId);
     if (!record || record.tenantId !== tenant.tenantId) {
@@ -1222,9 +1293,9 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
 
   // ── Renewal (auth required) ───────────────────────────────────────────────────
 
-  authed.post("/v1/agreements/:contractId/renew", async (c) => {
+  authed.post("/v1/agreements/:contractId/renew", renewLimiter, async (c) => {
     const tenant = c.get("tenant");
-    const contractId = c.req.param("contractId");
+    const contractId = c.req.param("contractId") ?? "";
 
     const record = await agreements.findById(contractId);
     if (!record || record.tenantId !== tenant.tenantId) {
@@ -1292,7 +1363,7 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
 
   authed.post("/v1/templates/:hash/supersede", async (c) => {
     const tenant = c.get("tenant");
-    const parentHash = c.req.param("hash");
+    const parentHash = c.req.param("hash") ?? "";
 
     const parent = await templates.findByHash(parentHash);
     if (!parent || parent.tenantId !== tenant.tenantId) {
@@ -1322,7 +1393,7 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
 
   authed.get("/v1/templates/:hash/history", async (c) => {
     const tenant = c.get("tenant");
-    const hash = c.req.param("hash");
+    const hash = c.req.param("hash") ?? "";
 
     const tmpl = await templates.findByHash(hash);
     if (!tmpl || tmpl.tenantId !== tenant.tenantId) {
@@ -1335,7 +1406,7 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
 
   authed.get("/v1/templates/:hash/children", async (c) => {
     const tenant = c.get("tenant");
-    const hash = c.req.param("hash");
+    const hash = c.req.param("hash") ?? "";
 
     const tmpl = await templates.findByHash(hash);
     if (!tmpl || tmpl.tenantId !== tenant.tenantId) {

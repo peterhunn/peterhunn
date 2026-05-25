@@ -9,6 +9,9 @@ export {
   InMemoryAgreementStore,
   InMemoryRequirementsStore,
   InMemoryWebhookStore,
+  InMemoryEventStore,
+  InMemoryPendingContractStore,
+  InMemoryWebhookDeliveryStore,
   sha256hex,
   encodeCursor,
   decodeCursor,
@@ -19,6 +22,9 @@ export type {
   AgreementStore,
   RequirementsStore,
   WebhookStore,
+  EventStore,
+  PendingContractStore,
+  WebhookDeliveryStore,
 } from "./store.js";
 
 // Postgres store implementations
@@ -28,6 +34,9 @@ export {
   PostgresAgreementStore,
   PostgresRequirementsStore,
   PostgresWebhookStore,
+  PostgresEventStore,
+  PostgresPendingContractStore,
+  PostgresWebhookDeliveryStore,
 } from "./store-postgres.js";
 
 // Webhook delivery helper (for custom integrations)
@@ -84,9 +93,16 @@ export type {
 export { InMemoryIntegrationConfigStore } from "./integration-config-store.js";
 export type { IntegrationConfig, IntegrationConfigStore, IntegrationSource } from "./integration-config-store.js";
 
+// Postgres integration config store
+export { PostgresIntegrationConfigStore } from "./integration-config-store-postgres.js";
+
 // Operator dashboard
 export { renderDashboard } from "./dashboard.js";
 
 // Expiry scheduler — fires contract.expiring webhook events
 export { ExpiryScheduler } from "./expiry-scheduler.js";
 export type { ExpirySchedulerOptions } from "./expiry-scheduler.js";
+
+// Document extraction — PDF and DOCX → plain text for template registration
+export { extractDocumentText } from "./document-extractor.js";
+export type { DocumentExtractResult } from "./document-extractor.js";

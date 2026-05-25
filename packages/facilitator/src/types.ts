@@ -90,6 +90,8 @@ export interface AgreementRecord {
   expiresAt: number;
   revokedAt?: number;
   revokedReason?: string;
+  /** Set by ExpiryScheduler after a contract.expiring warning is delivered. Prevents duplicate warnings. */
+  warnedAt?: number;
   /** EIP-712 signed credential over the agreement data (optional, EVM feature). */
   walletAddress?: string;
   eip712Credential?: string;
