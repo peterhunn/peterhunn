@@ -8,7 +8,7 @@
   "exports": { ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" } },
   "scripts": {
     "build": "tsc",
-    "test": "node --import tsx/esm --test 'src/__tests__/agent-client.test.ts'"
+    "test": "node --import tsx/esm --test 'src/__tests__/*.test.ts'"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.26.0",
