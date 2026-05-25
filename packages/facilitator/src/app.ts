@@ -13,6 +13,8 @@ import type { TenantStore, TemplateStore, AgreementStore, RequirementsStore, Web
 import type { Tenant, RegisteredTemplate, WebhookEventType, ContractEventRecord } from "./types.js";
 import { rateLimit } from "./rate-limit.js";
 import { deliverWebhookEvent, assertSafeWebhookUrl } from "./webhook.js";
+import { signEip712Agreement, mintAgreementNft, type Eip712AgreementData } from "./evm.js";
+import type { Hex } from "viem";
 
 export interface FacilitatorAppOptions {
   tenants: TenantStore;
@@ -55,6 +57,32 @@ setInterval(() => {
     if (v.expiresAt < now) idempotencyCache.delete(k);
   }
 }, 60_000).unref();
+
+// ── EVM feature helpers ────────────────────────────────────────────────────────
+
+const ETH_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+
+/** Returns true when partyData.walletAddress is a valid Ethereum address. */
+function isValidWalletAddress(walletAddress: string | undefined): walletAddress is string {
+  return typeof walletAddress === "string" && ETH_ADDRESS_RE.test(walletAddress);
+}
+
+/** Returns EIP-712 signer config from env vars, or null if not configured. */
+function getEip712Config(): { signerKey: Hex; chainId: number } | null {
+  const signerKey = process.env["EIP712_SIGNER_KEY"];
+  if (!signerKey) return null;
+  const chainId = process.env["EIP712_CHAIN_ID"] ? Number(process.env["EIP712_CHAIN_ID"]) : 1;
+  return { signerKey: signerKey as Hex, chainId };
+}
+
+/** Returns NFT minting config from env vars, or null if any are missing. */
+function getNftConfig(): { rpcUrl: string; contractAddress: string; privateKey: string } | null {
+  const rpcUrl = process.env["EVM_RPC_URL"];
+  const contractAddress = process.env["NFT_CONTRACT_ADDRESS"];
+  const privateKey = process.env["MINTER_PRIVATE_KEY"];
+  if (!rpcUrl || !contractAddress || !privateKey) return null;
+  return { rpcUrl, contractAddress, privateKey };
+}
 
 /**
  * Creates the facilitator Hono app.
@@ -420,7 +448,29 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
       tenant.hmacSecret,
     );
 
-    await agreements.record({
+    // ── Optional EIP-712 credential ───────────────────────────────────────────
+    const walletAddress = body.partyData["walletAddress"];
+    let eip712Credential: string | undefined;
+    if (isValidWalletAddress(walletAddress)) {
+      const eip712Config = getEip712Config();
+      if (eip712Config) {
+        try {
+          const agreementData: Eip712AgreementData = {
+            contractId,
+            templateHash: body.templateHash,
+            partyId: walletAddress,
+            resource: "*",
+            issuedAt: now,
+            expiresAt: now + expiresIn,
+          };
+          eip712Credential = await signEip712Agreement(agreementData, eip712Config.signerKey, eip712Config.chainId);
+        } catch (err) {
+          console.error("EIP-712 signing failed (continuing without credential):", err);
+        }
+      }
+    }
+
+    const agreementRecord = {
       contractId,
       tenantId,
       templateHash: body.templateHash,
@@ -430,7 +480,32 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
       token,
       issuedAt: now,
       expiresAt: now + expiresIn,
-    });
+      ...(walletAddress ? { walletAddress } : {}),
+      ...(eip712Credential ? { eip712Credential } : {}),
+    };
+
+    await agreements.record(agreementRecord);
+
+    // ── Optional NFT minting (fire-and-forget) ────────────────────────────────
+    if (isValidWalletAddress(walletAddress)) {
+      const nftConfig = getNftConfig();
+      if (nftConfig) {
+        mintAgreementNft(walletAddress, contractId, nftConfig)
+          .then(async ({ tokenId, txHash }) => {
+            const existing = await agreements.findById(contractId);
+            if (existing) {
+              await agreements.record({
+                ...existing,
+                nftTokenId: tokenId.toString(),
+                nftTxHash: txHash,
+              });
+            }
+          })
+          .catch((err) => {
+            console.error("NFT minting failed (non-fatal):", err);
+          });
+      }
+    }
 
     // Fire-and-forget — webhook delivery must not block or fail the response.
     void deliverWebhookEvent(webhooks, tenantId, "agreement.created", {
@@ -454,6 +529,10 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     }
 
     const response: AcceptResponse = { status: "accepted", contractId, token };
+    const extendedResponse = {
+      ...response,
+      ...(eip712Credential ? { eip712Credential } : {}),
+    };
 
     if (idempotencyKey) {
       idempotencyCache.set(`${tenantId}:${idempotencyKey}`, {
@@ -462,7 +541,7 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
       });
     }
 
-    return c.json(response, 200);
+    return c.json(extendedResponse, 200);
   });
 
   // ── Negotiate endpoint (agent-facing, public, rate limited) ──────────────
