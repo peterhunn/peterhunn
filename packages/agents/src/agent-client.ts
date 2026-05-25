@@ -1,17 +1,22 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { ContractClient } from "@x490/protocol";
-import type { ContractRequirements, NegotiableField } from "@x490/protocol";
+import type { ContractRequirements } from "@x490/protocol";
 import type { AgentContractClientOptions, ReviewDecision } from "./types.js";
 import { AnthropicClient } from "./llm.js";
 import type { LLMClient } from "./llm.js";
+import type { NegotiationNode } from "./negotiation-dag.js";
+import { formatNegotiationHistory } from "./negotiation-dag.js";
 
 export class AgentContractClient {
   private readonly inner: ContractClient;
   private readonly llm: LLMClient;
   private readonly opts: AgentContractClientOptions;
+  private readonly sessionId: string;
+  private round = 0;
 
   constructor(opts: AgentContractClientOptions) {
     this.opts = opts;
+    this.sessionId = opts.sessionId ?? crypto.randomUUID();
     this.llm = opts.llm ?? new AnthropicClient(new Anthropic({ apiKey: opts.apiKey }), opts.model ?? "claude-sonnet-4-6");
 
     this.inner = new ContractClient({
@@ -38,7 +43,9 @@ export class AgentContractClient {
   }
 
   private async reviewRequirements(requirements: ContractRequirements): Promise<void> {
-    const decision = await this.claudeReview(requirements);
+    const history = await this.loadHistory();
+    const decision = await this.claudeReview(requirements, history);
+    await this.recordNode(requirements, undefined, decision, history);
 
     if (this.opts.onReview) {
       await this.opts.onReview(decision, requirements);
@@ -53,11 +60,39 @@ export class AgentContractClient {
   private async proposeNegotiation(requirements: ContractRequirements): Promise<Record<string, unknown> | undefined> {
     if (!requirements.negotiable || !requirements.negotiableFields?.length) return undefined;
 
-    const decision = await this.claudeReview(requirements);
+    this.round++;
+    const history = await this.loadHistory();
+    const decision = await this.claudeReview(requirements, history);
+    await this.recordNode(requirements, decision.proposedTerms, decision, history);
     return decision.proposedTerms;
   }
 
-  private async claudeReview(requirements: ContractRequirements): Promise<ReviewDecision> {
+  // ── Internal ────────────────────────────────────────────────────────────────
+
+  private async loadHistory(): Promise<NegotiationNode[]> {
+    if (!this.opts.negotiationStore) return [];
+    return this.opts.negotiationStore.getHistory(this.sessionId);
+  }
+
+  private async recordNode(
+    requirements: ContractRequirements,
+    proposedTerms: Record<string, unknown> | undefined,
+    decision: ReviewDecision,
+    _history: NegotiationNode[],
+  ): Promise<void> {
+    if (!this.opts.negotiationStore) return;
+    await this.opts.negotiationStore.append({
+      sessionId: this.sessionId,
+      role: "client",
+      round: this.round,
+      requirements: requirements as unknown as Record<string, unknown>,
+      ...(proposedTerms !== undefined ? { proposedTerms } : {}),
+      decision: decision.decision,
+      reason: decision.reason,
+    });
+  }
+
+  private async claudeReview(requirements: ContractRequirements, history: NegotiationNode[]): Promise<ReviewDecision> {
     const clauseNote = requirements.clauseEditing
       ? '\nWhen proposing clause changes, include them as: { "clauses": { "clause-id": "new text" } } in proposedTerms. Use clause IDs matching <!-- clause:id --> markers in the document.'
       : "";
@@ -75,6 +110,10 @@ When templateVariables are present, propose their values in proposedTerms.${clau
     const sections: string[] = [
       `Contract requirements:\n${JSON.stringify(requirements, null, 2)}`,
     ];
+
+    if (history.length > 0) {
+      sections.push(formatNegotiationHistory(history));
+    }
 
     if (requirements.variants) {
       sections.push(

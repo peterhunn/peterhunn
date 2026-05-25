@@ -8,3 +8,5 @@ export { createExtractor } from "./extractor.js";
 export { hashTemplate } from "./hash-template.js";
 export { renderTemplate } from "./render-template.js";
 export { applyClauseEdits, extractClauses, applyAndHash } from "./apply-clauses.js";
+export { InMemoryNegotiationStore, formatNegotiationHistory, computeNodeHash } from "./negotiation-dag.js";
+export type { NegotiationNode, NegotiationStore } from "./negotiation-dag.js";

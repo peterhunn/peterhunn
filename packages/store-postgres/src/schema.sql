@@ -76,6 +76,30 @@ CREATE TABLE IF NOT EXISTS audit_log_tips (
   PRIMARY KEY (org_id, scope, hash)
 );
 
+-- Merkle-linked negotiation DAG.
+--
+-- Each node records one LLM decision during a contract negotiation.
+-- `parent_hash` links to the previous node in the same session, forming a
+-- tamper-evident chain: any edit to a prior node changes its hash and breaks
+-- all descendant parent_hash references.
+CREATE TABLE IF NOT EXISTS negotiation_nodes (
+  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id      TEXT        NOT NULL,
+  contract_id     TEXT,
+  role            TEXT        NOT NULL CHECK (role IN ('client', 'server')),
+  round           INT         NOT NULL,
+  requirements    JSONB       NOT NULL,
+  proposed_terms  JSONB,
+  decision        TEXT        NOT NULL,
+  reason          TEXT        NOT NULL,
+  parent_hash     TEXT,
+  hash            TEXT        NOT NULL UNIQUE,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_negotiation_nodes_session
+  ON negotiation_nodes(session_id, round ASC, created_at ASC);
+
 CREATE TABLE IF NOT EXISTS webhooks (
   id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   org_id      UUID        NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,

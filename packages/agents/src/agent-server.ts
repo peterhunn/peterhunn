@@ -5,6 +5,8 @@ import { AnthropicClient } from "./llm.js";
 import type { LLMClient } from "./llm.js";
 import { renderTemplate } from "./render-template.js";
 import { applyAndHash, extractClauses } from "./apply-clauses.js";
+import type { NegotiationNode } from "./negotiation-dag.js";
+import { formatNegotiationHistory } from "./negotiation-dag.js";
 
 /**
  * AgentContractServer — the issuing side of an agent-to-agent negotiation.
@@ -82,10 +84,31 @@ export class AgentContractServer {
       return this.issueToken(request.partyData);
     }
 
-    const decision = await this.claudeReview(request);
+    // Load negotiation history (DAG) for this session so Claude can reason over prior rounds
+    const sessionId = await this.computeSessionId(request);
+    const history = this.opts.negotiationStore
+      ? await this.opts.negotiationStore.getHistory(sessionId)
+      : [];
+
+    const decision = await this.claudeReview(request, history);
 
     if (this.opts.onReview) {
       await this.opts.onReview(decision, request);
+    }
+
+    // Record this round in the DAG
+    if (this.opts.negotiationStore) {
+      await this.opts.negotiationStore.append({
+        sessionId,
+        role: "server",
+        round: history.length,
+        requirements: this.opts.requirements as unknown as Record<string, unknown>,
+        ...(request.negotiationTerms !== undefined
+          ? { proposedTerms: request.negotiationTerms as Record<string, unknown> }
+          : {}),
+        decision: decision.decision,
+        reason: decision.reason,
+      });
     }
 
     if (decision.decision === "reject") {
@@ -112,13 +135,24 @@ export class AgentContractServer {
 
   // ── Internal ────────────────────────────────────────────────────────────────
 
+  /** Deterministic session ID: SHA-256(templateId + templateHash + partyData), truncated to 32 hex chars. */
+  private async computeSessionId(request: AcceptRequest): Promise<string> {
+    const key = JSON.stringify({
+      templateId: request.templateId,
+      templateHash: request.templateHash,
+      partyData: request.partyData,
+    });
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(key));
+    return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 32);
+  }
+
   private async issueToken(partyData: Record<string, string>): Promise<AcceptResponse> {
     const contractId = crypto.randomUUID();
     const token = await this.opts.issueToken(contractId, partyData);
     return { status: "accepted", contractId, token };
   }
 
-  private async claudeReview(request: AcceptRequest): Promise<ServerReviewDecision> {
+  private async claudeReview(request: AcceptRequest, history: NegotiationNode[] = []): Promise<ServerReviewDecision> {
     const { requirements } = this.opts;
     const selectedVariant =
       typeof request.negotiationTerms?.variant === "string"
@@ -159,6 +193,9 @@ counterOffer is only needed when decision is "counter_offer".`;
     const sections: string[] = [
       `YOUR CONTRACT REQUIREMENTS:\n${JSON.stringify(requirements, null, 2)}`,
     ];
+    if (history.length > 0) {
+      sections.push(formatNegotiationHistory(history));
+    }
     if (selectedVariant) {
       sections.push(`SELECTED VARIANT: ${selectedVariant}`);
     }

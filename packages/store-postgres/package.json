@@ -19,6 +19,7 @@
     "test": "echo 'No unit tests — integration tests require a live Postgres instance'"
   },
   "dependencies": {
+    "@x490/agents": "*",
     "@x490/api": "*",
     "postgres": "^3.4.0"
   },

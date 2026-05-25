@@ -1,4 +1,5 @@
 import type { LLMClient } from "./llm.js";
+import type { NegotiationStore } from "./negotiation-dag.js";
 
 export interface ReviewDecision {
   decision: "accept" | "reject" | "negotiate";
@@ -49,6 +50,12 @@ export interface AgentContractServerOptions {
     templateContent: string,
     edits: Record<string, string>,
   ) => Promise<{ document: string; hash: string }>;
+  /**
+   * Persistent DAG store for negotiation history. When provided, every LLM
+   * decision is written as a Merkle-linked node so the agent can reason over
+   * past rounds and the full audit trail is preserved.
+   */
+  negotiationStore?: NegotiationStore;
 }
 
 export interface AgentContractClientOptions {
@@ -79,4 +86,15 @@ export interface AgentContractClientOptions {
   llm?: LLMClient;
   /** Extract text from binary documents (e.g. .docx, .pdf) for hash verification and LLM review. */
   extractText?: (content: ArrayBuffer, contentType: string, url: string) => Promise<string>;
+  /**
+   * Persistent DAG store for negotiation history. When provided, every LLM
+   * decision is written as a Merkle-linked node so the agent can reason over
+   * past rounds and the full audit trail is preserved.
+   */
+  negotiationStore?: NegotiationStore;
+  /**
+   * Stable identifier for this negotiation session. Defaults to a random UUID
+   * generated at construction time (one session per client instance).
+   */
+  sessionId?: string;
 }
