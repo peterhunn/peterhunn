@@ -176,6 +176,20 @@ components:
         requiredAcceptances:
           type: integer
           description: Total parties required before the contract is finalised
+        eip712Credential:
+          type: string
+          description: >
+            EIP-712 signed credential over the agreement data, returned when
+            partyData.walletAddress is a valid Ethereum address and the
+            facilitator is configured with EIP712_SIGNER_KEY. Can be verified
+            on any EVM chain without calling back to the facilitator.
+        nftTokenId:
+          type: string
+          description: >
+            Token ID of the ERC-721 NFT minted to partyData.walletAddress,
+            returned when the facilitator is configured with EVM_RPC_URL,
+            NFT_CONTRACT_ADDRESS, and MINTER_PRIVATE_KEY. The tokenId is
+            keccak256(contractId).
 
     # ── VerifyResponse ───────────────────────────────────────────────────────
 
