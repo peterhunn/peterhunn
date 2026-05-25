@@ -48,3 +48,18 @@ export type {
   WebhookEventType,
   WebhookPayload,
 } from "./types.js";
+
+// Integration store — maps external CLM workflow IDs to x490 templates
+export { InMemoryIntegrationStore } from "./integration-store.js";
+export type { IntegrationStore, IntegrationMapping } from "./integration-store.js";
+
+// Ironclad adapter
+export { IroncladClient, IroncladWebhookAdapter, verifyIroncladSignature } from "./adapters/ironclad.js";
+export type {
+  IroncladWorkflow,
+  IroncladAttribute,
+  IroncladDocument,
+  IroncladWebhookEvent,
+  IroncladAdapterOptions,
+  IroncladWorkflowRegistered,
+} from "./adapters/ironclad.js";

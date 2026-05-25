@@ -10,11 +10,13 @@ import { signToken, verifyToken } from "@x490/protocol";
 import type { AcceptRequest, AcceptResponse, VerifyResponse, RevokeRequest, RevokeResponse, NegotiableField } from "@x490/protocol";
 import type { ContractTerms } from "@x490/core";
 import type { TenantStore, TemplateStore, AgreementStore, RequirementsStore, WebhookStore, EventStore, PendingContractStore, WebhookDeliveryStore } from "./store.js";
-import type { Tenant, RegisteredTemplate, WebhookEventType, ContractEventRecord } from "./types.js";
+import type { Tenant, RegisteredTemplate, WebhookEventType, ContractEventRecord, AgreementRecord } from "./types.js";
 import { rateLimit } from "./rate-limit.js";
 import { deliverWebhookEvent, assertSafeWebhookUrl } from "./webhook.js";
 import { signEip712Agreement, mintAgreementNft, type Eip712AgreementData } from "./evm.js";
 import type { Hex } from "viem";
+import type { IroncladWebhookAdapter } from "./adapters/ironclad.js";
+import { verifyIroncladSignature, type IroncladWebhookEvent } from "./adapters/ironclad.js";
 
 export interface FacilitatorAppOptions {
   tenants: TenantStore;
@@ -39,6 +41,23 @@ export interface FacilitatorAppOptions {
     verify?: number;
     /** POST /tenants (sign-up) — default 5 */
     signup?: number;
+  };
+  /**
+   * Called after every agreement is recorded (any platform). Use this to
+   * push results back to originating CLM platforms (Ironclad, DocuSign, etc.)
+   *
+   * Errors thrown here are logged but do not fail the accept response.
+   */
+  onAgreementCreated?: (record: AgreementRecord, negotiationTerms?: Record<string, unknown>) => Promise<void>;
+  /**
+   * Ironclad integration. When set, mounts:
+   *   POST /v1/integrations/ironclad/webhook — receives Ironclad workflow events
+   *
+   * webhookSecret must match the signing secret configured in Ironclad's developer portal.
+   */
+  ironclad?: {
+    webhookSecret: string;
+    adapter: IroncladWebhookAdapter;
   };
 }
 
@@ -368,10 +387,15 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
             expiresAt: now + expiresIn,
           });
 
-          void deliverWebhookEvent(webhooks, tenantId, "agreement.created", {
+          const multiPartyRecord: AgreementRecord = {
             contractId: entry.contractId, tenantId, templateHash: body.templateHash, partyId,
             resource: "*", partyData: body.partyData, token, issuedAt: now, expiresAt: now + expiresIn,
-          }, deliveries);
+          };
+          void deliverWebhookEvent(webhooks, tenantId, "agreement.created", multiPartyRecord, deliveries);
+          if (opts.onAgreementCreated) {
+            void opts.onAgreementCreated(multiPartyRecord)
+              .catch((err) => console.error("[facilitator] onAgreementCreated error:", err));
+          }
 
           if (events) {
             const parentId = await events.latestEventId(entry.contractId);
@@ -485,6 +509,12 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     };
 
     await agreements.record(agreementRecord);
+
+    // Notify integration adapters (Ironclad, DocuSign, etc.) — fire-and-forget.
+    if (opts.onAgreementCreated) {
+      void opts.onAgreementCreated(agreementRecord, body.negotiationTerms as Record<string, unknown> | undefined)
+        .catch((err) => console.error("[facilitator] onAgreementCreated error:", err));
+    }
 
     // ── Optional NFT minting (fire-and-forget) ────────────────────────────────
     if (isValidWalletAddress(walletAddress)) {
@@ -1037,6 +1067,47 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     await events.append(event);
     return c.json(event, 201);
   });
+
+  // ── Ironclad integration (public, signature-verified) ────────────────────────
+
+  if (opts.ironclad) {
+    const { webhookSecret, adapter } = opts.ironclad;
+
+    app.post("/v1/integrations/ironclad/webhook", async (c) => {
+      // Read raw body first — Hono's body can only be consumed once.
+      const rawBody = await c.req.raw.text();
+
+      const sigHeader = c.req.header("X-Ironclad-Hmac-Sha256") ?? "";
+      if (!verifyIroncladSignature(rawBody, sigHeader, webhookSecret)) {
+        return c.json({ error: "Invalid webhook signature" }, 401);
+      }
+
+      let event: IroncladWebhookEvent;
+      try {
+        event = JSON.parse(rawBody) as IroncladWebhookEvent;
+      } catch {
+        return c.json({ error: "Invalid JSON body" }, 400);
+      }
+
+      const workflowId = event.payload?.workflowId;
+      if (!workflowId) return c.json({ error: "Missing workflowId in payload" }, 400);
+
+      if (event.event === "workflow_created") {
+        try {
+          const result = await adapter.onWorkflowCreated(workflowId);
+          return c.json(result, 200);
+        } catch (err) {
+          console.error("[ironclad] onWorkflowCreated failed:", err);
+          return c.json({ error: "Failed to register workflow" }, 500);
+        }
+      }
+
+      // Other events (approved, declined, etc.) — acknowledge without action.
+      // Operators can subscribe their own webhook URLs to handle these via
+      // the x490 webhook system and the contract event DAG.
+      return c.json({ received: true, event: event.event }, 200);
+    });
+  }
 
   // Mount authenticated routes after public routes.
   app.route("/", authed);
