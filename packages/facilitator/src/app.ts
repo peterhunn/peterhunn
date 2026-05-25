@@ -17,6 +17,7 @@ import { signEip712Agreement, mintAgreementNft, type Eip712AgreementData } from 
 import type { Hex } from "viem";
 import type { IroncladWebhookAdapter } from "./adapters/ironclad.js";
 import { verifyIroncladSignature, type IroncladWebhookEvent } from "./adapters/ironclad.js";
+import { renderReviewPage } from "./review-page.js";
 
 export interface FacilitatorAppOptions {
   tenants: TenantStore;
@@ -1066,6 +1067,37 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     };
     await events.append(event);
     return c.json(event, 201);
+  });
+
+  // ── Counterparty review UI (public) ──────────────────────────────────────────
+  // Served at the URL you share with counterparties — no account required.
+  // Route: GET /v1/:tenantId/review/:templateHash
+
+  app.get("/v1/:tenantId/review/:templateHash", async (c) => {
+    const tenantId = c.req.param("tenantId") ?? "";
+    const templateHash = c.req.param("templateHash") ?? "";
+
+    const [tenant, tmpl] = await Promise.all([
+      tenants.findById(tenantId),
+      templates.findByHash(templateHash),
+    ]);
+
+    if (!tenant || !tmpl || tmpl.tenantId !== tenantId) {
+      return c.html(
+        `<!DOCTYPE html><html><head><title>Not Found</title>
+         <script src="https://cdn.tailwindcss.com"></script></head>
+         <body class="flex items-center justify-center min-h-screen bg-gray-50">
+           <div class="text-center">
+             <p class="text-4xl font-bold text-gray-300 mb-2">404</p>
+             <p class="text-gray-500">Contract not found.</p>
+           </div>
+         </body></html>`,
+        404,
+      );
+    }
+
+    const reqConfig = await requirements.findByTemplate(tenantId, templateHash);
+    return c.html(renderReviewPage({ tenant, tmpl, reqConfig, baseUrl }));
   });
 
   // ── Ironclad integration (public, signature-verified) ────────────────────────

@@ -49,6 +49,10 @@ export type {
   WebhookPayload,
 } from "./types.js";
 
+// Counterparty review page renderer (useful for custom hosting)
+export { renderReviewPage } from "./review-page.js";
+export type { ReviewPageOptions } from "./review-page.js";
+
 // Integration store — maps external CLM workflow IDs to x490 templates
 export { InMemoryIntegrationStore } from "./integration-store.js";
 export type { IntegrationStore, IntegrationMapping } from "./integration-store.js";
