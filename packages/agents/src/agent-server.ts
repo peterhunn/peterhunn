@@ -3,6 +3,7 @@ import type { ContractRequirements, AcceptRequest, AcceptResponse } from "@x490/
 import type { AgentContractServerOptions, ServerReviewDecision } from "./types.js";
 import { AnthropicClient } from "./llm.js";
 import type { LLMClient } from "./llm.js";
+import { renderTemplate } from "./render-template.js";
 
 /**
  * AgentContractServer — the issuing side of an agent-to-agent negotiation.
@@ -35,6 +36,30 @@ export class AgentContractServer {
    * - With negotiationTerms → Claude reviews → accept, counter-propose, or reject.
    */
   async handleAccept(request: AcceptRequest): Promise<AcceptResponse> {
+    // Validate selected variant
+    if (typeof request.negotiationTerms?.variant === "string") {
+      const key = request.negotiationTerms.variant;
+      if (!this.opts.requirements.variants?.[key]) {
+        throw new Error(
+          `AgentContractServer: unknown variant "${key}". ` +
+          `Available: ${Object.keys(this.opts.requirements.variants ?? {}).join(", ")}`,
+        );
+      }
+    }
+
+    // Validate template variable values
+    if (request.negotiationTerms && this.opts.requirements.templateVariables) {
+      for (const [key, spec] of Object.entries(this.opts.requirements.templateVariables)) {
+        const val = request.negotiationTerms[key];
+        if (val !== undefined && spec.allowedValues && !spec.allowedValues.includes(String(val))) {
+          throw new Error(
+            `AgentContractServer: "${String(val)}" is not an allowed value for variable "${key}". ` +
+            `Allowed: ${spec.allowedValues.join(", ")}`,
+          );
+        }
+      }
+    }
+
     if (
       !request.negotiationTerms ||
       Object.keys(request.negotiationTerms).length === 0
@@ -73,7 +98,34 @@ export class AgentContractServer {
   }
 
   private async claudeReview(request: AcceptRequest): Promise<ServerReviewDecision> {
-    const { requirements, templateContent } = this.opts;
+    const { requirements } = this.opts;
+    const selectedVariant =
+      typeof request.negotiationTerms?.variant === "string"
+        ? request.negotiationTerms.variant
+        : undefined;
+
+    // Resolve template content: use provided content, or fetch variant template
+    let templateContent = this.opts.templateContent;
+    if (!templateContent && selectedVariant && this.opts.fetchVariantTemplates) {
+      const variant = requirements.variants?.[selectedVariant];
+      if (variant) {
+        const res = await fetch(variant.templateUrl);
+        if (res.ok) templateContent = await res.text();
+      }
+    }
+
+    // Render slots with proposed variable values for LLM review
+    if (templateContent && request.negotiationTerms && requirements.templateVariables) {
+      const vars: Record<string, string> = {};
+      for (const [key, spec] of Object.entries(requirements.templateVariables)) {
+        const val = request.negotiationTerms[key];
+        if (val !== undefined) vars[key] = String(val);
+        else if (spec.defaultValue !== undefined) vars[key] = spec.defaultValue;
+      }
+      if (Object.keys(vars).length > 0) {
+        templateContent = renderTemplate(templateContent, vars);
+      }
+    }
 
     const systemPrompt = `You are a contract issuer agent reviewing an acceptance request from another AI agent.
 Review the proposed terms and decide: accept, counter_offer, or reject.
@@ -86,8 +138,11 @@ counterOffer is only needed when decision is "counter_offer".`;
     const sections: string[] = [
       `YOUR CONTRACT REQUIREMENTS:\n${JSON.stringify(requirements, null, 2)}`,
     ];
+    if (selectedVariant) {
+      sections.push(`SELECTED VARIANT: ${selectedVariant}`);
+    }
     if (templateContent) {
-      sections.push(`TEMPLATE:\n${templateContent}`);
+      sections.push(`TEMPLATE${selectedVariant ? ` (${selectedVariant})` : ""}:\n${templateContent}`);
     }
     sections.push(
       `PROPOSED TERMS FROM ACCEPTING AGENT:\n${JSON.stringify(request.negotiationTerms, null, 2)}`,
@@ -99,7 +154,7 @@ counterOffer is only needed when decision is "counter_offer".`;
     try {
       return JSON.parse(result.content) as ServerReviewDecision;
     } catch {
-      return { decision: "accept", reason: "Could not parse Claude response — defaulting to accept" };
+      return { decision: "accept", reason: "Could not parse LLM response — defaulting to accept" };
     }
   }
 }

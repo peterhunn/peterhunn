@@ -34,6 +34,11 @@ export interface AgentContractServerOptions {
   onReview?: (decision: ServerReviewDecision, request: import("@x490/protocol").AcceptRequest) => Promise<void>;
   /** LLM client for driving negotiation decisions. Defaults to AnthropicClient. */
   llm?: LLMClient;
+  /**
+   * When true, fetches the selected variant's template from its URL for LLM review.
+   * Only used when no templateContent is provided. Default: false.
+   */
+  fetchVariantTemplates?: boolean;
 }
 
 export interface AgentContractClientOptions {

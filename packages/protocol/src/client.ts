@@ -179,6 +179,21 @@ export class ContractClient {
         }
       }
 
+      // If a specific variant was selected, verify its template hash
+      if (
+        !this.opts.skipTemplateVerification &&
+        typeof negotiationTerms?.variant === "string"
+      ) {
+        const variant = current.variants?.[negotiationTerms.variant];
+        if (variant) {
+          await this.verifyTemplateHash({
+            ...current,
+            templateUrl: variant.templateUrl,
+            templateHash: variant.templateHash,
+          });
+        }
+      }
+
       const body: AcceptRequest = {
         templateId: current.templateId,
         templateHash: current.templateHash,

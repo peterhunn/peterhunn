@@ -64,11 +64,35 @@ Review the contract requirements and decide: accept, reject, or negotiate.
 - Negotiate if the contract is negotiable and specific fields can be improved.
 - Reject only if terms are clearly harmful or unacceptable.
 Respond with JSON only: { "decision": "accept"|"reject"|"negotiate", "reason": "...", "proposedTerms": {...} }
-proposedTerms is only needed when decision is "negotiate" — use field names from negotiableFields.`;
+proposedTerms is only needed when decision is "negotiate" — use field names from negotiableFields.
+When variants are available, propose { "variant": "<key>" } in proposedTerms to select one.
+When templateVariables are present, propose their values in proposedTerms.`;
 
-    const userContent = `Contract requirements:\n${JSON.stringify(requirements, null, 2)}`;
+    const sections: string[] = [
+      `Contract requirements:\n${JSON.stringify(requirements, null, 2)}`,
+    ];
 
-    const result = await this.llm.complete(systemPrompt, [{ role: "user", content: userContent }]);
+    if (requirements.variants) {
+      sections.push(
+        `AVAILABLE VARIANTS:\n${Object.entries(requirements.variants)
+          .map(([k, v]) => `- "${k}": ${v.description ?? k}`)
+          .join("\n")}`,
+      );
+    }
+
+    if (requirements.templateVariables) {
+      sections.push(
+        `TEMPLATE VARIABLES (negotiate values for these slots):\n${Object.entries(requirements.templateVariables)
+          .map(([k, v]) =>
+            `- ${k}: ${v.description}` +
+            (v.defaultValue !== undefined ? ` (default: ${v.defaultValue})` : "") +
+            (v.allowedValues ? ` (allowed: ${v.allowedValues.join(", ")})` : ""),
+          )
+          .join("\n")}`,
+      );
+    }
+
+    const result = await this.llm.complete(systemPrompt, [{ role: "user", content: sections.join("\n\n") }]);
 
     try {
       return JSON.parse(result.content) as ReviewDecision;

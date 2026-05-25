@@ -25,6 +25,24 @@ export interface NegotiableField {
   description: string;
 }
 
+/** A pre-authored document variant that parties may select during negotiation. */
+export interface TemplateVariant {
+  templateUrl: string;
+  templateHash: string;
+  description?: string;
+}
+
+/**
+ * A named variable slot in the template document, denoted {{slotName}}.
+ * Agents may propose values for these during negotiation.
+ */
+export interface TemplateVariable {
+  description: string;
+  defaultValue?: string;
+  allowedValues?: string[];
+  type?: "string" | "number" | "boolean" | "date";
+}
+
 /** Sent by the server in a 490 body and X-490-Requirements header. */
 export interface ContractRequirements {
   scheme: "x490";
@@ -69,6 +87,18 @@ export interface ContractRequirements {
    * by including pendingContractId in their AcceptRequest.
    */
   requiredParties?: number;
+  /**
+   * Named pre-authored variants of this template that parties may select.
+   * Each variant has its own URL and hash. Agents propose { variant: "<key>" }
+   * in negotiationTerms to select one.
+   */
+  variants?: Record<string, TemplateVariant>;
+  /**
+   * Named variable slots in the template ({{slotName}} syntax).
+   * Agents propose values for these in negotiationTerms.
+   * The server validates values against allowedValues and renders the final document.
+   */
+  templateVariables?: Record<string, TemplateVariable>;
 }
 
 /** Payload embedded inside an AgreementToken. */
