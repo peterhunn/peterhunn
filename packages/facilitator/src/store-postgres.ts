@@ -351,6 +351,10 @@ interface AgreementRow {
   expires_at: Date;
   revoked_at: Date | null;
   revoked_reason: string | null;
+  wallet_address: string | null;
+  eip712_credential: string | null;
+  nft_token_id: string | null;
+  nft_tx_hash: string | null;
 }
 
 function rowToAgreement(r: AgreementRow): AgreementRecord {
@@ -367,6 +371,10 @@ function rowToAgreement(r: AgreementRow): AgreementRecord {
   };
   if (r.revoked_at !== null) record.revokedAt = Math.floor(r.revoked_at.getTime() / 1000);
   if (r.revoked_reason !== null) record.revokedReason = r.revoked_reason;
+  if (r.wallet_address !== null) record.walletAddress = r.wallet_address;
+  if (r.eip712_credential !== null) record.eip712Credential = r.eip712_credential;
+  if (r.nft_token_id !== null) record.nftTokenId = r.nft_token_id;
+  if (r.nft_tx_hash !== null) record.nftTxHash = r.nft_tx_hash;
   return record;
 }
 
@@ -377,11 +385,14 @@ export class PostgresAgreementStore implements AgreementStore {
     await this.sql`
       INSERT INTO x490_agreements (
         contract_id, tenant_id, template_hash, party_id, resource,
-        party_data, token, issued_at, expires_at
+        party_data, token, issued_at, expires_at,
+        wallet_address, eip712_credential, nft_token_id, nft_tx_hash
       ) VALUES (
         ${a.contractId}, ${a.tenantId}, ${a.templateHash}, ${a.partyId}, ${a.resource},
         ${this.sql.json(a.partyData as never)}, ${a.token},
-        to_timestamp(${a.issuedAt}), to_timestamp(${a.expiresAt})
+        to_timestamp(${a.issuedAt}), to_timestamp(${a.expiresAt}),
+        ${a.walletAddress ?? null}, ${a.eip712Credential ?? null},
+        ${a.nftTokenId ?? null}, ${a.nftTxHash ?? null}
       )
       ON CONFLICT (contract_id) DO NOTHING
     `;

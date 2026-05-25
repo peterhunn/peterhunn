@@ -80,7 +80,12 @@ CREATE TABLE IF NOT EXISTS x490_agreements (
   issued_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   expires_at     TIMESTAMPTZ NOT NULL,
   revoked_at     TIMESTAMPTZ,
-  revoked_reason TEXT
+  revoked_reason TEXT,
+  -- Optional EVM fields — populated when walletAddress is present in partyData
+  wallet_address   TEXT,
+  eip712_credential TEXT,
+  nft_token_id     TEXT,
+  nft_tx_hash      TEXT
 );
 
 -- Paginated listing by tenant, sorted newest first.
