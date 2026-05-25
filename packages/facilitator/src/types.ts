@@ -86,6 +86,12 @@ export interface AgreementRecord {
   expiresAt: number;
   revokedAt?: number;
   revokedReason?: string;
+  /** EIP-712 signed credential over the agreement data (optional, EVM feature). */
+  walletAddress?: string;
+  eip712Credential?: string;
+  /** ERC-721 NFT minting result (optional, EVM feature). */
+  nftTokenId?: string;
+  nftTxHash?: string;
 }
 
 /**

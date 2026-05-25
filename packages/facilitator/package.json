@@ -28,6 +28,7 @@
     "hono": "^4.4.0",
     "jose": "^5.0.0",
     "postgres": "^3.4.0",
+    "viem": "^2.21.0",
     "yaml": "^2.4.0"
   },
   "devDependencies": {

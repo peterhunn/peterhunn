@@ -1,0 +1,15 @@
+{
+  "name": "@x490/x402",
+  "version": "0.1.0",
+  "description": "x402 HTTP payment protocol — server middleware and client",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" } },
+  "scripts": {
+    "build": "tsc",
+    "test": "node --import tsx/esm --test 'src/__tests__/*.test.ts'"
+  },
+  "dependencies": { "hono": "*" },
+  "devDependencies": { "tsx": "*", "@types/node": "*" }
+}
