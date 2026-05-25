@@ -17,6 +17,8 @@ import { signEip712Agreement, mintAgreementNft, type Eip712AgreementData } from 
 import type { Hex } from "viem";
 import type { IroncladWebhookAdapter } from "./adapters/ironclad.js";
 import { verifyIroncladSignature, type IroncladWebhookEvent } from "./adapters/ironclad.js";
+import type { DocuSignWebhookAdapter } from "./adapters/docusign.js";
+import { verifyDocuSignSignature, type DocuSignConnectEvent } from "./adapters/docusign.js";
 import { renderReviewPage } from "./review-page.js";
 
 export interface FacilitatorAppOptions {
@@ -59,6 +61,17 @@ export interface FacilitatorAppOptions {
   ironclad?: {
     webhookSecret: string;
     adapter: IroncladWebhookAdapter;
+  };
+  /**
+   * DocuSign integration (background mode). When set, mounts:
+   *   POST /v1/integrations/docusign/webhook — receives DocuSign Connect events
+   *
+   * webhookSecret must match the HMAC key configured in DocuSign Admin → Connect.
+   * DocuSign's UI is preserved entirely — x490 records agreements silently.
+   */
+  docusign?: {
+    webhookSecret: string;
+    adapter: DocuSignWebhookAdapter;
   };
 }
 
@@ -507,6 +520,8 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
       expiresAt: now + expiresIn,
       ...(walletAddress ? { walletAddress } : {}),
       ...(eip712Credential ? { eip712Credential } : {}),
+      ...(body.externalSource ? { externalSource: body.externalSource } : {}),
+      ...(body.externalId ? { externalId: body.externalId } : {}),
     };
 
     await agreements.record(agreementRecord);
@@ -838,6 +853,19 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     });
   });
 
+  // Static sub-routes must be registered before the /:contractId wildcard.
+  authed.get("/v1/agreements/by-external", async (c) => {
+    const tenant = c.get("tenant");
+    const source = c.req.query("source");
+    const externalId = c.req.query("externalId");
+    if (!source || !externalId) {
+      return c.json({ error: "source and externalId query params are required" }, 400);
+    }
+    const record = await agreements.findByExternalId(tenant.tenantId, source, externalId);
+    if (!record) return c.json({ error: "Agreement not found" }, 404);
+    return c.json(safeRecord(record));
+  });
+
   authed.get("/v1/agreements/:contractId", async (c) => {
     const tenant = c.get("tenant");
     const record = await agreements.findById(c.req.param("contractId"));
@@ -1145,6 +1173,44 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
       // Other events (approved, declined, etc.) — acknowledge without action.
       // Operators can subscribe their own webhook URLs to handle these via
       // the x490 webhook system and the contract event DAG.
+      return c.json({ received: true, event: event.event }, 200);
+    });
+  }
+
+  // ── DocuSign integration (public, signature-verified) ────────────────────────
+
+  if (opts.docusign) {
+    const { webhookSecret, adapter } = opts.docusign;
+
+    app.post("/v1/integrations/docusign/webhook", async (c) => {
+      const rawBody = await c.req.raw.text();
+
+      // DocuSign sends the HMAC as base64 in X-DocuSign-Signature-1
+      const sigHeader = c.req.header("X-DocuSign-Signature-1") ?? "";
+      if (!verifyDocuSignSignature(rawBody, sigHeader, webhookSecret)) {
+        return c.json({ error: "Invalid webhook signature" }, 401);
+      }
+
+      let event: DocuSignConnectEvent;
+      try {
+        event = JSON.parse(rawBody) as DocuSignConnectEvent;
+      } catch {
+        return c.json({ error: "Invalid JSON body" }, 400);
+      }
+
+      const envelopeId = event.data?.envelopeId;
+      if (!envelopeId) return c.json({ error: "Missing envelopeId in data" }, 400);
+
+      if (event.event === "envelope-completed") {
+        try {
+          const result = await adapter.onEnvelopeCompleted(envelopeId, event.data?.envelopeSummary);
+          return c.json(result, 200);
+        } catch (err) {
+          console.error("[docusign] onEnvelopeCompleted failed:", err);
+          return c.json({ error: "Failed to process envelope" }, 500);
+        }
+      }
+
       return c.json({ received: true, event: event.event }, 200);
     });
   }

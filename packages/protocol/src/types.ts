@@ -143,6 +143,13 @@ export interface AcceptRequest {
    * Subsequent parties include this to co-sign the same pending contract.
    */
   pendingContractId?: string;
+  /**
+   * For direct CLM integration — the source system (e.g., "docusign", "salesforce").
+   * Stored on the agreement record and searchable via GET /v1/agreements/by-external.
+   */
+  externalSource?: string;
+  /** Native record ID in the source system (e.g., a DocuSign envelope ID). */
+  externalId?: string;
 }
 
 /** Returned by the server from the acceptEndpoint. */

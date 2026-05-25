@@ -67,3 +67,14 @@ export type {
   IroncladAdapterOptions,
   IroncladWorkflowRegistered,
 } from "./adapters/ironclad.js";
+
+// DocuSign adapter
+export { DocuSignClient, DocuSignWebhookAdapter, verifyDocuSignSignature } from "./adapters/docusign.js";
+export type {
+  DocuSignConnectEvent,
+  DocuSignEnvelope,
+  DocuSignSigner,
+  DocuSignDocumentSummary,
+  DocuSignAdapterOptions,
+  DocuSignEnvelopeRegistered,
+} from "./adapters/docusign.js";

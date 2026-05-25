@@ -92,6 +92,16 @@ export interface AgreementRecord {
   /** ERC-721 NFT minting result (optional, EVM feature). */
   nftTokenId?: string;
   nftTxHash?: string;
+  /**
+   * For direct CLM integration — the source system that originated this agreement.
+   * Examples: "docusign", "salesforce", "ironclad"
+   */
+  externalSource?: string;
+  /**
+   * Native record ID in the source system (e.g., a DocuSign envelope ID or
+   * a Salesforce contract ID). Enables lookup via GET /v1/agreements/by-external.
+   */
+  externalId?: string;
 }
 
 /**

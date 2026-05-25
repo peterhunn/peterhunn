@@ -61,6 +61,7 @@ export interface RequirementsStore {
 export interface AgreementStore {
   record(agreement: AgreementRecord): Promise<void>;
   findById(contractId: string): Promise<AgreementRecord | null>;
+  findByExternalId(tenantId: string, source: string, externalId: string): Promise<AgreementRecord | null>;
   listByTenant(tenantId: string, opts?: { resource?: string; limit?: number; after?: string }): Promise<{
     agreements: AgreementRecord[];
     nextCursor: string | null;
@@ -283,6 +284,15 @@ export class InMemoryAgreementStore implements AgreementStore {
 
   async findById(contractId: string): Promise<AgreementRecord | null> {
     return this.agreements.get(contractId) ?? null;
+  }
+
+  async findByExternalId(tenantId: string, source: string, externalId: string): Promise<AgreementRecord | null> {
+    for (const record of this.agreements.values()) {
+      if (record.tenantId === tenantId && record.externalSource === source && record.externalId === externalId) {
+        return record;
+      }
+    }
+    return null;
   }
 
   async listByTenant(
