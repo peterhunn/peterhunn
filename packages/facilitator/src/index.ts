@@ -78,3 +78,10 @@ export type {
   DocuSignAdapterOptions,
   DocuSignEnvelopeRegistered,
 } from "./adapters/docusign.js";
+
+// Integration config store — per-tenant credential management
+export { InMemoryIntegrationConfigStore } from "./integration-config-store.js";
+export type { IntegrationConfig, IntegrationConfigStore, IntegrationSource } from "./integration-config-store.js";
+
+// Operator dashboard
+export { renderDashboard } from "./dashboard.js";

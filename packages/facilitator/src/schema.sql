@@ -73,6 +73,8 @@ ALTER TABLE x490_agreements ADD COLUMN IF NOT EXISTS wallet_address    TEXT;
 ALTER TABLE x490_agreements ADD COLUMN IF NOT EXISTS eip712_credential TEXT;
 ALTER TABLE x490_agreements ADD COLUMN IF NOT EXISTS nft_token_id      TEXT;
 ALTER TABLE x490_agreements ADD COLUMN IF NOT EXISTS nft_tx_hash       TEXT;
+ALTER TABLE x490_agreements ADD COLUMN IF NOT EXISTS external_source   TEXT;
+ALTER TABLE x490_agreements ADD COLUMN IF NOT EXISTS external_id       TEXT;
 
 -- Agreements: one row per accepted contract.
 CREATE TABLE IF NOT EXISTS x490_agreements (
@@ -91,8 +93,15 @@ CREATE TABLE IF NOT EXISTS x490_agreements (
   wallet_address   TEXT,
   eip712_credential TEXT,
   nft_token_id     TEXT,
-  nft_tx_hash      TEXT
+  nft_tx_hash      TEXT,
+  -- External CLM source tracking (DocuSign, Salesforce, etc.)
+  external_source  TEXT,
+  external_id      TEXT
 );
+
+CREATE INDEX IF NOT EXISTS idx_x490_agreements_external
+  ON x490_agreements(tenant_id, external_source, external_id)
+  WHERE external_source IS NOT NULL;
 
 -- Paginated listing by tenant, sorted newest first.
 CREATE INDEX IF NOT EXISTS idx_x490_agreements_tenant_issued

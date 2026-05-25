@@ -355,6 +355,8 @@ interface AgreementRow {
   eip712_credential: string | null;
   nft_token_id: string | null;
   nft_tx_hash: string | null;
+  external_source: string | null;
+  external_id: string | null;
 }
 
 function rowToAgreement(r: AgreementRow): AgreementRecord {
@@ -375,6 +377,8 @@ function rowToAgreement(r: AgreementRow): AgreementRecord {
   if (r.eip712_credential !== null) record.eip712Credential = r.eip712_credential;
   if (r.nft_token_id !== null) record.nftTokenId = r.nft_token_id;
   if (r.nft_tx_hash !== null) record.nftTxHash = r.nft_tx_hash;
+  if (r.external_source !== null) record.externalSource = r.external_source;
+  if (r.external_id !== null) record.externalId = r.external_id;
   return record;
 }
 
@@ -386,13 +390,15 @@ export class PostgresAgreementStore implements AgreementStore {
       INSERT INTO x490_agreements (
         contract_id, tenant_id, template_hash, party_id, resource,
         party_data, token, issued_at, expires_at,
-        wallet_address, eip712_credential, nft_token_id, nft_tx_hash
+        wallet_address, eip712_credential, nft_token_id, nft_tx_hash,
+        external_source, external_id
       ) VALUES (
         ${a.contractId}, ${a.tenantId}, ${a.templateHash}, ${a.partyId}, ${a.resource},
         ${this.sql.json(a.partyData as never)}, ${a.token},
         to_timestamp(${a.issuedAt}), to_timestamp(${a.expiresAt}),
         ${a.walletAddress ?? null}, ${a.eip712Credential ?? null},
-        ${a.nftTokenId ?? null}, ${a.nftTxHash ?? null}
+        ${a.nftTokenId ?? null}, ${a.nftTxHash ?? null},
+        ${a.externalSource ?? null}, ${a.externalId ?? null}
       )
       ON CONFLICT (contract_id) DO NOTHING
     `;
@@ -475,6 +481,17 @@ export class PostgresAgreementStore implements AgreementStore {
       SELECT revoked_at FROM x490_agreements WHERE contract_id = ${contractId}
     `;
     return rows[0]?.revoked_at !== null && rows[0]?.revoked_at !== undefined;
+  }
+
+  async findByExternalId(tenantId: string, source: string, externalId: string): Promise<AgreementRecord | null> {
+    const rows = await this.sql<AgreementRow[]>`
+      SELECT * FROM x490_agreements
+      WHERE tenant_id = ${tenantId}
+        AND external_source = ${source}
+        AND external_id = ${externalId}
+      LIMIT 1
+    `;
+    return rows[0] ? rowToAgreement(rows[0]) : null;
   }
 }
 

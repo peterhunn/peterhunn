@@ -9,7 +9,7 @@
 export interface IntegrationMapping {
   id: string;
   /** Platform identifier: "ironclad", "docusign", etc. */
-  source: "ironclad";
+  source: string;
   /** Platform-native workflow / envelope / document ID. */
   externalId: string;
   tenantId: string;

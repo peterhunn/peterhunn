@@ -16,10 +16,14 @@ import { deliverWebhookEvent, assertSafeWebhookUrl } from "./webhook.js";
 import { signEip712Agreement, mintAgreementNft, type Eip712AgreementData } from "./evm.js";
 import type { Hex } from "viem";
 import type { IroncladWebhookAdapter } from "./adapters/ironclad.js";
-import { verifyIroncladSignature, type IroncladWebhookEvent } from "./adapters/ironclad.js";
+import { IroncladClient, IroncladWebhookAdapter as IroncladAdapter, verifyIroncladSignature, type IroncladWebhookEvent } from "./adapters/ironclad.js";
 import type { DocuSignWebhookAdapter } from "./adapters/docusign.js";
-import { verifyDocuSignSignature, type DocuSignConnectEvent } from "./adapters/docusign.js";
+import { DocuSignClient, DocuSignWebhookAdapter as DocuSignAdapter, verifyDocuSignSignature, type DocuSignConnectEvent } from "./adapters/docusign.js";
 import { renderReviewPage } from "./review-page.js";
+import { renderDashboard } from "./dashboard.js";
+import type { IntegrationConfigStore } from "./integration-config-store.js";
+import type { IntegrationSource } from "./integration-config-store.js";
+import { InMemoryIntegrationStore } from "./integration-store.js";
 
 export interface FacilitatorAppOptions {
   tenants: TenantStore;
@@ -73,6 +77,28 @@ export interface FacilitatorAppOptions {
     webhookSecret: string;
     adapter: DocuSignWebhookAdapter;
   };
+  /**
+   * Store for per-tenant integration credentials (API keys, webhook secrets, etc.)
+   * configured via the dashboard or admin API.
+   *
+   * When set, enables:
+   *   GET  /v1/dashboard                       — operator dashboard UI
+   *   GET  /v1/integrations                    — list configured integrations
+   *   PUT  /v1/integrations/:source            — upsert integration config
+   *   DELETE /v1/integrations/:source          — remove integration config
+   *   POST /v1/:tenantId/integrations/ironclad/webhook  — dynamic webhook
+   *   POST /v1/:tenantId/integrations/docusign/webhook  — dynamic webhook
+   *
+   * Dynamic webhooks create adapters on-the-fly from stored credentials,
+   * so no static `ironclad` or `docusign` options are needed.
+   */
+  integrationConfigs?: IntegrationConfigStore;
+  /**
+   * Shared integration mapping store used by dynamic adapters.
+   * Required alongside `integrationConfigs` for idempotency tracking.
+   * Falls back to a fresh in-memory store per request when omitted.
+   */
+  integrations?: import("./integration-store.js").IntegrationStore;
 }
 
 type AuthEnv = { Variables: { tenant: Tenant } };
@@ -1097,6 +1123,57 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     return c.json(event, 201);
   });
 
+  // ── Integration config management (auth required) ────────────────────────────
+
+  if (opts.integrationConfigs) {
+    const configStore = opts.integrationConfigs;
+    const VALID_SOURCES: IntegrationSource[] = ["ironclad", "docusign"];
+
+    authed.get("/v1/integrations", async (c) => {
+      const tenant = c.get("tenant");
+      const list = await configStore.listByTenant(tenant.tenantId);
+      return c.json({
+        integrations: list.map(({ webhookSecret: _ws, credentials: _cr, ...safe }) => safe),
+      });
+    });
+
+    authed.put("/v1/integrations/:source", async (c) => {
+      const tenant = c.get("tenant");
+      const source = c.req.param("source") as IntegrationSource;
+      if (!VALID_SOURCES.includes(source)) {
+        return c.json({ error: `Unknown integration source: ${source}` }, 400);
+      }
+      const body = await c.req.json<{ credentials?: Record<string, string>; webhookSecret: string }>();
+      if (!body.webhookSecret?.trim()) return c.json({ error: "webhookSecret is required" }, 400);
+      const config = await configStore.upsert({
+        tenantId: tenant.tenantId,
+        source,
+        credentials: body.credentials ?? {},
+        webhookSecret: body.webhookSecret,
+      });
+      const { webhookSecret: _ws, credentials: _cr, ...safe } = config;
+      return c.json({
+        ...safe,
+        webhookUrl: `${baseUrl}/v1/${tenant.tenantId}/integrations/${source}/webhook`,
+      }, 200);
+    });
+
+    authed.delete("/v1/integrations/:source", async (c) => {
+      const tenant = c.get("tenant");
+      const source = c.req.param("source");
+      const removed = await configStore.remove(tenant.tenantId, source);
+      return c.json({ removed, source });
+    });
+  }
+
+  // ── Operator dashboard (auth required, HTML) ──────────────────────────────────
+  // Authentication handled client-side: API key stored in sessionStorage after
+  // a /v1/me check, then sent as X-API-Key on each subsequent API request.
+
+  if (opts.integrationConfigs) {
+    app.get("/v1/dashboard", (c) => c.html(renderDashboard(baseUrl)));
+  }
+
   // ── Counterparty review UI (public) ──────────────────────────────────────────
   // Served at the URL you share with counterparties — no account required.
   // Route: GET /v1/:tenantId/review/:templateHash
@@ -1135,6 +1212,99 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
       ...(embedded ? { embedded } : {}),
     }));
   });
+
+  // ── Dynamic integration webhooks (config-store driven) ───────────────────────
+  // Tenant-scoped URLs so each tenant registers their own webhook in Ironclad/DocuSign.
+  // Route: POST /v1/:tenantId/integrations/{source}/webhook
+
+  if (opts.integrationConfigs) {
+    const configStore = opts.integrationConfigs;
+    // Shared integration mapping store — falls back to a fresh one per invocation
+    // if opts.integrations is not provided (idempotency will reset on restart).
+    const integStore = opts.integrations ?? new InMemoryIntegrationStore();
+
+    app.post("/v1/:tenantId/integrations/ironclad/webhook", async (c) => {
+      const tenantId = c.req.param("tenantId") ?? "";
+      const tenant = await tenants.findById(tenantId);
+      if (!tenant) return c.json({ error: "Tenant not found" }, 404);
+
+      const config = await configStore.findByTenantAndSource(tenantId, "ironclad");
+      if (!config) return c.json({ error: "Ironclad not configured for this tenant" }, 404);
+
+      const rawBody = await c.req.raw.text();
+      const sigHeader = c.req.header("X-Ironclad-Hmac-Sha256") ?? "";
+      if (!verifyIroncladSignature(rawBody, sigHeader, config.webhookSecret)) {
+        return c.json({ error: "Invalid webhook signature" }, 401);
+      }
+
+      let event: IroncladWebhookEvent;
+      try { event = JSON.parse(rawBody) as IroncladWebhookEvent; }
+      catch { return c.json({ error: "Invalid JSON body" }, 400); }
+
+      const workflowId = event.payload?.workflowId;
+      if (!workflowId) return c.json({ error: "Missing workflowId in payload" }, 400);
+
+      if (event.event === "workflow_created") {
+        try {
+          const client = new IroncladClient(
+            config.credentials["apiKey"] ?? "",
+            config.credentials["baseUrl"] ? { baseUrl: config.credentials["baseUrl"] } : {},
+          );
+          const adapter = new IroncladAdapter({
+            client, templates, requirements, integrations: integStore, tenantId, facilitatorBaseUrl: baseUrl,
+          });
+          const result = await adapter.onWorkflowCreated(workflowId);
+          return c.json(result, 200);
+        } catch (err) {
+          console.error("[ironclad-dynamic] onWorkflowCreated failed:", err);
+          return c.json({ error: "Failed to register workflow" }, 500);
+        }
+      }
+      return c.json({ received: true, event: event.event }, 200);
+    });
+
+    app.post("/v1/:tenantId/integrations/docusign/webhook", async (c) => {
+      const tenantId = c.req.param("tenantId") ?? "";
+      const tenant = await tenants.findById(tenantId);
+      if (!tenant) return c.json({ error: "Tenant not found" }, 404);
+
+      const config = await configStore.findByTenantAndSource(tenantId, "docusign");
+      if (!config) return c.json({ error: "DocuSign not configured for this tenant" }, 404);
+
+      const rawBody = await c.req.raw.text();
+      const sigHeader = c.req.header("X-DocuSign-Signature-1") ?? "";
+      if (!verifyDocuSignSignature(rawBody, sigHeader, config.webhookSecret)) {
+        return c.json({ error: "Invalid webhook signature" }, 401);
+      }
+
+      let event: DocuSignConnectEvent;
+      try { event = JSON.parse(rawBody) as DocuSignConnectEvent; }
+      catch { return c.json({ error: "Invalid JSON body" }, 400); }
+
+      const envelopeId = event.data?.envelopeId;
+      if (!envelopeId) return c.json({ error: "Missing envelopeId in data" }, 400);
+
+      if (event.event === "envelope-completed") {
+        try {
+          const client = new DocuSignClient(
+            config.credentials["accessToken"] ?? "",
+            config.credentials["accountId"] ?? "",
+            config.credentials["baseUrl"],
+          );
+          const adapter = new DocuSignAdapter({
+            client, templates, requirements, agreements, integrations: integStore,
+            tenantId, hmacSecret: tenant.hmacSecret, facilitatorBaseUrl: baseUrl,
+          });
+          const result = await adapter.onEnvelopeCompleted(envelopeId, event.data?.envelopeSummary);
+          return c.json(result, 200);
+        } catch (err) {
+          console.error("[docusign-dynamic] onEnvelopeCompleted failed:", err);
+          return c.json({ error: "Failed to process envelope" }, 500);
+        }
+      }
+      return c.json({ received: true, event: event.event }, 200);
+    });
+  }
 
   // ── Ironclad integration (public, signature-verified) ────────────────────────
 
