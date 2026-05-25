@@ -182,6 +182,21 @@ export interface IroncladAdapterOptions {
   integrations: IntegrationStore;
   tenantId: string;
   facilitatorBaseUrl: string;
+  /**
+   * Optional callback invoked after a workflow is registered.
+   * Use this to send the review link to counterparties via email (SendGrid,
+   * Resend, SES) or Slack. The `reviewUrl` is the public browser page;
+   * `acceptUrl` is the raw API endpoint for agent-to-agent flows.
+   *
+   * Errors thrown here are logged but do not fail the registration.
+   */
+  sendReviewLink?: (params: {
+    reviewUrl: string;
+    acceptUrl: string;
+    workflowId: string;
+    templateHash: string;
+    workflow: IroncladWorkflow;
+  }) => Promise<void>;
 }
 
 export interface IroncladWorkflowRegistered {
@@ -266,7 +281,22 @@ export class IroncladWebhookAdapter {
       templateHash: tmpl.hash,
     });
 
-    return this.buildResult(tmpl.hash, workflowId, facilitatorBaseUrl, tenantId);
+    const result = this.buildResult(tmpl.hash, workflowId, facilitatorBaseUrl, tenantId);
+
+    // 6. Notify operator so they can send the review link via email/Slack/etc.
+    if (this.opts.sendReviewLink) {
+      const base = facilitatorBaseUrl.replace(/\/$/, "");
+      const reviewUrl = `${base}/v1/${tenantId}/review/${tmpl.hash}`;
+      void this.opts.sendReviewLink({
+        reviewUrl,
+        acceptUrl: result.acceptUrl,
+        workflowId,
+        templateHash: tmpl.hash,
+        workflow,
+      }).catch((err) => console.error("[ironclad] sendReviewLink failed:", err));
+    }
+
+    return result;
   }
 
   /**

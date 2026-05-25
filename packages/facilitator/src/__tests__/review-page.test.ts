@@ -170,6 +170,36 @@ describe("renderReviewPage", () => {
     const html = renderReviewPage({ tenant: fakeTenant, tmpl: fakeTmpl, reqConfig: null, baseUrl: BASE_URL });
     assert.ok(html.includes("Software License Agreement"), "template content should be in the page");
   });
+
+  it("embeds redirectUri and state in the JSON data island", () => {
+    const html = renderReviewPage({
+      tenant: fakeTenant,
+      tmpl: fakeTmpl,
+      reqConfig: null,
+      baseUrl: BASE_URL,
+      redirectUri: "https://app.example.com/callback",
+      state: "csrf-token-abc",
+    });
+    assert.ok(html.includes("https://app.example.com/callback"), "redirectUri should appear in data island");
+    assert.ok(html.includes("csrf-token-abc"), "state should appear in data island");
+  });
+
+  it("sets embedded flag in the JSON data island when embedded=true", () => {
+    const html = renderReviewPage({
+      tenant: fakeTenant,
+      tmpl: fakeTmpl,
+      reqConfig: null,
+      baseUrl: BASE_URL,
+      embedded: true,
+    });
+    assert.ok(html.includes('"embedded":true'), "embedded flag should appear in JSON data island");
+  });
+
+  it("does not include redirectUri or embedded in the data island when not set", () => {
+    const html = renderReviewPage({ tenant: fakeTenant, tmpl: fakeTmpl, reqConfig: null, baseUrl: BASE_URL });
+    assert.ok(!html.includes('"redirectUri"'), "redirectUri should not appear when not set");
+    assert.ok(!html.includes('"embedded"'), "embedded should not appear when not set");
+  });
 });
 
 // ── GET /v1/:tenantId/review/:templateHash HTTP route ─────────────────────────
@@ -258,5 +288,22 @@ describe("GET /v1/:tenantId/review/:templateHash", () => {
     assert.equal(res.status, 200);
     const html = await res.text();
     assert.ok(html.includes("Accept Contract"));
+  });
+
+  it("passes redirect_uri and state query params into the page data island", async () => {
+    const { app, tenant, tmpl } = await makeApp();
+    const url = `/v1/${tenant.tenantId}/review/${tmpl.hash}?redirect_uri=https%3A%2F%2Fapp.example.com%2Fcb&state=xyz123`;
+    const res = await app.request(url);
+    const html = await res.text();
+    assert.ok(html.includes("https://app.example.com/cb"), "redirectUri should be in the page");
+    assert.ok(html.includes("xyz123"), "state should be in the page");
+  });
+
+  it("passes embedded=true query param into the page data island", async () => {
+    const { app, tenant, tmpl } = await makeApp();
+    const url = `/v1/${tenant.tenantId}/review/${tmpl.hash}?embedded=true`;
+    const res = await app.request(url);
+    const html = await res.text();
+    assert.ok(html.includes('"embedded":true'), "embedded flag should be in the page data");
   });
 });

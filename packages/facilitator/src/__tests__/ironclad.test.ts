@@ -185,6 +185,88 @@ describe("IroncladWebhookAdapter.onWorkflowCreated", () => {
     assert.equal(r1.templateHash, r2.templateHash);
   });
 
+  it("calls sendReviewLink with correct reviewUrl and workflow info", async () => {
+    const stores = makeStores();
+    const links: Array<{ reviewUrl: string; acceptUrl: string; workflowId: string; templateHash: string }> = [];
+    const mockClient = {
+      getWorkflow: async () => MOCK_WORKFLOW,
+      listDocuments: async () => [],
+      getDocumentContent: async () => new ArrayBuffer(0),
+      addComment: async () => undefined,
+      updateAttributes: async () => undefined,
+    } as unknown as InstanceType<typeof IroncladClient>;
+    const adapter = new IroncladWebhookAdapter({
+      client: mockClient,
+      templates: stores.templates,
+      requirements: stores.requirements,
+      integrations: stores.integrations,
+      tenantId: "tenant-1",
+      facilitatorBaseUrl: BASE_URL,
+      sendReviewLink: async (params) => { links.push(params); },
+    });
+
+    const result = await adapter.onWorkflowCreated("wf-abc123");
+    // Give fire-and-forget a tick
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(links.length, 1);
+    assert.ok(links[0]?.reviewUrl.includes("/v1/tenant-1/review/"), "reviewUrl should point to review page");
+    assert.ok(links[0]?.reviewUrl.includes(result.templateHash), "reviewUrl should contain templateHash");
+    assert.equal(links[0]?.workflowId, "wf-abc123");
+    assert.equal(links[0]?.templateHash, result.templateHash);
+  });
+
+  it("does not call sendReviewLink on idempotent second call", async () => {
+    const stores = makeStores();
+    let callCount = 0;
+    const mockClient = {
+      getWorkflow: async () => MOCK_WORKFLOW,
+      listDocuments: async () => [],
+      getDocumentContent: async () => new ArrayBuffer(0),
+      addComment: async () => undefined,
+      updateAttributes: async () => undefined,
+    } as unknown as InstanceType<typeof IroncladClient>;
+    const adapter = new IroncladWebhookAdapter({
+      client: mockClient,
+      templates: stores.templates,
+      requirements: stores.requirements,
+      integrations: stores.integrations,
+      tenantId: "tenant-1",
+      facilitatorBaseUrl: BASE_URL,
+      sendReviewLink: async () => { callCount++; },
+    });
+
+    await adapter.onWorkflowCreated("wf-abc123");
+    await new Promise((resolve) => setImmediate(resolve));
+    await adapter.onWorkflowCreated("wf-abc123");
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(callCount, 1, "sendReviewLink should only be called on first registration");
+  });
+
+  it("does not fail when sendReviewLink throws", async () => {
+    const stores = makeStores();
+    const mockClient = {
+      getWorkflow: async () => MOCK_WORKFLOW,
+      listDocuments: async () => [],
+      getDocumentContent: async () => new ArrayBuffer(0),
+      addComment: async () => undefined,
+      updateAttributes: async () => undefined,
+    } as unknown as InstanceType<typeof IroncladClient>;
+    const adapter = new IroncladWebhookAdapter({
+      client: mockClient,
+      templates: stores.templates,
+      requirements: stores.requirements,
+      integrations: stores.integrations,
+      tenantId: "tenant-1",
+      facilitatorBaseUrl: BASE_URL,
+      sendReviewLink: async () => { throw new Error("email service down"); },
+    });
+
+    // Should not throw even if sendReviewLink fails
+    await assert.doesNotReject(() => adapter.onWorkflowCreated("wf-abc123"));
+  });
+
   it("uses document content when primary document is available", async () => {
     const stores = makeStores();
     const docContent = "This is the actual contract PDF text content.";

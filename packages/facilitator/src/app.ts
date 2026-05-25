@@ -1097,7 +1097,15 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     }
 
     const reqConfig = await requirements.findByTemplate(tenantId, templateHash);
-    return c.html(renderReviewPage({ tenant, tmpl, reqConfig, baseUrl }));
+    const redirectUri = c.req.query("redirect_uri");
+    const state = c.req.query("state");
+    const embedded = c.req.query("embedded") === "true";
+    return c.html(renderReviewPage({
+      tenant, tmpl, reqConfig, baseUrl,
+      ...(redirectUri ? { redirectUri } : {}),
+      ...(state ? { state } : {}),
+      ...(embedded ? { embedded } : {}),
+    }));
   });
 
   // ── Ironclad integration (public, signature-verified) ────────────────────────

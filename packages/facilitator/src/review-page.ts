@@ -25,10 +25,28 @@ export interface ReviewPageOptions {
   tmpl: RegisteredTemplate;
   reqConfig: RequirementsConfig | null;
   baseUrl: string;
+  /**
+   * After acceptance, redirect to this URL with ?token=&contractId=&state=
+   * appended. Enables the OAuth-style redirect flow so any web app can
+   * integrate x490 without the user ever leaving their native context.
+   * Must be HTTPS (or http://localhost for development).
+   */
+  redirectUri?: string;
+  /**
+   * Opaque value passed back untouched on redirect / postMessage.
+   * Use to correlate the acceptance with the initiating request in your app.
+   */
+  state?: string;
+  /**
+   * When true, the page fires window.parent.postMessage after acceptance
+   * instead of redirecting. Use when embedding the review page in an iframe
+   * inside your own application.
+   */
+  embedded?: boolean;
 }
 
 export function renderReviewPage(opts: ReviewPageOptions): string {
-  const { tenant, tmpl, reqConfig, baseUrl } = opts;
+  const { tenant, tmpl, reqConfig, baseUrl, redirectUri, state, embedded } = opts;
 
   const title = tmpl.meta.title ?? "Contract Review";
   const description = tmpl.meta.description ?? "";
@@ -56,6 +74,9 @@ export function renderReviewPage(opts: ReviewPageOptions): string {
     requiredPartyFields,
     negotiableFields: enrichedFields,
     acceptEndpoint,
+    ...(redirectUri ? { redirectUri } : {}),
+    ...(state ? { state } : {}),
+    ...(embedded ? { embedded: true } : {}),
   })
     .replace(/</g, "\\u003c")
     .replace(/>/g, "\\u003e")
@@ -326,8 +347,25 @@ export function renderReviewPage(opts: ReviewPageOptions): string {
         const json = await res.json();
 
         if (json.status === 'accepted') {
+          if (DATA.redirectUri) {
+            const params = new URLSearchParams();
+            params.set('token', json.token ?? '');
+            params.set('contractId', json.contractId ?? '');
+            if (DATA.state) params.set('state', DATA.state);
+            const sep = DATA.redirectUri.includes('?') ? '&' : '?';
+            location.href = DATA.redirectUri + sep + params.toString();
+            return;
+          }
+          if (DATA.embedded) {
+            window.parent.postMessage({
+              type: 'x490:accepted',
+              token: json.token ?? '',
+              contractId: json.contractId ?? '',
+              state: DATA.state ?? null,
+            }, '*');
+          }
           document.getElementById('success-details').innerHTML =
-            'Contract ID<br><span class="text-gray-800">' + json.contractId + '</span>';
+            'Contract ID<br><span class="text-gray-800">' + (json.contractId ?? '') + '</span>';
           showPanel('success');
 
         } else if (json.status === 'counter_offer' && json.counterOffer) {
