@@ -43,6 +43,10 @@ export interface RegisteredTemplate {
   };
   /** Structured clause data provided by the operator at registration time. */
   terms?: import("@x490/core").ContractTerms;
+  /** Hash of the template this supersedes, enabling version lineage tracking. */
+  parentHash?: string;
+  /** Human-readable note describing why this version was created. */
+  changeNote?: string;
   createdAt: number;
 }
 
@@ -92,16 +96,33 @@ export interface AgreementRecord {
   /** ERC-721 NFT minting result (optional, EVM feature). */
   nftTokenId?: string;
   nftTxHash?: string;
-  /**
-   * For direct CLM integration — the source system that originated this agreement.
-   * Examples: "docusign", "salesforce", "ironclad"
-   */
+  /** For direct CLM integration — the source system that originated this agreement. */
   externalSource?: string;
-  /**
-   * Native record ID in the source system (e.g., a DocuSign envelope ID or
-   * a Salesforce contract ID). Enables lookup via GET /v1/agreements/by-external.
-   */
+  /** Native record ID in the source system (DocuSign envelope ID, Salesforce contract ID, etc.) */
   externalId?: string;
+  /** contractId of the agreement this renews, enabling renewal chains. */
+  parentContractId?: string;
+}
+
+/**
+ * Records a change to an in-force agreement.
+ * Amendments modify terms in place (same contractId); the new token supersedes
+ * the previous one for downstream verification.
+ */
+export interface AmendmentRecord {
+  amendmentId: string;
+  contractId: string;
+  tenantId: string;
+  /** Who initiated the amendment: a partyId or "operator". */
+  amendedBy: string;
+  reason?: string;
+  /** Free-form delta describing what changed (fields, values). */
+  changes: Record<string, unknown>;
+  /** New token issued for the amended agreement — supersedes previousToken. */
+  token: string;
+  previousToken: string;
+  issuedAt: number;
+  expiresAt: number;
 }
 
 /**
@@ -128,7 +149,12 @@ export interface ContractEventRecord {
 
 // ── Webhooks ───────────────────────────────────────────────────────────────────
 
-export type WebhookEventType = "agreement.created" | "agreement.revoked";
+export type WebhookEventType =
+  | "agreement.created"
+  | "agreement.amended"
+  | "agreement.renewed"
+  | "agreement.revoked"
+  | "contract.expiring";
 
 /**
  * A webhook endpoint registered by an operator.

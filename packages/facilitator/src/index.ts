@@ -43,6 +43,7 @@ export type {
   TenantApiKey,
   RegisteredTemplate,
   AgreementRecord,
+  AmendmentRecord,
   RequirementsConfig,
   Webhook,
   WebhookEventType,
@@ -85,3 +86,7 @@ export type { IntegrationConfig, IntegrationConfigStore, IntegrationSource } fro
 
 // Operator dashboard
 export { renderDashboard } from "./dashboard.js";
+
+// Expiry scheduler — fires contract.expiring webhook events
+export { ExpiryScheduler } from "./expiry-scheduler.js";
+export type { ExpirySchedulerOptions } from "./expiry-scheduler.js";

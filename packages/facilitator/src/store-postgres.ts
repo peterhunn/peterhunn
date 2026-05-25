@@ -10,7 +10,7 @@
  */
 
 import type postgres from "postgres";
-import type { Tenant, TenantApiKey, RegisteredTemplate, AgreementRecord, RequirementsConfig, Webhook, WebhookEventType, ContractEventRecord, PendingContract, WebhookDelivery } from "./types.js";
+import type { Tenant, TenantApiKey, RegisteredTemplate, AgreementRecord, AmendmentRecord, RequirementsConfig, Webhook, WebhookEventType, ContractEventRecord, PendingContract, WebhookDelivery } from "./types.js";
 import type { TenantStore, TemplateStore, AgreementStore, RequirementsStore, WebhookStore, EventStore, PendingContractStore, WebhookDeliveryStore } from "./store.js";
 import { sha256hex, encodeCursor, decodeCursor } from "./store.js";
 
@@ -168,6 +168,8 @@ interface TemplateRow {
   title: string | null;
   description: string | null;
   terms: import("@x490/core").ContractTerms | null;
+  parent_hash: string | null;
+  change_note: string | null;
   created_at: Date;
 }
 
@@ -175,14 +177,17 @@ function rowToTemplate(r: TemplateRow): RegisteredTemplate {
   const meta: RegisteredTemplate["meta"] = {};
   if (r.title !== null) meta.title = r.title;
   if (r.description !== null) meta.description = r.description;
-  return {
+  const tmpl: RegisteredTemplate = {
     hash: r.hash,
     tenantId: r.tenant_id,
     content: r.content,
     meta,
-    ...(r.terms ? { terms: r.terms } : {}),
     createdAt: Math.floor(r.created_at.getTime() / 1000),
   };
+  if (r.terms) tmpl.terms = r.terms;
+  if (r.parent_hash !== null) tmpl.parentHash = r.parent_hash;
+  if (r.change_note !== null) tmpl.changeNote = r.change_note;
+  return tmpl;
 }
 
 export class PostgresTemplateStore implements TemplateStore {
@@ -193,14 +198,17 @@ export class PostgresTemplateStore implements TemplateStore {
     content: string,
     meta: RegisteredTemplate["meta"],
     terms?: RegisteredTemplate["terms"],
+    parentHash?: string,
+    changeNote?: string,
   ): Promise<RegisteredTemplate> {
     const hash = await sha256hex(content);
     const rows = await this.sql<TemplateRow[]>`
-      INSERT INTO x490_templates (hash, tenant_id, content, title, description, terms)
+      INSERT INTO x490_templates (hash, tenant_id, content, title, description, terms, parent_hash, change_note)
       VALUES (
         ${hash}, ${tenantId}, ${content},
         ${meta.title ?? null}, ${meta.description ?? null},
-        ${terms ? this.sql.json(JSON.parse(JSON.stringify(terms)) as import("postgres").JSONValue) : null}
+        ${terms ? this.sql.json(JSON.parse(JSON.stringify(terms)) as import("postgres").JSONValue) : null},
+        ${parentHash ?? null}, ${changeNote ?? null}
       )
       ON CONFLICT (hash) DO UPDATE
         SET title       = COALESCE(EXCLUDED.title, x490_templates.title),
@@ -250,6 +258,27 @@ export class PostgresTemplateStore implements TemplateStore {
       ? encodeCursor(last.createdAt, last.hash)
       : null;
     return { templates, nextCursor };
+  }
+
+  async getHistory(hash: string): Promise<RegisteredTemplate[]> {
+    // Walk the parent chain in SQL using a recursive CTE (oldest first).
+    const rows = await this.sql<TemplateRow[]>`
+      WITH RECURSIVE chain AS (
+        SELECT * FROM x490_templates WHERE hash = ${hash}
+        UNION ALL
+        SELECT t.* FROM x490_templates t
+        JOIN chain c ON c.parent_hash = t.hash
+      )
+      SELECT * FROM chain ORDER BY created_at ASC
+    `;
+    return rows.map(rowToTemplate);
+  }
+
+  async getChildren(hash: string): Promise<RegisteredTemplate[]> {
+    const rows = await this.sql<TemplateRow[]>`
+      SELECT * FROM x490_templates WHERE parent_hash = ${hash} ORDER BY created_at ASC
+    `;
+    return rows.map(rowToTemplate);
   }
 }
 
@@ -357,6 +386,7 @@ interface AgreementRow {
   nft_tx_hash: string | null;
   external_source: string | null;
   external_id: string | null;
+  parent_contract_id: string | null;
 }
 
 function rowToAgreement(r: AgreementRow): AgreementRecord {
@@ -379,6 +409,7 @@ function rowToAgreement(r: AgreementRow): AgreementRecord {
   if (r.nft_tx_hash !== null) record.nftTxHash = r.nft_tx_hash;
   if (r.external_source !== null) record.externalSource = r.external_source;
   if (r.external_id !== null) record.externalId = r.external_id;
+  if (r.parent_contract_id !== null) record.parentContractId = r.parent_contract_id;
   return record;
 }
 
@@ -391,14 +422,15 @@ export class PostgresAgreementStore implements AgreementStore {
         contract_id, tenant_id, template_hash, party_id, resource,
         party_data, token, issued_at, expires_at,
         wallet_address, eip712_credential, nft_token_id, nft_tx_hash,
-        external_source, external_id
+        external_source, external_id, parent_contract_id
       ) VALUES (
         ${a.contractId}, ${a.tenantId}, ${a.templateHash}, ${a.partyId}, ${a.resource},
         ${this.sql.json(a.partyData as never)}, ${a.token},
         to_timestamp(${a.issuedAt}), to_timestamp(${a.expiresAt}),
         ${a.walletAddress ?? null}, ${a.eip712Credential ?? null},
         ${a.nftTokenId ?? null}, ${a.nftTxHash ?? null},
-        ${a.externalSource ?? null}, ${a.externalId ?? null}
+        ${a.externalSource ?? null}, ${a.externalId ?? null},
+        ${a.parentContractId ?? null}
       )
       ON CONFLICT (contract_id) DO NOTHING
     `;
@@ -493,6 +525,80 @@ export class PostgresAgreementStore implements AgreementStore {
     `;
     return rows[0] ? rowToAgreement(rows[0]) : null;
   }
+
+  async recordAmendment(amendment: AmendmentRecord): Promise<void> {
+    await this.sql`
+      INSERT INTO x490_amendments (
+        amendment_id, contract_id, tenant_id, amended_by, reason,
+        changes, token, previous_token, issued_at, expires_at
+      ) VALUES (
+        ${amendment.amendmentId}, ${amendment.contractId}, ${amendment.tenantId},
+        ${amendment.amendedBy}, ${amendment.reason ?? null},
+        ${this.sql.json(amendment.changes as import("postgres").JSONValue)},
+        ${amendment.token}, ${amendment.previousToken},
+        to_timestamp(${amendment.issuedAt}), to_timestamp(${amendment.expiresAt})
+      )
+    `;
+    await this.sql`
+      UPDATE x490_agreements
+      SET token = ${amendment.token}, expires_at = to_timestamp(${amendment.expiresAt})
+      WHERE contract_id = ${amendment.contractId}
+    `;
+  }
+
+  async listAmendments(contractId: string): Promise<AmendmentRecord[]> {
+    const rows = await this.sql<AmendmentRow[]>`
+      SELECT * FROM x490_amendments
+      WHERE contract_id = ${contractId}
+      ORDER BY issued_at ASC
+    `;
+    return rows.map(rowToAmendment);
+  }
+
+  async findExpiringBetween(afterUnix: number, beforeUnix: number, limit = 200): Promise<AgreementRecord[]> {
+    const afterDate = new Date(afterUnix * 1000);
+    const beforeDate = new Date(beforeUnix * 1000);
+    const rows = await this.sql<AgreementRow[]>`
+      SELECT * FROM x490_agreements
+      WHERE revoked_at IS NULL
+        AND expires_at > ${afterDate}
+        AND expires_at <= ${beforeDate}
+      ORDER BY expires_at ASC
+      LIMIT ${limit}
+    `;
+    return rows.map(rowToAgreement);
+  }
+}
+
+// ── Amendment row type ─────────────────────────────────────────────────────────
+
+interface AmendmentRow {
+  amendment_id: string;
+  contract_id: string;
+  tenant_id: string;
+  amended_by: string;
+  reason: string | null;
+  changes: Record<string, unknown>;
+  token: string;
+  previous_token: string;
+  issued_at: Date;
+  expires_at: Date;
+}
+
+function rowToAmendment(r: AmendmentRow): AmendmentRecord {
+  const a: AmendmentRecord = {
+    amendmentId: r.amendment_id,
+    contractId: r.contract_id,
+    tenantId: r.tenant_id,
+    amendedBy: r.amended_by,
+    changes: r.changes,
+    token: r.token,
+    previousToken: r.previous_token,
+    issuedAt: Math.floor(r.issued_at.getTime() / 1000),
+    expiresAt: Math.floor(r.expires_at.getTime() / 1000),
+  };
+  if (r.reason !== null) a.reason = r.reason;
+  return a;
 }
 
 // ── Webhook store ──────────────────────────────────────────────────────────────

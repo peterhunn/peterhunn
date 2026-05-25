@@ -1,4 +1,4 @@
-import type { Tenant, TenantApiKey, RegisteredTemplate, AgreementRecord, RequirementsConfig, Webhook, WebhookEventType, ContractEventRecord, PendingContract, WebhookDelivery } from "./types.js";
+import type { Tenant, TenantApiKey, RegisteredTemplate, AgreementRecord, AmendmentRecord, RequirementsConfig, Webhook, WebhookEventType, ContractEventRecord, PendingContract, WebhookDelivery } from "./types.js";
 
 // ── Crypto helpers ─────────────────────────────────────────────────────────────
 
@@ -42,12 +42,18 @@ export interface TemplateStore {
     content: string,
     meta: RegisteredTemplate["meta"],
     terms?: RegisteredTemplate["terms"],
+    parentHash?: string,
+    changeNote?: string,
   ): Promise<RegisteredTemplate>;
   findByHash(hash: string): Promise<RegisteredTemplate | null>;
   listByTenant(tenantId: string, opts?: { limit?: number; after?: string }): Promise<{
     templates: RegisteredTemplate[];
     nextCursor: string | null;
   }>;
+  /** Returns the version chain from the oldest ancestor to the given hash (inclusive). */
+  getHistory(hash: string): Promise<RegisteredTemplate[]>;
+  /** Returns templates that list this hash as their parentHash (direct successors). */
+  getChildren(hash: string): Promise<RegisteredTemplate[]>;
 }
 
 export interface RequirementsStore {
@@ -68,6 +74,15 @@ export interface AgreementStore {
   }>;
   revoke(contractId: string, reason?: string): Promise<boolean>;
   isRevoked(contractId: string): Promise<boolean>;
+  /** Record an amendment to an existing agreement. */
+  recordAmendment(amendment: AmendmentRecord): Promise<void>;
+  /** List all amendments for a contract, oldest first. */
+  listAmendments(contractId: string): Promise<AmendmentRecord[]>;
+  /**
+   * Find active (non-revoked) agreements expiring between afterUnix and beforeUnix.
+   * Used by the expiry scheduler to send warning notifications.
+   */
+  findExpiringBetween(afterUnix: number, beforeUnix: number, limit?: number): Promise<AgreementRecord[]>;
 }
 
 // ── In-memory implementations ──────────────────────────────────────────────────
@@ -183,6 +198,8 @@ export class InMemoryTemplateStore implements TemplateStore {
     content: string,
     meta: RegisteredTemplate["meta"],
     terms?: RegisteredTemplate["terms"],
+    parentHash?: string,
+    changeNote?: string,
   ): Promise<RegisteredTemplate> {
     const hash = await sha256hex(content);
     const existing = this.templates.get(hash);
@@ -194,6 +211,8 @@ export class InMemoryTemplateStore implements TemplateStore {
       content,
       meta,
       ...(terms ? { terms } : {}),
+      ...(parentHash ? { parentHash } : {}),
+      ...(changeNote ? { changeNote } : {}),
       createdAt: Math.floor(Date.now() / 1000),
     };
     this.templates.set(hash, tmpl);
@@ -226,6 +245,20 @@ export class InMemoryTemplateStore implements TemplateStore {
       ? encodeCursor(last.createdAt, last.hash)
       : null;
     return { templates: page, nextCursor };
+  }
+
+  async getHistory(hash: string): Promise<RegisteredTemplate[]> {
+    const chain: RegisteredTemplate[] = [];
+    let current = this.templates.get(hash);
+    while (current) {
+      chain.unshift(current); // oldest first
+      current = current.parentHash ? this.templates.get(current.parentHash) : undefined;
+    }
+    return chain;
+  }
+
+  async getChildren(hash: string): Promise<RegisteredTemplate[]> {
+    return [...this.templates.values()].filter((t) => t.parentHash === hash);
   }
 }
 
@@ -277,6 +310,7 @@ export class InMemoryRequirementsStore implements RequirementsStore {
 
 export class InMemoryAgreementStore implements AgreementStore {
   private readonly agreements = new Map<string, AgreementRecord>();
+  private readonly amendments = new Map<string, AmendmentRecord[]>();
 
   async record(agreement: AgreementRecord): Promise<void> {
     this.agreements.set(agreement.contractId, agreement);
@@ -336,6 +370,27 @@ export class InMemoryAgreementStore implements AgreementStore {
 
   async isRevoked(contractId: string): Promise<boolean> {
     return this.agreements.get(contractId)?.revokedAt !== undefined;
+  }
+
+  async recordAmendment(amendment: AmendmentRecord): Promise<void> {
+    const list = this.amendments.get(amendment.contractId) ?? [];
+    list.push(amendment);
+    this.amendments.set(amendment.contractId, list);
+  }
+
+  async listAmendments(contractId: string): Promise<AmendmentRecord[]> {
+    return [...(this.amendments.get(contractId) ?? [])];
+  }
+
+  async findExpiringBetween(afterUnix: number, beforeUnix: number, limit = 200): Promise<AgreementRecord[]> {
+    const results: AgreementRecord[] = [];
+    for (const a of this.agreements.values()) {
+      if (!a.revokedAt && a.expiresAt > afterUnix && a.expiresAt <= beforeUnix) {
+        results.push(a);
+        if (results.length >= limit) break;
+      }
+    }
+    return results;
   }
 }
 

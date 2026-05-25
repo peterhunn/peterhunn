@@ -10,7 +10,7 @@ import { signToken, verifyToken } from "@x490/protocol";
 import type { AcceptRequest, AcceptResponse, VerifyResponse, RevokeRequest, RevokeResponse, NegotiableField } from "@x490/protocol";
 import type { ContractTerms } from "@x490/core";
 import type { TenantStore, TemplateStore, AgreementStore, RequirementsStore, WebhookStore, EventStore, PendingContractStore, WebhookDeliveryStore } from "./store.js";
-import type { Tenant, RegisteredTemplate, WebhookEventType, ContractEventRecord, AgreementRecord } from "./types.js";
+import type { Tenant, RegisteredTemplate, WebhookEventType, ContractEventRecord, AgreementRecord, AmendmentRecord } from "./types.js";
 import { rateLimit } from "./rate-limit.js";
 import { deliverWebhookEvent, assertSafeWebhookUrl } from "./webhook.js";
 import { signEip712Agreement, mintAgreementNft, type Eip712AgreementData } from "./evm.js";
@@ -1015,7 +1015,7 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     if (!Array.isArray(body.events) || body.events.length === 0) {
       return c.json({ error: "events must be a non-empty array" }, 400);
     }
-    const validEvents: WebhookEventType[] = ["agreement.created", "agreement.revoked"];
+    const validEvents: WebhookEventType[] = ["agreement.created", "agreement.amended", "agreement.renewed", "agreement.revoked", "contract.expiring"];
     const invalid = body.events.filter((e) => !validEvents.includes(e));
     if (invalid.length > 0) {
       return c.json({ error: `unknown events: ${invalid.join(", ")}`, validEvents }, 400);
@@ -1121,6 +1121,229 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     };
     await events.append(event);
     return c.json(event, 201);
+  });
+
+  // ── Amendments (auth required) ────────────────────────────────────────────────
+
+  authed.post("/v1/agreements/:contractId/amend", async (c) => {
+    const tenant = c.get("tenant");
+    const contractId = c.req.param("contractId");
+
+    const record = await agreements.findById(contractId);
+    if (!record || record.tenantId !== tenant.tenantId) {
+      return c.json({ error: "Agreement not found" }, 404);
+    }
+    if (record.revokedAt) return c.json({ error: "Cannot amend a revoked agreement" }, 409);
+
+    const body = await c.req.json<{
+      amendedBy?: string;
+      reason?: string;
+      changes?: Record<string, unknown>;
+      expiresIn?: number;
+    }>();
+
+    if (!body.changes || Object.keys(body.changes).length === 0) {
+      return c.json({ error: "changes is required and must be non-empty" }, 400);
+    }
+
+    const tmpl = await templates.findByHash(record.templateHash);
+    if (!tmpl) return c.json({ error: "Template not found" }, 500);
+
+    const nowUnix = Math.floor(Date.now() / 1000);
+    const expiresAt = body.expiresIn ? nowUnix + body.expiresIn : record.expiresAt;
+
+    // Build merged partyData (apply changes on top of current partyData)
+    const mergedPartyData: Record<string, string> = { ...record.partyData };
+    for (const [k, v] of Object.entries(body.changes)) {
+      if (typeof v === "string") mergedPartyData[k] = v;
+    }
+
+    const newToken = await signToken(
+      {
+        contractId,
+        templateHash: record.templateHash,
+        resource: record.resource,
+        partyId: record.partyId,
+        iat: nowUnix,
+        exp: expiresAt,
+      },
+      tenant.hmacSecret,
+    );
+
+    const amendment: AmendmentRecord = {
+      amendmentId: crypto.randomUUID(),
+      contractId,
+      tenantId: tenant.tenantId,
+      amendedBy: body.amendedBy ?? tenant.tenantId,
+      changes: body.changes,
+      token: newToken,
+      previousToken: record.token,
+      issuedAt: nowUnix,
+      expiresAt,
+      ...(body.reason ? { reason: body.reason } : {}),
+    };
+
+    await agreements.recordAmendment(amendment);
+
+    const updated = await agreements.findById(contractId);
+    if (updated) {
+      void deliverWebhookEvent(webhooks, tenant.tenantId, "agreement.amended", updated, deliveries);
+    }
+
+    if (events) {
+      const parentId = await events.latestEventId(contractId);
+      void events.append({
+        eventId: crypto.randomUUID(),
+        contractId,
+        tenantId: tenant.tenantId,
+        type: "agreement.amended",
+        amendedBy: amendment.amendedBy,
+        payload: { amendmentId: amendment.amendmentId, changes: body.changes },
+        parentEventIds: parentId ? [parentId] : [],
+        createdAt: nowUnix,
+      } as ContractEventRecord & { amendedBy?: string });
+    }
+
+    return c.json({ amendment, token: newToken }, 200);
+  });
+
+  authed.get("/v1/agreements/:contractId/amendments", async (c) => {
+    const tenant = c.get("tenant");
+    const contractId = c.req.param("contractId");
+
+    const record = await agreements.findById(contractId);
+    if (!record || record.tenantId !== tenant.tenantId) {
+      return c.json({ error: "Agreement not found" }, 404);
+    }
+
+    const list = await agreements.listAmendments(contractId);
+    return c.json({ amendments: list });
+  });
+
+  // ── Renewal (auth required) ───────────────────────────────────────────────────
+
+  authed.post("/v1/agreements/:contractId/renew", async (c) => {
+    const tenant = c.get("tenant");
+    const contractId = c.req.param("contractId");
+
+    const record = await agreements.findById(contractId);
+    if (!record || record.tenantId !== tenant.tenantId) {
+      return c.json({ error: "Agreement not found" }, 404);
+    }
+    if (record.revokedAt) return c.json({ error: "Cannot renew a revoked agreement" }, 409);
+
+    const body = await c.req.json<{ expiresIn?: number; partyData?: Record<string, string> }>();
+
+    const reqConfig = await requirements.findByResource(
+      tenant.tenantId,
+      record.templateHash,
+      record.resource,
+    );
+    const expiresIn = body.expiresIn ?? reqConfig?.expiresIn ?? 365 * 24 * 3600;
+    const nowUnix = Math.floor(Date.now() / 1000);
+    const mergedPartyData = { ...record.partyData, ...(body.partyData ?? {}) };
+
+    const newContractId = `${record.resource}:${record.partyId}:${nowUnix}:${crypto.randomUUID().slice(0, 8)}`;
+    const newToken = await signToken(
+      {
+        contractId: newContractId,
+        templateHash: record.templateHash,
+        resource: record.resource,
+        partyId: record.partyId,
+        iat: nowUnix,
+        exp: nowUnix + expiresIn,
+      },
+      tenant.hmacSecret,
+    );
+
+    const renewal: AgreementRecord = {
+      contractId: newContractId,
+      tenantId: tenant.tenantId,
+      templateHash: record.templateHash,
+      partyId: record.partyId,
+      resource: record.resource,
+      partyData: mergedPartyData,
+      token: newToken,
+      issuedAt: nowUnix,
+      expiresAt: nowUnix + expiresIn,
+      parentContractId: contractId,
+    };
+
+    await agreements.record(renewal);
+    void deliverWebhookEvent(webhooks, tenant.tenantId, "agreement.renewed", renewal, deliveries);
+
+    if (events) {
+      const parentId = await events.latestEventId(contractId);
+      void events.append({
+        eventId: crypto.randomUUID(),
+        contractId: newContractId,
+        tenantId: tenant.tenantId,
+        type: "agreement.renewed",
+        payload: { renewedFrom: contractId },
+        parentEventIds: parentId ? [parentId] : [],
+        createdAt: nowUnix,
+      });
+    }
+
+    return c.json({ agreement: renewal, token: newToken }, 201);
+  });
+
+  // ── Template versioning (auth required) ───────────────────────────────────────
+
+  authed.post("/v1/templates/:hash/supersede", async (c) => {
+    const tenant = c.get("tenant");
+    const parentHash = c.req.param("hash");
+
+    const parent = await templates.findByHash(parentHash);
+    if (!parent || parent.tenantId !== tenant.tenantId) {
+      return c.json({ error: "Template not found" }, 404);
+    }
+
+    const body = await c.req.json<{
+      content: string;
+      meta?: RegisteredTemplate["meta"];
+      terms?: RegisteredTemplate["terms"];
+      changeNote?: string;
+    }>();
+
+    if (!body.content?.trim()) return c.json({ error: "content is required" }, 400);
+
+    const newTmpl = await templates.register(
+      tenant.tenantId,
+      body.content,
+      body.meta ?? parent.meta,
+      body.terms,
+      parentHash,
+      body.changeNote,
+    );
+
+    return c.json(newTmpl, 201);
+  });
+
+  authed.get("/v1/templates/:hash/history", async (c) => {
+    const tenant = c.get("tenant");
+    const hash = c.req.param("hash");
+
+    const tmpl = await templates.findByHash(hash);
+    if (!tmpl || tmpl.tenantId !== tenant.tenantId) {
+      return c.json({ error: "Template not found" }, 404);
+    }
+
+    const history = await templates.getHistory(hash);
+    return c.json({ history });
+  });
+
+  authed.get("/v1/templates/:hash/children", async (c) => {
+    const tenant = c.get("tenant");
+    const hash = c.req.param("hash");
+
+    const tmpl = await templates.findByHash(hash);
+    if (!tmpl || tmpl.tenantId !== tenant.tenantId) {
+      return c.json({ error: "Template not found" }, 404);
+    }
+
+    const children = await templates.getChildren(hash);
+    return c.json({ children });
   });
 
   // ── Integration config management (auth required) ────────────────────────────

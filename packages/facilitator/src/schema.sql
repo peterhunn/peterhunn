@@ -40,10 +40,19 @@ CREATE TABLE IF NOT EXISTS x490_templates (
   title       TEXT,
   description TEXT,
   terms       JSONB,
+  parent_hash TEXT        REFERENCES x490_templates(hash),
+  change_note TEXT,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
--- Idempotent migration for deployments that predate the terms column.
+-- Idempotent migrations for deployments that predate these columns.
 ALTER TABLE x490_templates ADD COLUMN IF NOT EXISTS terms JSONB;
+ALTER TABLE x490_templates ADD COLUMN IF NOT EXISTS parent_hash TEXT REFERENCES x490_templates(hash);
+ALTER TABLE x490_templates ADD COLUMN IF NOT EXISTS change_note TEXT;
+
+-- Version lineage index: find children of a given template version.
+CREATE INDEX IF NOT EXISTS idx_x490_templates_parent
+  ON x490_templates(parent_hash)
+  WHERE parent_hash IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_x490_templates_tenant
   ON x490_templates(tenant_id);
@@ -69,34 +78,37 @@ ALTER TABLE x490_requirements ADD COLUMN IF NOT EXISTS negotiable_fields JSONB N
 ALTER TABLE x490_requirements ADD COLUMN IF NOT EXISTS required_parties INT NOT NULL DEFAULT 1;
 
 -- Idempotent migrations for EVM optional fields on agreements.
-ALTER TABLE x490_agreements ADD COLUMN IF NOT EXISTS wallet_address    TEXT;
-ALTER TABLE x490_agreements ADD COLUMN IF NOT EXISTS eip712_credential TEXT;
-ALTER TABLE x490_agreements ADD COLUMN IF NOT EXISTS nft_token_id      TEXT;
-ALTER TABLE x490_agreements ADD COLUMN IF NOT EXISTS nft_tx_hash       TEXT;
-ALTER TABLE x490_agreements ADD COLUMN IF NOT EXISTS external_source   TEXT;
-ALTER TABLE x490_agreements ADD COLUMN IF NOT EXISTS external_id       TEXT;
+ALTER TABLE x490_agreements ADD COLUMN IF NOT EXISTS wallet_address      TEXT;
+ALTER TABLE x490_agreements ADD COLUMN IF NOT EXISTS eip712_credential   TEXT;
+ALTER TABLE x490_agreements ADD COLUMN IF NOT EXISTS nft_token_id        TEXT;
+ALTER TABLE x490_agreements ADD COLUMN IF NOT EXISTS nft_tx_hash         TEXT;
+ALTER TABLE x490_agreements ADD COLUMN IF NOT EXISTS external_source      TEXT;
+ALTER TABLE x490_agreements ADD COLUMN IF NOT EXISTS external_id          TEXT;
+ALTER TABLE x490_agreements ADD COLUMN IF NOT EXISTS parent_contract_id   TEXT;
 
 -- Agreements: one row per accepted contract.
 CREATE TABLE IF NOT EXISTS x490_agreements (
-  contract_id    TEXT        PRIMARY KEY,
-  tenant_id      UUID        NOT NULL REFERENCES x490_tenants(tenant_id) ON DELETE CASCADE,
-  template_hash  TEXT        NOT NULL REFERENCES x490_templates(hash),
-  party_id       TEXT        NOT NULL,
-  resource       TEXT        NOT NULL,
-  party_data     JSONB       NOT NULL DEFAULT '{}',
-  token          TEXT        NOT NULL,
-  issued_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-  expires_at     TIMESTAMPTZ NOT NULL,
-  revoked_at     TIMESTAMPTZ,
-  revoked_reason TEXT,
+  contract_id       TEXT        PRIMARY KEY,
+  tenant_id         UUID        NOT NULL REFERENCES x490_tenants(tenant_id) ON DELETE CASCADE,
+  template_hash     TEXT        NOT NULL REFERENCES x490_templates(hash),
+  party_id          TEXT        NOT NULL,
+  resource          TEXT        NOT NULL,
+  party_data        JSONB       NOT NULL DEFAULT '{}',
+  token             TEXT        NOT NULL,
+  issued_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at        TIMESTAMPTZ NOT NULL,
+  revoked_at        TIMESTAMPTZ,
+  revoked_reason    TEXT,
   -- Optional EVM fields — populated when walletAddress is present in partyData
-  wallet_address   TEXT,
+  wallet_address    TEXT,
   eip712_credential TEXT,
-  nft_token_id     TEXT,
-  nft_tx_hash      TEXT,
+  nft_token_id      TEXT,
+  nft_tx_hash       TEXT,
   -- External CLM source tracking (DocuSign, Salesforce, etc.)
-  external_source  TEXT,
-  external_id      TEXT
+  external_source   TEXT,
+  external_id       TEXT,
+  -- Renewal chain: references the contractId this agreement renews
+  parent_contract_id TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_x490_agreements_external
@@ -182,3 +194,31 @@ CREATE TABLE IF NOT EXISTS x490_webhook_deliveries (
 
 CREATE INDEX IF NOT EXISTS idx_x490_webhook_deliveries_webhook
   ON x490_webhook_deliveries(webhook_id, created_at DESC);
+
+-- Amendments: records each modification to an in-force agreement.
+-- The agreement row is also updated (token, expires_at) on each amendment.
+CREATE TABLE IF NOT EXISTS x490_amendments (
+  amendment_id    TEXT        PRIMARY KEY,
+  contract_id     TEXT        NOT NULL REFERENCES x490_agreements(contract_id) ON DELETE CASCADE,
+  tenant_id       UUID        NOT NULL REFERENCES x490_tenants(tenant_id) ON DELETE CASCADE,
+  amended_by      TEXT        NOT NULL,
+  reason          TEXT,
+  changes         JSONB       NOT NULL DEFAULT '{}',
+  token           TEXT        NOT NULL,
+  previous_token  TEXT        NOT NULL,
+  issued_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at      TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_x490_amendments_contract
+  ON x490_amendments(contract_id, issued_at ASC);
+
+-- Expiry index: efficiently find agreements expiring in a time window.
+CREATE INDEX IF NOT EXISTS idx_x490_agreements_expiry
+  ON x490_agreements(expires_at ASC)
+  WHERE revoked_at IS NULL;
+
+-- Renewal chain index: find all renewals of a given agreement.
+CREATE INDEX IF NOT EXISTS idx_x490_agreements_parent
+  ON x490_agreements(parent_contract_id)
+  WHERE parent_contract_id IS NOT NULL;
