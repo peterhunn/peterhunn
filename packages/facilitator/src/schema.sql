@@ -68,6 +68,12 @@ ALTER TABLE x490_requirements ADD COLUMN IF NOT EXISTS negotiable BOOLEAN NOT NU
 ALTER TABLE x490_requirements ADD COLUMN IF NOT EXISTS negotiable_fields JSONB NOT NULL DEFAULT '[]';
 ALTER TABLE x490_requirements ADD COLUMN IF NOT EXISTS required_parties INT NOT NULL DEFAULT 1;
 
+-- Idempotent migrations for EVM optional fields on agreements.
+ALTER TABLE x490_agreements ADD COLUMN IF NOT EXISTS wallet_address    TEXT;
+ALTER TABLE x490_agreements ADD COLUMN IF NOT EXISTS eip712_credential TEXT;
+ALTER TABLE x490_agreements ADD COLUMN IF NOT EXISTS nft_token_id      TEXT;
+ALTER TABLE x490_agreements ADD COLUMN IF NOT EXISTS nft_tx_hash       TEXT;
+
 -- Agreements: one row per accepted contract.
 CREATE TABLE IF NOT EXISTS x490_agreements (
   contract_id    TEXT        PRIMARY KEY,
