@@ -154,6 +154,7 @@ async function deliverToHook(
       ...(contractId ? { contractId } : {}),
       attemptCount: 1,
       createdAt: Math.floor(Date.now() / 1000),
+      payload: body,
     });
   }
 
@@ -201,8 +202,13 @@ async function deliverToHook(
     return;
   }
 
-  // All attempts exhausted — mark failure
+  // All attempts exhausted — mark failure and schedule persistent retry
   const errMsg = result.error ?? "unknown error";
   console.error(`Webhook delivery failed after 3 attempts: ${hook.webhookId} → ${hook.url} (${errMsg})`);
-  if (deliveries) await deliveries.markFailure(deliveryId, errMsg, 3);
+  if (deliveries) {
+    await deliveries.markFailure(deliveryId, errMsg, 3);
+    // Schedule next retry attempt at +2 minutes (next step in exponential backoff)
+    const nextRetryAt = Math.floor(Date.now() / 1000) + 120;
+    await deliveries.scheduleRetry(deliveryId, nextRetryAt, 3);
+  }
 }

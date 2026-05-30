@@ -42,6 +42,10 @@ export {
 // Webhook delivery helper (for custom integrations)
 export { signWebhookPayload, deliverWebhookEvent } from "./webhook.js";
 
+// Webhook retry worker — persistent retry with exponential backoff
+export { WebhookRetryWorker } from "./webhook-retry-worker.js";
+export type { WebhookRetryWorkerOptions } from "./webhook-retry-worker.js";
+
 // Client SDK — for server operators integrating with the managed service
 export { FacilitatorClient, signUp } from "./client.js";
 export type { FacilitatorClientOptions } from "./client.js";

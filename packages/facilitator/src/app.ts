@@ -104,6 +104,12 @@ export interface FacilitatorAppOptions {
    * Falls back to a fresh in-memory store per request when omitted.
    */
   integrations?: import("./integration-store.js").IntegrationStore;
+  /**
+   * Optional health check callback. Called by GET /health.
+   * Return a map of component → ok/degraded. Example:
+   *   { db: true, cache: false }
+   */
+  healthCheck?: () => Promise<Record<string, boolean>>;
 }
 
 type AuthEnv = { Variables: { tenant: Tenant } };
@@ -195,7 +201,23 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
   });
 
   // ── Health check ───────────────────────────────────────────────────────────────
-  app.get("/health", (c) => c.json({ ok: true }));
+  app.get("/health", async (c) => {
+    const nowUnix = Math.floor(Date.now() / 1000);
+    if (!opts.healthCheck) {
+      return c.json({ status: "ok", timestamp: nowUnix });
+    }
+    let components: Record<string, boolean>;
+    try {
+      components = await opts.healthCheck();
+    } catch {
+      return c.json({ status: "degraded", timestamp: nowUnix, components: {} }, 503);
+    }
+    const allOk = Object.values(components).every(Boolean);
+    return c.json(
+      { status: allOk ? "ok" : "degraded", timestamp: nowUnix, components },
+      allOk ? 200 : 503,
+    );
+  });
 
   // ── CORS ──────────────────────────────────────────────────────────────────────
   // Allow browsers (operator dashboard) and AI agent runtimes to call the API.
@@ -763,6 +785,20 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
   authed.get("/v1/me", async (c) => {
     const tenant = c.get("tenant");
     return c.json({ tenantId: tenant.tenantId, name: tenant.name });
+  });
+
+  // ── Stats endpoint (auth required) ───────────────────────────────────────────
+
+  authed.get("/v1/stats", async (c) => {
+    const tenant = c.get("tenant");
+    const webhookList = await webhooks.list(tenant.tenantId);
+    return c.json({
+      tenantId: tenant.tenantId,
+      webhooks: {
+        total: webhookList.length,
+        active: webhookList.filter((h) => h.active).length,
+      },
+    });
   });
 
   // ── Template registration (auth required) ─────────────────────────────────

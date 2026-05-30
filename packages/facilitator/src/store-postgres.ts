@@ -931,6 +931,9 @@ interface WebhookDeliveryRow {
   attempt_count: number;
   succeeded_at: Date | null;
   created_at: Date;
+  payload: string | null;
+  next_retry_at: Date | null;
+  perm_failed: boolean;
 }
 
 function rowToWebhookDelivery(r: WebhookDeliveryRow): WebhookDelivery {
@@ -946,6 +949,9 @@ function rowToWebhookDelivery(r: WebhookDeliveryRow): WebhookDelivery {
   if (r.status_code !== null) d.statusCode = r.status_code;
   if (r.error !== null) d.error = r.error;
   if (r.succeeded_at !== null) d.succeededAt = Math.floor(r.succeeded_at.getTime() / 1000);
+  if (r.payload !== null) d.payload = r.payload;
+  if (r.next_retry_at !== null) d.nextRetryAt = Math.floor(r.next_retry_at.getTime() / 1000);
+  if (r.perm_failed) d.permanentlyFailed = true;
   return d;
 }
 
@@ -955,12 +961,23 @@ export class PostgresWebhookDeliveryStore implements WebhookDeliveryStore {
   async record(delivery: WebhookDelivery): Promise<void> {
     await this.sql`
       INSERT INTO x490_webhook_deliveries
-        (delivery_id, webhook_id, tenant_id, event_type, contract_id, attempt_count)
+        (delivery_id, webhook_id, tenant_id, event_type, contract_id, attempt_count,
+         payload, next_retry_at, perm_failed)
       VALUES (
         ${delivery.deliveryId}, ${delivery.webhookId}, ${delivery.tenantId},
-        ${delivery.eventType}, ${delivery.contractId ?? null}, ${delivery.attemptCount}
+        ${delivery.eventType}, ${delivery.contractId ?? null}, ${delivery.attemptCount},
+        ${delivery.payload ?? null},
+        ${delivery.nextRetryAt !== undefined ? new Date(delivery.nextRetryAt * 1000) : null},
+        ${delivery.permanentlyFailed ?? false}
       )
     `;
+  }
+
+  async findById(deliveryId: string): Promise<WebhookDelivery | null> {
+    const rows = await this.sql<WebhookDeliveryRow[]>`
+      SELECT * FROM x490_webhook_deliveries WHERE delivery_id = ${deliveryId}
+    `;
+    return rows[0] ? rowToWebhookDelivery(rows[0]) : null;
   }
 
   async markSuccess(deliveryId: string, statusCode: number): Promise<void> {
@@ -987,5 +1004,36 @@ export class PostgresWebhookDeliveryStore implements WebhookDeliveryStore {
       LIMIT ${limit}
     `;
     return rows.map(rowToWebhookDelivery);
+  }
+
+  async listPendingRetries(beforeUnix: number, limit = 100): Promise<WebhookDelivery[]> {
+    const before = new Date(beforeUnix * 1000);
+    const rows = await this.sql<WebhookDeliveryRow[]>`
+      SELECT * FROM x490_webhook_deliveries
+      WHERE succeeded_at IS NULL
+        AND perm_failed = false
+        AND next_retry_at IS NOT NULL
+        AND next_retry_at <= ${before}
+      ORDER BY next_retry_at ASC
+      LIMIT ${limit}
+    `;
+    return rows.map(rowToWebhookDelivery);
+  }
+
+  async scheduleRetry(deliveryId: string, nextRetryAt: number, attemptCount: number): Promise<void> {
+    const nextRetryDate = new Date(nextRetryAt * 1000);
+    await this.sql`
+      UPDATE x490_webhook_deliveries
+      SET next_retry_at = ${nextRetryDate}, attempt_count = ${attemptCount}
+      WHERE delivery_id = ${deliveryId}
+    `;
+  }
+
+  async permanentlyFail(deliveryId: string, error: string): Promise<void> {
+    await this.sql`
+      UPDATE x490_webhook_deliveries
+      SET perm_failed = true, error = ${error}
+      WHERE delivery_id = ${deliveryId}
+    `;
   }
 }

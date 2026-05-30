@@ -192,11 +192,22 @@ CREATE TABLE IF NOT EXISTS x490_webhook_deliveries (
   error         TEXT,
   attempt_count INT         NOT NULL DEFAULT 1,
   succeeded_at  TIMESTAMPTZ,
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  payload       TEXT,
+  next_retry_at TIMESTAMPTZ,
+  perm_failed   BOOLEAN NOT NULL DEFAULT false
 );
+-- Idempotent migrations for deployments that predate persistent retry columns.
+ALTER TABLE x490_webhook_deliveries ADD COLUMN IF NOT EXISTS payload TEXT;
+ALTER TABLE x490_webhook_deliveries ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ;
+ALTER TABLE x490_webhook_deliveries ADD COLUMN IF NOT EXISTS perm_failed BOOLEAN NOT NULL DEFAULT false;
 
 CREATE INDEX IF NOT EXISTS idx_x490_webhook_deliveries_webhook
   ON x490_webhook_deliveries(webhook_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_x490_webhook_deliveries_retry
+  ON x490_webhook_deliveries(next_retry_at ASC)
+  WHERE succeeded_at IS NULL AND perm_failed = false AND next_retry_at IS NOT NULL;
 
 -- Amendments: records each modification to an in-force agreement.
 -- The agreement row is also updated (token, expires_at) on each amendment.

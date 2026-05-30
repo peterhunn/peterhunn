@@ -611,9 +611,16 @@ export class InMemoryEventStore implements EventStore {
 
 export interface WebhookDeliveryStore {
   record(delivery: WebhookDelivery): Promise<void>;
+  findById(deliveryId: string): Promise<WebhookDelivery | null>;
   markSuccess(deliveryId: string, statusCode: number): Promise<void>;
   markFailure(deliveryId: string, error: string, attemptCount: number): Promise<void>;
   listByWebhook(webhookId: string, limit?: number): Promise<WebhookDelivery[]>;
+  /** Deliveries that have failed, are not permanently failed, and are past their nextRetryAt. */
+  listPendingRetries(beforeUnix: number, limit?: number): Promise<WebhookDelivery[]>;
+  /** Advance to next retry: updates nextRetryAt and attemptCount. */
+  scheduleRetry(deliveryId: string, nextRetryAt: number, attemptCount: number): Promise<void>;
+  /** Mark permanently failed — no more retries will be attempted. */
+  permanentlyFail(deliveryId: string, error: string): Promise<void>;
 }
 
 export class InMemoryWebhookDeliveryStore implements WebhookDeliveryStore {
@@ -633,6 +640,10 @@ export class InMemoryWebhookDeliveryStore implements WebhookDeliveryStore {
     this.byWebhook.set(delivery.webhookId, list);
   }
 
+  async findById(deliveryId: string): Promise<WebhookDelivery | null> {
+    return this.deliveries.get(deliveryId) ?? null;
+  }
+
   async markSuccess(deliveryId: string, statusCode: number): Promise<void> {
     const d = this.deliveries.get(deliveryId);
     if (d) {
@@ -650,5 +661,35 @@ export class InMemoryWebhookDeliveryStore implements WebhookDeliveryStore {
   async listByWebhook(webhookId: string, limit = 50): Promise<WebhookDelivery[]> {
     const ids = this.byWebhook.get(webhookId) ?? [];
     return ids.slice(0, limit).map((id) => this.deliveries.get(id)!);
+  }
+
+  async listPendingRetries(beforeUnix: number, limit = 100): Promise<WebhookDelivery[]> {
+    const results: WebhookDelivery[] = [];
+    for (const d of this.deliveries.values()) {
+      if (
+        !d.succeededAt &&
+        !d.permanentlyFailed &&
+        d.nextRetryAt !== undefined &&
+        d.nextRetryAt <= beforeUnix
+      ) {
+        results.push(d);
+        if (results.length >= limit) break;
+      }
+    }
+    return results;
+  }
+
+  async scheduleRetry(deliveryId: string, nextRetryAt: number, attemptCount: number): Promise<void> {
+    const d = this.deliveries.get(deliveryId);
+    if (d) {
+      this.deliveries.set(deliveryId, { ...d, nextRetryAt, attemptCount });
+    }
+  }
+
+  async permanentlyFail(deliveryId: string, error: string): Promise<void> {
+    const d = this.deliveries.get(deliveryId);
+    if (d) {
+      this.deliveries.set(deliveryId, { ...d, permanentlyFailed: true, error });
+    }
   }
 }

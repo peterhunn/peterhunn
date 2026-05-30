@@ -194,4 +194,10 @@ export interface WebhookDelivery {
   attemptCount: number;
   succeededAt?: number;
   createdAt: number;
+  /** Serialized JSON body stored for persistent retry. */
+  payload?: string;
+  /** Unix timestamp when next retry should be attempted. Only set while retries remain. */
+  nextRetryAt?: number;
+  /** True once all retry attempts are exhausted. */
+  permanentlyFailed?: boolean;
 }
