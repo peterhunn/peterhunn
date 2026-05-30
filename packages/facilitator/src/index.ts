@@ -48,7 +48,18 @@ export type { WebhookRetryWorkerOptions } from "./webhook-retry-worker.js";
 
 // Client SDK — for server operators integrating with the managed service
 export { FacilitatorClient, signUp } from "./client.js";
-export type { FacilitatorClientOptions } from "./client.js";
+export type {
+  FacilitatorClientOptions,
+  UploadResult,
+  TemplateSummary,
+  TemplatePage,
+  AgreementPage,
+  EventPage,
+  AmendResult,
+  RenewResult,
+  StatsResult,
+  HealthResult,
+} from "./client.js";
 
 // Types
 export type {
@@ -57,8 +68,10 @@ export type {
   RegisteredTemplate,
   AgreementRecord,
   AmendmentRecord,
+  ContractEventRecord,
   RequirementsConfig,
   Webhook,
+  WebhookDelivery,
   WebhookEventType,
   WebhookPayload,
 } from "./types.js";
