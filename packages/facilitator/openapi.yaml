@@ -355,6 +355,175 @@ components:
           type: integer
           description: Unix timestamp (seconds)
 
+    # ── RegisteredTemplate ───────────────────────────────────────────────────
+
+    RegisteredTemplate:
+      type: object
+      required: [hash, tenantId, content, meta, createdAt]
+      properties:
+        hash:
+          type: string
+          description: SHA-256 hex digest of the template content
+        tenantId:
+          type: string
+        content:
+          type: string
+          description: Raw template text with {{variable}} placeholders
+        meta:
+          type: object
+          properties:
+            title:
+              type: string
+            description:
+              type: string
+        terms:
+          type: object
+          additionalProperties: true
+          description: Structured clause data provided at registration time
+        parentHash:
+          type: string
+          description: Hash of the template this supersedes (version lineage)
+        changeNote:
+          type: string
+          description: Human-readable note describing why this version was created
+        createdAt:
+          type: integer
+          description: Unix timestamp (seconds)
+
+    # ── AmendmentRecord ──────────────────────────────────────────────────────
+
+    AmendmentRecord:
+      type: object
+      required:
+        - amendmentId
+        - contractId
+        - tenantId
+        - amendedBy
+        - changes
+        - token
+        - previousToken
+        - issuedAt
+        - expiresAt
+      properties:
+        amendmentId:
+          type: string
+          format: uuid
+        contractId:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+        amendedBy:
+          type: string
+          description: Party ID or "operator" who initiated the amendment
+        reason:
+          type: string
+          description: Human-readable reason for the amendment
+        changes:
+          type: object
+          additionalProperties: true
+          description: Free-form delta describing what changed (fields and their new values)
+        token:
+          type: string
+          description: New token issued for the amended agreement; supersedes previousToken
+        previousToken:
+          type: string
+          description: The token that was active before this amendment
+        issuedAt:
+          type: integer
+          description: Unix timestamp (seconds)
+        expiresAt:
+          type: integer
+          description: Unix timestamp (seconds)
+
+    # ── ContractEventRecord ──────────────────────────────────────────────────
+
+    ContractEventRecord:
+      type: object
+      required:
+        - eventId
+        - contractId
+        - tenantId
+        - type
+        - payload
+        - parentEventIds
+        - createdAt
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        contractId:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+        type:
+          type: string
+          description: >
+            Event type. System events use the "agreement." prefix (reserved);
+            custom events must use a different prefix.
+        party:
+          type: string
+          description: Party identifier associated with the event (optional)
+        payload:
+          type: object
+          additionalProperties: true
+        parentEventIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: DAG edges — IDs of events that causally precede this one
+        createdAt:
+          type: integer
+          description: Unix timestamp (seconds)
+
+    # ── PendingContract ──────────────────────────────────────────────────────
+
+    PendingContract:
+      type: object
+      required:
+        - contractId
+        - tenantId
+        - templateHash
+        - requiredParties
+        - acceptances
+        - createdAt
+      properties:
+        contractId:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+        templateHash:
+          type: string
+        requiredParties:
+          type: integer
+          minimum: 2
+          description: Total number of parties required to finalise the contract
+        acceptances:
+          type: array
+          description: Parties that have accepted so far
+          items:
+            type: object
+            required: [partyId, partyData, acceptedAt]
+            properties:
+              partyId:
+                type: string
+              partyData:
+                type: object
+                additionalProperties:
+                  type: string
+              acceptedAt:
+                type: integer
+                description: Unix timestamp (seconds)
+        completedAt:
+          type: integer
+          description: Unix timestamp (seconds); present once all parties have signed
+        createdAt:
+          type: integer
+          description: Unix timestamp (seconds)
+
     # ── Pagination wrapper ───────────────────────────────────────────────────
 
     Cursor:
@@ -379,11 +548,36 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [ok]
+                required: [status, timestamp]
                 properties:
-                  ok:
-                    type: boolean
-                    enum: [true]
+                  status:
+                    type: string
+                    enum: [ok, degraded]
+                  timestamp:
+                    type: integer
+                    description: Unix timestamp (seconds) at time of check
+                  components:
+                    type: object
+                    additionalProperties:
+                      type: boolean
+                    description: Per-component health flags; present when a healthCheck callback is configured
+        "503":
+          description: Service is degraded (one or more components unhealthy)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, timestamp]
+                properties:
+                  status:
+                    type: string
+                    enum: [degraded]
+                  timestamp:
+                    type: integer
+                  components:
+                    type: object
+                    additionalProperties:
+                      type: boolean
 
   # ── OpenAPI / Docs ─────────────────────────────────────────────────────────
 
@@ -616,6 +810,245 @@ paths:
                 $ref: "#/components/schemas/Template"
         "404":
           description: Template not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/templates/upload:
+    post:
+      operationId: uploadTemplateFile
+      summary: Upload a PDF/DOCX/text file as a template (extracts text automatically)
+      tags: [templates]
+      security:
+        - apiKeyAuth: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Template file to upload (PDF, DOCX, plain text, or Markdown)
+                title:
+                  type: string
+                  description: Human-readable title; defaults to the uploaded filename
+                parentHash:
+                  type: string
+                  description: Hash of the template this supersedes (enables version lineage)
+                changeNote:
+                  type: string
+                  description: Human-readable note describing why this version was created
+      responses:
+        "201":
+          description: Template extracted and registered
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [hash, url, format]
+                properties:
+                  hash:
+                    type: string
+                    description: SHA-256 hex digest of the extracted template content
+                  url:
+                    type: string
+                    format: uri
+                  format:
+                    type: string
+                    description: Detected file format (e.g. "pdf", "docx", "text")
+                  title:
+                    type: string
+                  parentHash:
+                    type: string
+                  pages:
+                    type: integer
+                    description: Number of pages (PDF only)
+                  warnings:
+                    type: array
+                    items:
+                      type: string
+                    description: Non-fatal extraction warnings
+        "400":
+          description: Missing file field or unsupported content type
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "415":
+          description: Unsupported file type
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, supported]
+                properties:
+                  error:
+                    type: string
+                  supported:
+                    type: array
+                    items:
+                      type: string
+        "422":
+          description: File could not be parsed or contains no extractable text
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/templates/{hash}/supersede:
+    post:
+      operationId: supersedeTemplate
+      summary: Create a new template version that supersedes the given hash
+      tags: [templates]
+      security:
+        - apiKeyAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: hash
+          in: path
+          required: true
+          schema:
+            type: string
+          description: SHA-256 hex digest of the template being superseded
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content:
+                  type: string
+                  description: Raw template text for the new version
+                meta:
+                  type: object
+                  properties:
+                    title:
+                      type: string
+                    description:
+                      type: string
+                terms:
+                  type: object
+                  additionalProperties: true
+                changeNote:
+                  type: string
+                  description: Human-readable note describing what changed in this version
+      responses:
+        "201":
+          description: New template version registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegisteredTemplate"
+        "400":
+          description: content is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Parent template not found (or belongs to a different tenant)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/templates/{hash}/history:
+    get:
+      operationId: getTemplateHistory
+      summary: Get the version history of a template (ancestor chain)
+      tags: [templates]
+      security:
+        - apiKeyAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: hash
+          in: path
+          required: true
+          schema:
+            type: string
+          description: SHA-256 hex digest of the template
+      responses:
+        "200":
+          description: Ordered list of ancestor template versions (oldest first)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [history]
+                properties:
+                  history:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RegisteredTemplate"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Template not found (or belongs to a different tenant)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/templates/{hash}/children:
+    get:
+      operationId: getTemplateChildren
+      summary: Get direct child versions of a template
+      tags: [templates]
+      security:
+        - apiKeyAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: hash
+          in: path
+          required: true
+          schema:
+            type: string
+          description: SHA-256 hex digest of the parent template
+      responses:
+        "200":
+          description: List of templates that directly supersede the given template
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [children]
+                properties:
+                  children:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RegisteredTemplate"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Template not found (or belongs to a different tenant)
           content:
             application/json:
               schema:
@@ -954,6 +1387,55 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/stats:
+    get:
+      operationId: getStats
+      summary: Get usage statistics for the authenticated tenant
+      tags: [tenants]
+      security:
+        - apiKeyAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Tenant statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tenantId, webhooks]
+                properties:
+                  tenantId:
+                    type: string
+                  webhooks:
+                    type: object
+                    required: [total, active]
+                    properties:
+                      total:
+                        type: integer
+                      active:
+                        type: integer
+                  agreements:
+                    type: object
+                    required: [total, active]
+                    properties:
+                      total:
+                        type: integer
+                      active:
+                        type: integer
+                        description: Agreements that are not revoked and not yet expired
+                  templates:
+                    type: object
+                    required: [total]
+                    properties:
+                      total:
+                        type: integer
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   # ── Agreements ─────────────────────────────────────────────────────────────
 
   /v1/agreements:
@@ -1033,6 +1515,237 @@ paths:
                 $ref: "#/components/schemas/Error"
         "404":
           description: Agreement not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/agreements/by-external:
+    get:
+      operationId: getAgreementByExternal
+      summary: Look up an agreement by its external source system ID
+      tags: [agreements]
+      security:
+        - apiKeyAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: source
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Name of the originating system (e.g. "ironclad", "docusign")
+        - name: externalId
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Record ID in the source system (e.g. Ironclad workflow ID, DocuSign envelope ID)
+      responses:
+        "200":
+          description: Matching agreement record (token field omitted)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agreement"
+        "400":
+          description: Missing source or externalId query params
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Agreement not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/agreements/{contractId}/amend:
+    post:
+      operationId: amendAgreement
+      summary: Amend an in-force agreement (modifies terms, issues a new token)
+      tags: [agreements]
+      security:
+        - apiKeyAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [changes]
+              properties:
+                changes:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  description: >
+                    Key-value pairs of fields to change. Applied on top of the
+                    current partyData; the new token encodes the merged state.
+                reason:
+                  type: string
+                  description: Human-readable reason for the amendment
+                amendedBy:
+                  type: string
+                  description: Party ID or label of who initiated the amendment; defaults to tenantId
+                expiresIn:
+                  type: integer
+                  description: >
+                    New TTL in seconds from now. When omitted the existing expiresAt is preserved.
+      responses:
+        "200":
+          description: Amendment recorded; new token supersedes the previous one
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [amendment, token]
+                properties:
+                  amendment:
+                    $ref: "#/components/schemas/AmendmentRecord"
+                  token:
+                    type: string
+                    description: New signed contract token
+        "400":
+          description: Validation error — changes is required and must be non-empty
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Agreement not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Agreement is revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/agreements/{contractId}/amendments:
+    get:
+      operationId: listAmendments
+      summary: List all amendments for an agreement
+      tags: [agreements]
+      security:
+        - apiKeyAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of amendment records (tokens omitted)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [amendments]
+                properties:
+                  amendments:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AmendmentRecord"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Agreement not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/agreements/{contractId}/renew:
+    post:
+      operationId: renewAgreement
+      summary: Renew an agreement (creates a successor contract with a new token)
+      tags: [agreements]
+      security:
+        - apiKeyAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expiresIn:
+                  type: integer
+                  description: >
+                    TTL in seconds for the renewed agreement.
+                    Falls back to the configured requirements expiresIn, then 1 year.
+                partyData:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  description: >
+                    Optional overrides merged on top of the existing partyData
+                    for the renewed agreement.
+      responses:
+        "201":
+          description: Renewal created; new contractId and token issued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [agreement, token]
+                properties:
+                  agreement:
+                    $ref: "#/components/schemas/Agreement"
+                  token:
+                    type: string
+                    description: Signed contract token for the renewed agreement
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Agreement not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Agreement is revoked
           content:
             application/json:
               schema:
@@ -1448,6 +2161,148 @@ paths:
                 $ref: "#/components/schemas/Error"
         "404":
           description: Webhook not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/webhooks/{webhookId}/test:
+    post:
+      operationId: testWebhook
+      summary: Send a test delivery to a webhook endpoint
+      tags: [webhooks]
+      security:
+        - apiKeyAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: webhookId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                eventType:
+                  type: string
+                  description: >
+                    Event type to send in the test payload. Defaults to
+                    the first event type registered on the webhook.
+      responses:
+        "200":
+          description: Test delivery result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok:
+                    type: boolean
+                  statusCode:
+                    type: integer
+                    description: HTTP status code returned by the destination
+                  error:
+                    type: string
+                    description: Error message if the delivery failed
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Webhook not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ── Cross-contract event log ────────────────────────────────────────────────
+
+  /v1/events:
+    get:
+      operationId: listEvents
+      summary: List contract lifecycle events across all agreements (paginated)
+      tags: [agreements]
+      security:
+        - apiKeyAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: cursor
+          in: query
+          schema:
+            type: string
+          description: Opaque pagination cursor from a previous response
+        - name: resource
+          in: query
+          schema:
+            type: string
+          description: Filter events to agreements with this resource scope
+        - name: type
+          in: query
+          schema:
+            type: string
+          description: Filter by event type (e.g. "agreement.accepted", "agreement.revoked")
+      responses:
+        "200":
+          description: Paginated list of contract events
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events]
+                properties:
+                  events:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ContractEventRecord"
+                  cursor:
+                    type: string
+                    description: Opaque cursor for the next page; absent when no more results
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ── Pending contracts ──────────────────────────────────────────────────────
+
+  /v1/pending-contracts:
+    get:
+      operationId: listPendingContracts
+      summary: List pending (multi-party) contracts awaiting additional signatures
+      tags: [contracts]
+      security:
+        - apiKeyAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: List of pending contracts
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pendingContracts]
+                properties:
+                  pendingContracts:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PendingContract"
+        "401":
+          description: Unauthenticated
           content:
             application/json:
               schema:
