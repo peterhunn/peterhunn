@@ -200,6 +200,25 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     return c.json({ error: err.message }, 500);
   });
 
+  // ── Request logging ────────────────────────────────────────────────────────────
+  // Emits one structured JSON line per request with timing and tenant context.
+  app.use("*", async (c, next) => {
+    const requestId = crypto.randomUUID();
+    const start = Date.now();
+    c.res.headers.set("X-Request-ID", requestId);
+    await next();
+    const log: Record<string, unknown> = {
+      requestId,
+      method: c.req.method,
+      path: c.req.path,
+      status: c.res.status,
+      durationMs: Date.now() - start,
+    };
+    const tenant = (c as unknown as { get(k: string): unknown }).get("tenant") as { tenantId: string } | undefined;
+    if (tenant?.tenantId) log.tenantId = tenant.tenantId;
+    console.log(JSON.stringify(log));
+  });
+
   // ── Health check ───────────────────────────────────────────────────────────────
   app.get("/health", async (c) => {
     const nowUnix = Math.floor(Date.now() / 1000);
@@ -791,9 +810,22 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
 
   authed.get("/v1/stats", async (c) => {
     const tenant = c.get("tenant");
-    const webhookList = await webhooks.list(tenant.tenantId);
+    const nowUnix = Math.floor(Date.now() / 1000);
+    const [webhookList, agreementCounts, templateCount, expiring] = await Promise.all([
+      webhooks.list(tenant.tenantId),
+      agreements.countByTenant(tenant.tenantId),
+      templates.countByTenant(tenant.tenantId),
+      agreements.findExpiringBetween(nowUnix, nowUnix + 7 * 86400, 1000),
+    ]);
     return c.json({
       tenantId: tenant.tenantId,
+      agreements: {
+        total: agreementCounts.total,
+        active: agreementCounts.active,
+        revoked: agreementCounts.total - agreementCounts.active,
+        expiringIn7Days: expiring.length,
+      },
+      templates: { total: templateCount },
       webhooks: {
         total: webhookList.length,
         active: webhookList.filter((h) => h.active).length,
@@ -1157,6 +1189,55 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     }
     const list = await deliveries?.listByWebhook(webhookId, 50) ?? [];
     return c.json({ deliveries: list });
+  });
+
+  authed.post("/v1/webhooks/:webhookId/test", async (c) => {
+    const tenant = c.get("tenant");
+    const webhookId = c.req.param("webhookId");
+    const hook = await webhooks.findById(webhookId);
+    if (!hook || hook.tenantId !== tenant.tenantId) {
+      return c.json({ error: "Webhook not found" }, 404);
+    }
+    if (!hook.active) return c.json({ error: "Webhook is disabled" }, 409);
+
+    try {
+      await assertSafeWebhookUrl(hook.url);
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 400);
+    }
+
+    const body = await c.req.json<{ eventType?: WebhookEventType }>().catch(() => ({ eventType: undefined }));
+    const requestedType = body.eventType;
+    const eventType: WebhookEventType =
+      (requestedType && hook.events.includes(requestedType) ? requestedType : hook.events[0]) ?? "agreement.created";
+
+    const { signWebhookPayload } = await import("./webhook.js");
+    const nowUnix = Math.floor(Date.now() / 1000);
+    const syntheticPayload = JSON.stringify({
+      eventId: crypto.randomUUID(),
+      type: eventType,
+      tenantId: tenant.tenantId,
+      data: { contractId: "test-" + crypto.randomUUID().slice(0, 8), test: true },
+      timestamp: nowUnix,
+    });
+
+    const signature = await signWebhookPayload(hook.secret, syntheticPayload);
+    try {
+      const res = await fetch(hook.url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-X490-Signature": signature,
+          "X-X490-Event": eventType,
+          "X-X490-Delivery": crypto.randomUUID(),
+        },
+        body: syntheticPayload,
+        signal: AbortSignal.timeout(10_000),
+      });
+      return c.json({ ok: res.ok, statusCode: res.status });
+    } catch (err) {
+      return c.json({ ok: false, error: String(err) });
+    }
   });
 
   // ── Tenant deletion (auth required) ──────────────────────────────────────────

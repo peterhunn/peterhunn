@@ -280,6 +280,13 @@ export class PostgresTemplateStore implements TemplateStore {
     `;
     return rows.map(rowToTemplate);
   }
+
+  async countByTenant(tenantId: string): Promise<number> {
+    const rows = await this.sql<[{ n: string }]>`
+      SELECT COUNT(*)::text AS n FROM x490_templates WHERE tenant_id = ${tenantId}
+    `;
+    return Number(rows[0]?.n ?? 0);
+  }
 }
 
 // ── Requirements store ─────────────────────────────────────────────────────────
@@ -578,6 +585,20 @@ export class PostgresAgreementStore implements AgreementStore {
       SET warned_at = now()
       WHERE contract_id = ${contractId} AND warned_at IS NULL
     `;
+  }
+
+  async countByTenant(tenantId: string): Promise<{ total: number; active: number }> {
+    const rows = await this.sql<[{ total: string; active: string }]>`
+      SELECT
+        COUNT(*)::text AS total,
+        COUNT(*) FILTER (WHERE revoked_at IS NULL)::text AS active
+      FROM x490_agreements
+      WHERE tenant_id = ${tenantId}
+    `;
+    return {
+      total: Number(rows[0]?.total ?? 0),
+      active: Number(rows[0]?.active ?? 0),
+    };
   }
 }
 

@@ -69,6 +69,7 @@ export type {
   AgreementRecord,
   AmendmentRecord,
   ContractEventRecord,
+  PendingContract,
   RequirementsConfig,
   Webhook,
   WebhookDelivery,

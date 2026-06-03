@@ -1,5 +1,5 @@
 import type { ContractRequirements, NegotiableField } from "@x490/protocol";
-import type { AgreementRecord, AmendmentRecord, ContractEventRecord, RegisteredTemplate, TenantApiKey, WebhookDelivery, WebhookEventType } from "./types.js";
+import type { AgreementRecord, AmendmentRecord, ContractEventRecord, PendingContract, RegisteredTemplate, TenantApiKey, WebhookDelivery, WebhookEventType } from "./types.js";
 
 export interface FacilitatorClientOptions {
   /** API key from POST /v1/tenants or POST /v1/apikeys */
@@ -53,6 +53,8 @@ export interface RenewResult {
 
 export interface StatsResult {
   tenantId: string;
+  agreements: { total: number; active: number; revoked: number; expiringIn7Days: number };
+  templates: { total: number };
   webhooks: { total: number; active: number };
 }
 
@@ -403,6 +405,24 @@ export class FacilitatorClient {
   async getHealth(): Promise<HealthResult> {
     const res = await fetch(`${this.baseUrl}/health`);
     return res.json() as Promise<HealthResult>;
+  }
+
+  /** List pending multi-party contracts awaiting additional acceptances. */
+  async listPendingContracts(): Promise<PendingContract[]> {
+    const res = await this.get("/v1/pending-contracts");
+    if (!res.ok) throw new Error(`listPendingContracts failed: ${res.status} ${await res.text()}`);
+    const { pendingContracts } = await res.json() as { pendingContracts: PendingContract[] };
+    return pendingContracts;
+  }
+
+  /**
+   * Fire a synthetic test event to a webhook endpoint.
+   * Useful for verifying the endpoint is wired correctly without creating real agreements.
+   */
+  async testWebhook(webhookId: string, eventType?: WebhookEventType): Promise<{ ok: boolean; statusCode?: number; error?: string }> {
+    const res = await this.post(`/v1/webhooks/${webhookId}/test`, eventType ? { eventType } : {});
+    if (!res.ok) throw new Error(`testWebhook failed: ${res.status} ${await res.text()}`);
+    return res.json() as Promise<{ ok: boolean; statusCode?: number; error?: string }>;
   }
 
   // ── Private helpers ──────────────────────────────────────────────────────────

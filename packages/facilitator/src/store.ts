@@ -54,6 +54,8 @@ export interface TemplateStore {
   getHistory(hash: string): Promise<RegisteredTemplate[]>;
   /** Returns templates that list this hash as their parentHash (direct successors). */
   getChildren(hash: string): Promise<RegisteredTemplate[]>;
+  /** Count of templates registered by this tenant. */
+  countByTenant(tenantId: string): Promise<number>;
 }
 
 export interface RequirementsStore {
@@ -85,6 +87,8 @@ export interface AgreementStore {
   findExpiringBetween(afterUnix: number, beforeUnix: number, limit?: number): Promise<AgreementRecord[]>;
   /** Mark that a contract.expiring warning has been delivered. Prevents duplicate notifications. */
   markWarned(contractId: string): Promise<void>;
+  /** Agreement counts for a tenant: total and how many are currently active (not revoked). */
+  countByTenant(tenantId: string): Promise<{ total: number; active: number }>;
 }
 
 // ── In-memory implementations ──────────────────────────────────────────────────
@@ -262,6 +266,12 @@ export class InMemoryTemplateStore implements TemplateStore {
   async getChildren(hash: string): Promise<RegisteredTemplate[]> {
     return [...this.templates.values()].filter((t) => t.parentHash === hash);
   }
+
+  async countByTenant(tenantId: string): Promise<number> {
+    let n = 0;
+    for (const t of this.templates.values()) if (t.tenantId === tenantId) n++;
+    return n;
+  }
 }
 
 export class InMemoryRequirementsStore implements RequirementsStore {
@@ -400,6 +410,16 @@ export class InMemoryAgreementStore implements AgreementStore {
     if (record) {
       this.agreements.set(contractId, { ...record, warnedAt: Math.floor(Date.now() / 1000) });
     }
+  }
+
+  async countByTenant(tenantId: string): Promise<{ total: number; active: number }> {
+    let total = 0, active = 0;
+    for (const a of this.agreements.values()) {
+      if (a.tenantId !== tenantId) continue;
+      total++;
+      if (!a.revokedAt) active++;
+    }
+    return { total, active };
   }
 }
 
