@@ -95,6 +95,24 @@ export async function signWebhookPayload(secret: string, body: string): Promise<
 }
 
 /**
+ * Verify a webhook signature received in the X-X490-Signature header.
+ * Uses constant-time comparison to prevent timing attacks.
+ */
+export async function verifyWebhookSignature(
+  payload: string,
+  signature: string,
+  secret: string,
+): Promise<boolean> {
+  const expected = await signWebhookPayload(secret, payload);
+  const a = new TextEncoder().encode(expected);
+  const b = new TextEncoder().encode(signature);
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= (a[i] ?? 0) ^ (b[i] ?? 0);
+  return diff === 0;
+}
+
+/**
  * Deliver a webhook event to all active subscribers.
  *
  * Fire-and-forget per endpoint: failures are logged but never propagate to

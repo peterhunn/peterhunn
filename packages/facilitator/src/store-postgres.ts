@@ -11,7 +11,7 @@
 
 import type postgres from "postgres";
 import type { Tenant, TenantApiKey, RegisteredTemplate, AgreementRecord, AmendmentRecord, RequirementsConfig, Webhook, WebhookEventType, ContractEventRecord, PendingContract, WebhookDelivery } from "./types.js";
-import type { TenantStore, TemplateStore, AgreementStore, RequirementsStore, WebhookStore, EventStore, PendingContractStore, WebhookDeliveryStore } from "./store.js";
+import type { TenantStore, TemplateStore, AgreementStore, RequirementsStore, WebhookStore, EventStore, PendingContractStore, WebhookDeliveryStore, IdempotencyStore, IdempotencyRecord } from "./store.js";
 import { sha256hex, encodeCursor, decodeCursor } from "./store.js";
 
 type Sql = ReturnType<typeof postgres>;
@@ -156,6 +156,18 @@ export class PostgresTenantStore implements TenantStore {
       DELETE FROM x490_tenants WHERE tenant_id = ${tenantId}
     `;
     return result.count > 0;
+  }
+
+  async rotateHmacSecret(tenantId: string): Promise<string> {
+    const bytes = crypto.getRandomValues(new Uint8Array(32));
+    const newSecret = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+    const rows = await this.sql<[{ hmac_secret: string }]>`
+      UPDATE x490_tenants SET hmac_secret = ${newSecret}
+      WHERE tenant_id = ${tenantId}
+      RETURNING hmac_secret
+    `;
+    if (!rows[0]) throw new Error("Tenant not found");
+    return rows[0].hmac_secret;
   }
 }
 
@@ -454,50 +466,32 @@ export class PostgresAgreementStore implements AgreementStore {
 
   async listByTenant(
     tenantId: string,
-    opts: { resource?: string; limit?: number; after?: string } = {},
+    opts: { resource?: string; partyId?: string; templateHash?: string; status?: "active" | "revoked"; limit?: number; after?: string } = {},
   ): Promise<{ agreements: AgreementRecord[]; nextCursor: string | null }> {
     const limit = Math.min(opts.limit ?? 50, 200);
 
-    let rows: AgreementRow[];
+    const resourceF = opts.resource ? this.sql`AND (resource = ${opts.resource} OR resource = '*')` : this.sql``;
+    const partyF = opts.partyId ? this.sql`AND party_id = ${opts.partyId}` : this.sql``;
+    const tmplF = opts.templateHash ? this.sql`AND template_hash = ${opts.templateHash}` : this.sql``;
+    const statusF = opts.status === "active"
+      ? this.sql`AND revoked_at IS NULL`
+      : opts.status === "revoked"
+      ? this.sql`AND revoked_at IS NOT NULL`
+      : this.sql``;
+    let afterF = this.sql``;
     if (opts.after) {
       const [afterTs, afterId] = decodeCursor(opts.after);
       const afterDate = new Date(afterTs * 1000);
-      if (opts.resource) {
-        rows = await this.sql<AgreementRow[]>`
-          SELECT * FROM x490_agreements
-          WHERE tenant_id = ${tenantId}
-            AND (resource = ${opts.resource} OR resource = '*')
-            AND (issued_at < ${afterDate} OR (issued_at = ${afterDate} AND contract_id > ${afterId}))
-          ORDER BY issued_at DESC, contract_id ASC
-          LIMIT ${limit}
-        `;
-      } else {
-        rows = await this.sql<AgreementRow[]>`
-          SELECT * FROM x490_agreements
-          WHERE tenant_id = ${tenantId}
-            AND (issued_at < ${afterDate} OR (issued_at = ${afterDate} AND contract_id > ${afterId}))
-          ORDER BY issued_at DESC, contract_id ASC
-          LIMIT ${limit}
-        `;
-      }
-    } else {
-      if (opts.resource) {
-        rows = await this.sql<AgreementRow[]>`
-          SELECT * FROM x490_agreements
-          WHERE tenant_id = ${tenantId}
-            AND (resource = ${opts.resource} OR resource = '*')
-          ORDER BY issued_at DESC, contract_id ASC
-          LIMIT ${limit}
-        `;
-      } else {
-        rows = await this.sql<AgreementRow[]>`
-          SELECT * FROM x490_agreements
-          WHERE tenant_id = ${tenantId}
-          ORDER BY issued_at DESC, contract_id ASC
-          LIMIT ${limit}
-        `;
-      }
+      afterF = this.sql`AND (issued_at < ${afterDate} OR (issued_at = ${afterDate} AND contract_id > ${afterId}))`;
     }
+
+    const rows = await this.sql<AgreementRow[]>`
+      SELECT * FROM x490_agreements
+      WHERE tenant_id = ${tenantId}
+        ${resourceF} ${partyF} ${tmplF} ${statusF} ${afterF}
+      ORDER BY issued_at DESC, contract_id ASC
+      LIMIT ${limit}
+    `;
 
     const agreements = rows.map(rowToAgreement);
     const last = agreements[agreements.length - 1];
@@ -1055,6 +1049,43 @@ export class PostgresWebhookDeliveryStore implements WebhookDeliveryStore {
       UPDATE x490_webhook_deliveries
       SET perm_failed = true, error = ${error}
       WHERE delivery_id = ${deliveryId}
+    `;
+  }
+}
+
+// ── Idempotency store ──────────────────────────────────────────────────────────
+
+export class PostgresIdempotencyStore implements IdempotencyStore {
+  private static readonly DEFAULT_TTL = 86400;
+  constructor(private readonly sql: Sql) {}
+
+  async get(tenantId: string, key: string): Promise<IdempotencyRecord | null> {
+    const rows = await this.sql<{ method: string; path: string; status_code: number; body: string; created_at: Date }[]>`
+      SELECT method, path, status_code, body, created_at
+      FROM x490_idempotency_keys
+      WHERE tenant_id = ${tenantId} AND idempotency_key = ${key}
+        AND expires_at > now()
+    `;
+    if (!rows[0]) return null;
+    return {
+      method: rows[0].method,
+      path: rows[0].path,
+      statusCode: rows[0].status_code,
+      body: rows[0].body,
+      createdAt: Math.floor(rows[0].created_at.getTime() / 1000),
+    };
+  }
+
+  async set(tenantId: string, key: string, record: IdempotencyRecord, ttlSeconds = PostgresIdempotencyStore.DEFAULT_TTL): Promise<void> {
+    const expiresAt = new Date((Math.floor(Date.now() / 1000) + ttlSeconds) * 1000);
+    await this.sql`
+      INSERT INTO x490_idempotency_keys
+        (tenant_id, idempotency_key, method, path, status_code, body, expires_at)
+      VALUES (
+        ${tenantId}, ${key}, ${record.method}, ${record.path},
+        ${record.statusCode}, ${record.body}, ${expiresAt}
+      )
+      ON CONFLICT (tenant_id, idempotency_key) DO NOTHING
     `;
   }
 }

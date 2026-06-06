@@ -249,3 +249,21 @@ CREATE TABLE IF NOT EXISTS x490_integration_configs (
 CREATE INDEX IF NOT EXISTS idx_x490_agreements_parent
   ON x490_agreements(parent_contract_id)
   WHERE parent_contract_id IS NOT NULL;
+
+-- Idempotency keys: deduplicate mutating requests within a 24-hour window.
+-- ON CONFLICT DO NOTHING means first-writer wins — subsequent identical keys replay the stored response.
+CREATE TABLE IF NOT EXISTS x490_idempotency_keys (
+  tenant_id       UUID        NOT NULL REFERENCES x490_tenants(tenant_id) ON DELETE CASCADE,
+  idempotency_key TEXT        NOT NULL,
+  method          TEXT        NOT NULL,
+  path            TEXT        NOT NULL,
+  status_code     INT         NOT NULL,
+  body            TEXT        NOT NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at      TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (tenant_id, idempotency_key)
+);
+
+-- Efficient cleanup of expired keys by a background job.
+CREATE INDEX IF NOT EXISTS idx_x490_idempotency_expires
+  ON x490_idempotency_keys(expires_at ASC);

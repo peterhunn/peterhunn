@@ -12,6 +12,7 @@ export {
   InMemoryEventStore,
   InMemoryPendingContractStore,
   InMemoryWebhookDeliveryStore,
+  InMemoryIdempotencyStore,
   sha256hex,
   encodeCursor,
   decodeCursor,
@@ -25,6 +26,8 @@ export type {
   EventStore,
   PendingContractStore,
   WebhookDeliveryStore,
+  IdempotencyStore,
+  IdempotencyRecord,
 } from "./store.js";
 
 // Postgres store implementations
@@ -37,10 +40,11 @@ export {
   PostgresEventStore,
   PostgresPendingContractStore,
   PostgresWebhookDeliveryStore,
+  PostgresIdempotencyStore,
 } from "./store-postgres.js";
 
-// Webhook delivery helper (for custom integrations)
-export { signWebhookPayload, deliverWebhookEvent } from "./webhook.js";
+// Webhook helpers (for custom integrations)
+export { signWebhookPayload, verifyWebhookSignature, deliverWebhookEvent } from "./webhook.js";
 
 // Webhook retry worker — persistent retry with exponential backoff
 export { WebhookRetryWorker } from "./webhook-retry-worker.js";

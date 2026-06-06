@@ -34,6 +34,12 @@ export interface TenantStore {
   listApiKeys(tenantId: string): Promise<TenantApiKey[]>;
   revokeApiKey(keyId: string): Promise<boolean>;
   delete(tenantId: string): Promise<boolean>;
+  /**
+   * Generate a new HMAC signing secret for the tenant.
+   * Tokens signed with the old secret will fail verification immediately.
+   * Returns the new secret.
+   */
+  rotateHmacSecret(tenantId: string): Promise<string>;
 }
 
 export interface TemplateStore {
@@ -70,7 +76,14 @@ export interface AgreementStore {
   record(agreement: AgreementRecord): Promise<void>;
   findById(contractId: string): Promise<AgreementRecord | null>;
   findByExternalId(tenantId: string, source: string, externalId: string): Promise<AgreementRecord | null>;
-  listByTenant(tenantId: string, opts?: { resource?: string; limit?: number; after?: string }): Promise<{
+  listByTenant(tenantId: string, opts?: {
+    resource?: string;
+    partyId?: string;
+    templateHash?: string;
+    status?: "active" | "revoked";
+    limit?: number;
+    after?: string;
+  }): Promise<{
     agreements: AgreementRecord[];
     nextCursor: string | null;
   }>;
@@ -193,6 +206,14 @@ export class InMemoryTenantStore implements TenantStore {
       if (tid === tenantId) this.auth0SubIndex.delete(sub);
     }
     return true;
+  }
+
+  async rotateHmacSecret(tenantId: string): Promise<string> {
+    const tenant = this.tenants.get(tenantId);
+    if (!tenant) throw new Error("Tenant not found");
+    const newSecret = generateHmacSecret();
+    this.tenants.set(tenantId, { ...tenant, hmacSecret: newSecret });
+    return newSecret;
   }
 }
 
@@ -343,13 +364,16 @@ export class InMemoryAgreementStore implements AgreementStore {
 
   async listByTenant(
     tenantId: string,
-    opts: { resource?: string; limit?: number; after?: string } = {},
+    opts: { resource?: string; partyId?: string; templateHash?: string; status?: "active" | "revoked"; limit?: number; after?: string } = {},
   ): Promise<{ agreements: AgreementRecord[]; nextCursor: string | null }> {
     const limit = Math.min(opts.limit ?? 50, 200);
 
     let records = [...this.agreements.values()]
       .filter((a) => a.tenantId === tenantId)
       .filter((a) => !opts.resource || a.resource === opts.resource || a.resource === "*")
+      .filter((a) => !opts.partyId || a.partyId === opts.partyId)
+      .filter((a) => !opts.templateHash || a.templateHash === opts.templateHash)
+      .filter((a) => !opts.status || (opts.status === "active" ? !a.revokedAt : !!a.revokedAt))
       .sort((a, b) => b.issuedAt - a.issuedAt || a.contractId.localeCompare(b.contractId));
 
     if (opts.after) {
@@ -711,5 +735,44 @@ export class InMemoryWebhookDeliveryStore implements WebhookDeliveryStore {
     if (d) {
       this.deliveries.set(deliveryId, { ...d, permanentlyFailed: true, error });
     }
+  }
+}
+
+// ── Idempotency store ──────────────────────────────────────────────────────────
+
+export interface IdempotencyRecord {
+  method: string;
+  path: string;
+  statusCode: number;
+  body: string;
+  createdAt: number;
+}
+
+export interface IdempotencyStore {
+  get(tenantId: string, key: string): Promise<IdempotencyRecord | null>;
+  set(tenantId: string, key: string, record: IdempotencyRecord, ttlSeconds?: number): Promise<void>;
+}
+
+export class InMemoryIdempotencyStore implements IdempotencyStore {
+  private readonly records = new Map<string, IdempotencyRecord & { expiresAt: number }>();
+  private static readonly DEFAULT_TTL = 86400; // 24 hours
+
+  private mapKey(tenantId: string, key: string): string {
+    return `${tenantId}:${key}`;
+  }
+
+  async get(tenantId: string, key: string): Promise<IdempotencyRecord | null> {
+    const entry = this.records.get(this.mapKey(tenantId, key));
+    if (!entry) return null;
+    if (entry.expiresAt < Math.floor(Date.now() / 1000)) {
+      this.records.delete(this.mapKey(tenantId, key));
+      return null;
+    }
+    return entry;
+  }
+
+  async set(tenantId: string, key: string, record: IdempotencyRecord, ttlSeconds = InMemoryIdempotencyStore.DEFAULT_TTL): Promise<void> {
+    const expiresAt = Math.floor(Date.now() / 1000) + ttlSeconds;
+    this.records.set(this.mapKey(tenantId, key), { ...record, expiresAt });
   }
 }

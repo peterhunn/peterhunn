@@ -9,7 +9,7 @@ import { parse as parseYaml } from "yaml";
 import { signToken, verifyToken } from "@x490/protocol";
 import type { AcceptRequest, AcceptResponse, VerifyResponse, RevokeRequest, RevokeResponse, NegotiableField } from "@x490/protocol";
 import type { ContractTerms } from "@x490/core";
-import type { TenantStore, TemplateStore, AgreementStore, RequirementsStore, WebhookStore, EventStore, PendingContractStore, WebhookDeliveryStore } from "./store.js";
+import type { TenantStore, TemplateStore, AgreementStore, RequirementsStore, WebhookStore, EventStore, PendingContractStore, WebhookDeliveryStore, IdempotencyStore } from "./store.js";
 import type { Tenant, RegisteredTemplate, WebhookEventType, ContractEventRecord, AgreementRecord, AmendmentRecord } from "./types.js";
 import { rateLimit } from "./rate-limit.js";
 import { deliverWebhookEvent, assertSafeWebhookUrl } from "./webhook.js";
@@ -110,6 +110,12 @@ export interface FacilitatorAppOptions {
    *   { db: true, cache: false }
    */
   healthCheck?: () => Promise<Record<string, boolean>>;
+  /**
+   * Persistent idempotency store. When set, POST/PUT/PATCH requests that include
+   * an `Idempotency-Key` header will be deduplicated: the first response is stored
+   * and replayed verbatim on subsequent identical requests (scoped per tenant).
+   */
+  idempotency?: IdempotencyStore;
 }
 
 type AuthEnv = { Variables: { tenant: Tenant } };
@@ -295,6 +301,37 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
 
     return c.json({ error: "Authentication required" }, 401);
   });
+
+  // ── Idempotency middleware (authenticated routes, POST/PUT/PATCH only) ───────
+  // Must be registered after auth middleware so c.get("tenant") is available.
+  if (opts.idempotency) {
+    const idempotencyStore = opts.idempotency;
+    authed.use("*", async (c, next) => {
+      if (!["POST", "PUT", "PATCH"].includes(c.req.method)) return next();
+      const iKey = c.req.header("Idempotency-Key");
+      if (!iKey) return next();
+      const tenant = c.get("tenant");
+
+      const existing = await idempotencyStore.get(tenant.tenantId, iKey);
+      if (existing) {
+        return new Response(existing.body, {
+          status: existing.statusCode,
+          headers: { "Content-Type": "application/json", "Idempotency-Replayed": "true" },
+        });
+      }
+
+      await next();
+
+      const body = await c.res.clone().text();
+      await idempotencyStore.set(tenant.tenantId, iKey, {
+        method: c.req.method,
+        path: c.req.path,
+        statusCode: c.res.status,
+        body,
+        createdAt: Math.floor(Date.now() / 1000),
+      });
+    });
+  }
 
   // ── OpenAPI spec + Swagger UI (public) ────────────────────────────────────
 
@@ -806,6 +843,16 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
     return c.json({ tenantId: tenant.tenantId, name: tenant.name });
   });
 
+  authed.post("/v1/me/rotate-secret", async (c) => {
+    const tenant = c.get("tenant");
+    await tenants.rotateHmacSecret(tenant.tenantId);
+    return c.json({
+      tenantId: tenant.tenantId,
+      rotatedAt: Math.floor(Date.now() / 1000),
+      note: "All tokens signed with the previous secret are now invalid.",
+    });
+  });
+
   // ── Stats endpoint (auth required) ───────────────────────────────────────────
 
   authed.get("/v1/stats", async (c) => {
@@ -1000,11 +1047,18 @@ export function createFacilitatorApp(opts: FacilitatorAppOptions): Hono {
   authed.get("/v1/agreements", async (c) => {
     const tenant = c.get("tenant");
     const resource = c.req.query("resource");
+    const partyId = c.req.query("partyId");
+    const templateHash = c.req.query("templateHash");
+    const rawStatus = c.req.query("status");
+    const status = rawStatus === "active" || rawStatus === "revoked" ? rawStatus : undefined;
     const limit = Math.min(Number(c.req.query("limit") ?? "50"), 200);
     const after = c.req.query("after");
 
     const { agreements: records, nextCursor } = await agreements.listByTenant(tenant.tenantId, {
       ...(resource ? { resource } : {}),
+      ...(partyId ? { partyId } : {}),
+      ...(templateHash ? { templateHash } : {}),
+      ...(status ? { status } : {}),
       limit,
       ...(after ? { after } : {}),
     });

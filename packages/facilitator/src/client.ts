@@ -198,10 +198,13 @@ export class FacilitatorClient {
    *   } while (cursor);
    */
   async listAgreements(
-    filters: { resource?: string; limit?: number; after?: string } = {},
+    filters: { resource?: string; partyId?: string; templateHash?: string; status?: "active" | "revoked"; limit?: number; after?: string } = {},
   ): Promise<AgreementPage> {
     const qs = new URLSearchParams();
     if (filters.resource) qs.set("resource", filters.resource);
+    if (filters.partyId) qs.set("partyId", filters.partyId);
+    if (filters.templateHash) qs.set("templateHash", filters.templateHash);
+    if (filters.status) qs.set("status", filters.status);
     if (filters.limit) qs.set("limit", String(filters.limit));
     if (filters.after) qs.set("after", filters.after);
     const q = qs.toString();
@@ -383,6 +386,17 @@ export class FacilitatorClient {
   }
 
   // ── Tenant & observability ───────────────────────────────────────────────────
+
+  /**
+   * Rotate the HMAC signing secret for this tenant.
+   * All tokens issued before rotation become immediately invalid.
+   * Call this only during planned key-rotation windows.
+   */
+  async rotateHmacSecret(): Promise<{ tenantId: string; rotatedAt: number }> {
+    const res = await this.post("/v1/me/rotate-secret", {});
+    if (!res.ok) throw new Error(`rotateHmacSecret failed: ${res.status} ${await res.text()}`);
+    return res.json() as Promise<{ tenantId: string; rotatedAt: number }>;
+  }
 
   /** Return the tenantId and name for the authenticated API key. */
   async getMe(): Promise<{ tenantId: string; name: string }> {
