@@ -1,0 +1,12 @@
+[project]
+name = "robinhood-trading-agent"
+version = "0.1.0"
+description = "Agentic trading agent connected to Robinhood's MCP server"
+requires-python = ">=3.10"
+dependencies = [
+    "anthropic>=0.116.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.scripts]
+trading-agent = "agent:main"
