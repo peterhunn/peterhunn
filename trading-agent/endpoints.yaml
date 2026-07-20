@@ -1,0 +1,36 @@
+# Registry of MCP endpoints this agent can drive. Add a new entry per
+# server, then run: python agent.py --endpoint <name> "<instruction>".
+#
+# Fields per endpoint:
+#   url:                Streamable HTTP MCP endpoint.
+#   token_env:          Env var holding the OAuth bearer token.
+#   prompt_file:        Path to the system prompt (relative to this file).
+#   journal_file:       Path to the JSONL journal (relative to this file).
+#   write_markers:      Substrings that classify a tool as mutating. If empty
+#                       or omitted, the endpoint is treated as fully read-only
+#                       and dry-run does nothing. Match is case-insensitive.
+#   max_writes_per_run: (optional) Cap on allowed write calls per run.
+#   notional_cap_usd:   (optional, trading) When set, writes require numeric
+#                       quantity + price args and quantity*price must be ≤ cap.
+
+endpoints:
+
+  robinhood:
+    url: https://agent.robinhood.com/mcp/trading
+    token_env: ROBINHOOD_MCP_TOKEN
+    prompt_file: prompts/robinhood.md
+    journal_file: journals/robinhood.jsonl
+    write_markers: [place_, submit_, cancel_, modify_, replace_order, buy, sell]
+    max_writes_per_run: 3
+    notional_cap_usd: 250
+
+  # Example second endpoint — swap URL + env var for your Linear workspace's
+  # MCP server (typically obtained the same way as Robinhood, via
+  # `claude mcp add`).
+  linear:
+    url: https://mcp.linear.app/mcp
+    token_env: LINEAR_MCP_TOKEN
+    prompt_file: prompts/linear.md
+    journal_file: journals/linear.jsonl
+    write_markers: [create_, update_, delete_, archive_, cancel_, assign_, transition_]
+    max_writes_per_run: 10

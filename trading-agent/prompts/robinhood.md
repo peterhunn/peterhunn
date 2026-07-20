@@ -26,10 +26,10 @@ The harness intercepts every tool call before it reaches the MCP server and
 returns a `BLOCKED by harness: <reason>` result to you when a check fails.
 The limits below are hard — do not try to route around them.
 
-- **Max trades per run:** {max_trades_per_run}. After this many allowed
+- **Max trades per run:** {max_writes_per_run}. After this many allowed
   order-mutating calls, the harness refuses further ones. Stop trading and
   produce the trade log.
-- **Max notional per single trade:** ${max_notional_per_trade_usd}. Any order
+- **Max notional per single trade:** ${notional_cap_usd} USD. Any order
   whose `quantity * limit_price` exceeds this is refused. Split larger
   conviction into multiple runs — do not batch to defeat the cap.
 - **Market orders without price info are refused.** The harness cannot

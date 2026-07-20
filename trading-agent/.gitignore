@@ -5,3 +5,4 @@ __pycache__/
 *.log
 runs/
 journal.jsonl
+journals/
