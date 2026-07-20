@@ -64,17 +64,25 @@ Tool calls print to stderr; Claude's user-facing text goes to stdout; run detail
 
 ### Per-endpoint fields
 
+Common (both transports):
+
 | Field | Required | Purpose |
 | --- | --- | --- |
-| `url` | ✅ | Streamable HTTP MCP endpoint. |
-| `token_env` | ✅ * | Name of the env var holding the auth token. \* Optional if `auth_header: ''`. |
+| `transport` | — | `"http"` (default) or `"stdio"`. |
 | `prompt_file` | ✅ | Path to the system prompt, relative to the package root. |
 | `journal_file` | ✅ | Path to the JSONL journal. |
 | `write_markers` | — | Substrings that mark a tool as a write. Empty/omitted = fully read-only endpoint (dry-run is inert). |
 | `max_writes_per_run` | — | Cap on allowed writes per run. Omit for unlimited. |
 | `notional_cap_usd` | — | Trading only. Requires `quantity` + `limit_price` on every write; refuses if `qty * price` exceeds the cap. |
-| `auth_header` | — | HTTP header name for auth. Default `Authorization`. Set to `''` to disable auth entirely (public MCPs). |
-| `auth_prefix` | — | Literal prefix in front of the token in the header. Default `Bearer `. |
+
+HTTP transport (`transport: http`):
+
+| Field | Required | Purpose |
+| --- | --- | --- |
+| `url` | ✅ | Streamable HTTP MCP endpoint. |
+| `token_env` | ✅ * | Env var holding the auth token. \* Optional if `auth_header: ''`. |
+| `auth_header` | — | HTTP header name. Default `Authorization`. `''` disables auth. |
+| `auth_prefix` | — | Literal prefix in the header value. Default `Bearer `. |
 
 Auth-scheme cheatsheet:
 
@@ -85,7 +93,36 @@ Auth-scheme cheatsheet:
 | `X-API-Key: <token>` | `X-API-Key` | `` (empty) |
 | Unauthenticated | `''` | — |
 
-Kalshi and other MCPs that use RSA-signed requests need **stdio transport**, not just a different header — this framework is Streamable-HTTP-only today. Adding stdio is a small change if you need it.
+stdio transport (`transport: stdio`):
+
+| Field | Required | Purpose |
+| --- | --- | --- |
+| `command` | ✅ | Program to launch (e.g. `npx`, `uvx`, `python`). |
+| `args` | — | List of arguments passed to `command`. |
+
+The stdio subprocess inherits the full parent process environment, so any secrets loaded from `.env` are visible to the MCP. Kalshi, for example, reads `KALSHI_API_KEY` and `KALSHI_PRIVATE_KEY_PATH` from env; put them in `.env` and the MCP subprocess picks them up.
+
+### Kalshi setup
+
+Kalshi is real money and CFTC-regulated. There is no first-party hosted MCP; you run one of the community MCPs locally:
+
+- [`IQAIcom/mcp-kalshi`](https://github.com/IQAIcom/mcp-kalshi)
+- [`joinQuantish/kalshi-mcp`](https://github.com/joinQuantish/kalshi-mcp)
+- [`9crusher/mcp-server-kalshi`](https://github.com/9crusher/mcp-server-kalshi)
+
+Steps:
+
+1. Fund your Kalshi account and generate an API key pair in account settings — you get an API key ID and a private RSA PEM. The private key stays on your machine.
+2. Install the chosen MCP (see its README for the exact `npx` / `uvx` invocation).
+3. Put both credentials in `.env`:
+   ```
+   KALSHI_API_KEY=your-key-id
+   KALSHI_PRIVATE_KEY_PATH=/absolute/path/to/kalshi-private-key.pem
+   ```
+4. Uncomment the `kalshi:` block in `endpoints.yaml` and replace `command`/`args` with the invocation from your MCP's README.
+5. Run: `python agent.py --endpoint kalshi "Scan liquid contracts and propose one edge."`
+
+`DRY_RUN=true` is the default and will refuse every `create_order` / `cancel_order` call; audit the tool list your MCP advertises against `write_markers` before you flip it.
 
 ### Global env vars
 

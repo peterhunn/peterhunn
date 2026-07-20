@@ -2,11 +2,14 @@
 
 - GlobalConfig: things that apply to every run (Anthropic key, model,
   effort, DRY_RUN).
-- EndpointProfile: things that apply to one MCP endpoint (URL, token,
-  prompt file, write markers, per-run caps, journal path).
+- EndpointProfile: things that apply to one MCP endpoint.
 
 Endpoints are declared in `endpoints.yaml` at the package root. Load a
 profile by name with `load_endpoint(name)`.
+
+Transports:
+    transport: "http"   (default) — Streamable HTTP; needs url + auth
+    transport: "stdio"  — local subprocess; needs command + args
 """
 
 from __future__ import annotations
@@ -23,6 +26,8 @@ load_dotenv()
 
 ROOT = Path(__file__).parent
 
+VALID_TRANSPORTS = ("http", "stdio")
+
 
 @dataclass(frozen=True)
 class GlobalConfig:
@@ -35,19 +40,30 @@ class GlobalConfig:
 @dataclass(frozen=True)
 class EndpointProfile:
     name: str
-    url: str
-    token: str
+    transport: str
     prompt_file: Path
     journal_file: Path
     write_markers: tuple[str, ...] = ()
     max_writes_per_run: int | None = None
     notional_cap_usd: float | None = None
+    # HTTP transport
+    url: str = ""
+    token: str = ""
     auth_header: str = "Authorization"
     auth_prefix: str = "Bearer "
+    # stdio transport
+    command: str = ""
+    args: tuple[str, ...] = ()
     extra: dict[str, Any] = field(default_factory=dict)
 
     def read_prompt(self) -> str:
         return self.prompt_file.read_text(encoding="utf-8")
+
+    def location(self) -> str:
+        """Human-readable identifier for logs."""
+        if self.transport == "stdio":
+            return f"stdio: {self.command} {' '.join(self.args)}".rstrip()
+        return f"http: {self.url}"
 
 
 def _require_env(name: str) -> str:
@@ -92,29 +108,48 @@ def load_endpoint(name: str) -> EndpointProfile:
         )
     raw = registry[name]
 
-    url = raw.get("url")
     prompt_file = raw.get("prompt_file")
     journal_file = raw.get("journal_file")
-    if not (url and prompt_file and journal_file):
+    if not (prompt_file and journal_file):
         raise RuntimeError(
-            f"Endpoint '{name}' is missing one of: url, prompt_file, journal_file"
+            f"Endpoint '{name}' is missing prompt_file or journal_file"
         )
 
+    transport = raw.get("transport", "http")
+    if transport not in VALID_TRANSPORTS:
+        raise RuntimeError(
+            f"Endpoint '{name}' has invalid transport '{transport}'. "
+            f"Valid: {', '.join(VALID_TRANSPORTS)}"
+        )
+
+    url = ""
+    token = ""
     auth_header = raw.get("auth_header", "Authorization")
     auth_prefix = raw.get("auth_prefix", "Bearer ")
+    command = ""
+    args: tuple[str, ...] = ()
 
-    # token_env is required unless auth is explicitly disabled (auth_header
-    # set to empty string means the endpoint is unauthenticated).
-    token_env = raw.get("token_env")
-    if auth_header:
-        if not token_env:
-            raise RuntimeError(
-                f"Endpoint '{name}' has an auth_header but no token_env. "
-                "Set token_env, or set auth_header: '' to disable auth."
-            )
-        token = _require_env(token_env)
-    else:
-        token = ""
+    if transport == "http":
+        url = raw.get("url", "")
+        if not url:
+            raise RuntimeError(f"Endpoint '{name}' (http) requires url")
+        token_env = raw.get("token_env")
+        if auth_header:
+            if not token_env:
+                raise RuntimeError(
+                    f"Endpoint '{name}' has an auth_header but no token_env. "
+                    "Set token_env, or set auth_header: '' to disable auth."
+                )
+            token = _require_env(token_env)
+
+    elif transport == "stdio":
+        command = raw.get("command", "")
+        if not command:
+            raise RuntimeError(f"Endpoint '{name}' (stdio) requires command")
+        raw_args = raw.get("args") or []
+        if not isinstance(raw_args, list):
+            raise RuntimeError(f"Endpoint '{name}' args must be a list of strings")
+        args = tuple(str(a) for a in raw_args)
 
     markers = tuple(str(m).lower() for m in (raw.get("write_markers") or []))
     max_writes = raw.get("max_writes_per_run")
@@ -126,19 +161,22 @@ def load_endpoint(name: str) -> EndpointProfile:
     consumed = {
         "url", "token_env", "prompt_file", "journal_file",
         "write_markers", "max_writes_per_run", "notional_cap_usd",
-        "auth_header", "auth_prefix",
+        "auth_header", "auth_prefix", "transport", "command", "args",
     }
 
     return EndpointProfile(
         name=name,
-        url=url,
-        token=token,
+        transport=transport,
         prompt_file=prompt_path,
         journal_file=journal_path,
         write_markers=markers,
         max_writes_per_run=int(max_writes) if max_writes is not None else None,
         notional_cap_usd=float(notional_cap) if notional_cap is not None else None,
+        url=url,
+        token=token,
         auth_header=auth_header,
         auth_prefix=auth_prefix,
+        command=command,
+        args=args,
         extra={k: v for k, v in raw.items() if k not in consumed},
     )

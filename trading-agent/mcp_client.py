@@ -1,36 +1,44 @@
-"""Streamable HTTP MCP client wrapper. Works with any MCP server that
-speaks the Streamable HTTP transport and accepts a bearer token."""
+"""MCP client wrapper. Handles both Streamable HTTP (for hosted remote
+MCPs like Robinhood) and stdio subprocess (for community MCPs that stay
+local, like the Kalshi ones — which sign requests with an RSA key that
+never leaves your machine)."""
 
 from __future__ import annotations
 
 import json
+import os
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
 
-from mcp import ClientSession
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamablehttp_client
+
+from config import EndpointProfile
 
 
 @asynccontextmanager
-async def open_session(
-    url: str,
-    token: str,
-    auth_header: str = "Authorization",
-    auth_prefix: str = "Bearer ",
-) -> AsyncIterator[ClientSession]:
-    """Open an MCP session over Streamable HTTP.
+async def open_session(profile: EndpointProfile) -> AsyncIterator[ClientSession]:
+    """Open an MCP session for the given profile, dispatching on transport."""
+    if profile.transport == "stdio":
+        params = StdioServerParameters(
+            command=profile.command,
+            args=list(profile.args),
+            # Inherit full parent env so the subprocess sees anything the
+            # user set in .env (e.g. KALSHI_API_KEY, KALSHI_PRIVATE_KEY_PATH).
+            env=dict(os.environ),
+        )
+        async with stdio_client(params) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                yield session
+        return
 
-    Auth is constructed as `{auth_header}: {auth_prefix}{token}`. Common
-    shapes:
-        bearer       (default):  Authorization: Bearer <token>
-        API-key      header:     X-API-Key: <token>          (auth_header='X-API-Key', auth_prefix='')
-        keyed        header:     Authorization: Key <token>  (auth_prefix='Key ')
-        no auth:                 (no header)                 (auth_header='')
-    """
+    # Default: Streamable HTTP with optional auth header.
     headers: dict[str, str] = {}
-    if auth_header and token:
-        headers[auth_header] = f"{auth_prefix}{token}"
-    async with streamablehttp_client(url, headers=headers) as (
+    if profile.auth_header and profile.token:
+        headers[profile.auth_header] = f"{profile.auth_prefix}{profile.token}"
+    async with streamablehttp_client(profile.url, headers=headers) as (
         read_stream,
         write_stream,
         _get_session_id,

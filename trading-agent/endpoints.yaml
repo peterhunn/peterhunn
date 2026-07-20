@@ -1,10 +1,8 @@
 # Registry of MCP endpoints this agent can drive. Add a new entry per
 # server, then run: python agent.py --endpoint <name> "<instruction>".
 #
-# Fields per endpoint:
-#   url:                Streamable HTTP MCP endpoint.
-#   token_env:          Env var holding the auth token. Required unless
-#                       auth_header is set to '' (unauthenticated MCP).
+# Common fields (both transports):
+#   transport:          "http" (default) or "stdio".
 #   prompt_file:        Path to the system prompt (relative to this file).
 #   journal_file:       Path to the JSONL journal (relative to this file).
 #   write_markers:      Substrings that classify a tool as mutating. If empty
@@ -13,13 +11,24 @@
 #   max_writes_per_run: (optional) Cap on allowed write calls per run.
 #   notional_cap_usd:   (optional, trading) When set, writes require numeric
 #                       quantity + price args and quantity*price must be ≤ cap.
+#
+# HTTP transport (transport: http):
+#   url:                Streamable HTTP MCP endpoint.
+#   token_env:          Env var holding the auth token. Required unless
+#                       auth_header is set to '' (unauthenticated MCP).
 #   auth_header:        (optional) HTTP header name for auth. Default
 #                       'Authorization'. Set to '' to disable auth.
-#   auth_prefix:        (optional) String prefix in front of the token in the
-#                       header value. Default 'Bearer '. Common shapes:
+#   auth_prefix:        (optional) Prefix in front of the token. Default 'Bearer '.
 #                         Authorization: Bearer <token>   default
 #                         X-API-Key: <token>              auth_header='X-API-Key', auth_prefix=''
 #                         Authorization: Key <token>      auth_prefix='Key '
+#
+# stdio transport (transport: stdio):
+#   command:            Program to launch as the MCP subprocess (e.g. "npx",
+#                       "uvx", "python").
+#   args:               List of arguments passed to the command.
+#   (The subprocess inherits the parent's env, so any secrets loaded from
+#   .env — e.g. KALSHI_API_KEY — are visible to the MCP.)
 
 endpoints:
 
@@ -70,3 +79,29 @@ endpoints:
   #   write_markers: [place_, cancel_, redeem_]
   #   max_writes_per_run: 5
   #   notional_cap_usd: 50
+
+  # Kalshi — stdio transport, using a community-maintained MCP server.
+  # There is no first-party hosted Kalshi MCP; instead, install one of:
+  #   - github.com/IQAIcom/mcp-kalshi
+  #   - github.com/joinQuantish/kalshi-mcp
+  #   - github.com/9crusher/mcp-server-kalshi
+  # Kalshi uses RSA-signed requests; the private key stays on your machine
+  # and the MCP subprocess signs each call. Generate the key pair in your
+  # Kalshi account settings, put both in .env, then uncomment below and
+  # replace the command/args with the invocation from your chosen MCP's
+  # README. The block below is a plausible shape for IQAIcom/mcp-kalshi —
+  # verify against that repo before running.
+  #
+  # kalshi:
+  #   transport: stdio
+  #   command: npx
+  #   args: ["-y", "@iqai/mcp-kalshi"]
+  #   prompt_file: prompts/kalshi.md
+  #   journal_file: journals/kalshi.jsonl
+  #   write_markers: [create_order, cancel_order, place_, submit_]
+  #   max_writes_per_run: 5
+  #   notional_cap_usd: 100
+  #
+  # Env vars the subprocess will pick up (put in .env):
+  #   KALSHI_API_KEY=your-key-id
+  #   KALSHI_PRIVATE_KEY_PATH=/absolute/path/to/kalshi-private-key.pem
