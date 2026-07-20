@@ -3,7 +3,8 @@
 #
 # Fields per endpoint:
 #   url:                Streamable HTTP MCP endpoint.
-#   token_env:          Env var holding the OAuth bearer token.
+#   token_env:          Env var holding the auth token. Required unless
+#                       auth_header is set to '' (unauthenticated MCP).
 #   prompt_file:        Path to the system prompt (relative to this file).
 #   journal_file:       Path to the JSONL journal (relative to this file).
 #   write_markers:      Substrings that classify a tool as mutating. If empty
@@ -12,6 +13,13 @@
 #   max_writes_per_run: (optional) Cap on allowed write calls per run.
 #   notional_cap_usd:   (optional, trading) When set, writes require numeric
 #                       quantity + price args and quantity*price must be ≤ cap.
+#   auth_header:        (optional) HTTP header name for auth. Default
+#                       'Authorization'. Set to '' to disable auth.
+#   auth_prefix:        (optional) String prefix in front of the token in the
+#                       header value. Default 'Bearer '. Common shapes:
+#                         Authorization: Bearer <token>   default
+#                         X-API-Key: <token>              auth_header='X-API-Key', auth_prefix=''
+#                         Authorization: Key <token>      auth_prefix='Key '
 
 endpoints:
 
@@ -34,3 +42,31 @@ endpoints:
     journal_file: journals/linear.jsonl
     write_markers: [create_, update_, delete_, archive_, cancel_, assign_, transition_]
     max_writes_per_run: 10
+
+  # Manifold Markets — play-money prediction market. Auth is
+  # `Authorization: Key <api-key>` (their non-standard bearer scheme).
+  # Get an API key at https://manifold.markets/profile.
+  # Pointing this at a real hosted Manifold MCP requires you to run one —
+  # substitute the URL below with whichever community MCP you use.
+  manifold:
+    url: https://REPLACE-ME-with-a-manifold-mcp-endpoint
+    token_env: MANIFOLD_API_KEY
+    auth_prefix: "Key "
+    prompt_file: prompts/manifold.md
+    journal_file: journals/manifold.jsonl
+    write_markers: [create_, post_, place_, bet, cancel_, resolve_]
+    max_writes_per_run: 10
+    notional_cap_usd: 25   # Mana ≈ USD for sizing purposes; adjust freely
+
+  # Example header-auth pattern (e.g. some Polymarket MCPs) — commented out
+  # because there is no universally-accepted hosted Polymarket MCP yet.
+  # polymarket:
+  #   url: https://REPLACE-ME
+  #   token_env: POLYMARKET_API_KEY
+  #   auth_header: X-API-Key
+  #   auth_prefix: ""
+  #   prompt_file: prompts/polymarket.md
+  #   journal_file: journals/polymarket.jsonl
+  #   write_markers: [place_, cancel_, redeem_]
+  #   max_writes_per_run: 5
+  #   notional_cap_usd: 50

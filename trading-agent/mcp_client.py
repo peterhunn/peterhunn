@@ -12,8 +12,24 @@ from mcp.client.streamable_http import streamablehttp_client
 
 
 @asynccontextmanager
-async def open_session(url: str, bearer_token: str) -> AsyncIterator[ClientSession]:
-    headers = {"Authorization": f"Bearer {bearer_token}"}
+async def open_session(
+    url: str,
+    token: str,
+    auth_header: str = "Authorization",
+    auth_prefix: str = "Bearer ",
+) -> AsyncIterator[ClientSession]:
+    """Open an MCP session over Streamable HTTP.
+
+    Auth is constructed as `{auth_header}: {auth_prefix}{token}`. Common
+    shapes:
+        bearer       (default):  Authorization: Bearer <token>
+        API-key      header:     X-API-Key: <token>          (auth_header='X-API-Key', auth_prefix='')
+        keyed        header:     Authorization: Key <token>  (auth_prefix='Key ')
+        no auth:                 (no header)                 (auth_header='')
+    """
+    headers: dict[str, str] = {}
+    if auth_header and token:
+        headers[auth_header] = f"{auth_prefix}{token}"
     async with streamablehttp_client(url, headers=headers) as (
         read_stream,
         write_stream,

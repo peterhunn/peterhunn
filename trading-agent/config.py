@@ -42,6 +42,8 @@ class EndpointProfile:
     write_markers: tuple[str, ...] = ()
     max_writes_per_run: int | None = None
     notional_cap_usd: float | None = None
+    auth_header: str = "Authorization"
+    auth_prefix: str = "Bearer "
     extra: dict[str, Any] = field(default_factory=dict)
 
     def read_prompt(self) -> str:
@@ -91,15 +93,28 @@ def load_endpoint(name: str) -> EndpointProfile:
     raw = registry[name]
 
     url = raw.get("url")
-    token_env = raw.get("token_env")
     prompt_file = raw.get("prompt_file")
     journal_file = raw.get("journal_file")
-    if not (url and token_env and prompt_file and journal_file):
+    if not (url and prompt_file and journal_file):
         raise RuntimeError(
-            f"Endpoint '{name}' is missing one of: url, token_env, prompt_file, journal_file"
+            f"Endpoint '{name}' is missing one of: url, prompt_file, journal_file"
         )
 
-    token = _require_env(token_env)
+    auth_header = raw.get("auth_header", "Authorization")
+    auth_prefix = raw.get("auth_prefix", "Bearer ")
+
+    # token_env is required unless auth is explicitly disabled (auth_header
+    # set to empty string means the endpoint is unauthenticated).
+    token_env = raw.get("token_env")
+    if auth_header:
+        if not token_env:
+            raise RuntimeError(
+                f"Endpoint '{name}' has an auth_header but no token_env. "
+                "Set token_env, or set auth_header: '' to disable auth."
+            )
+        token = _require_env(token_env)
+    else:
+        token = ""
 
     markers = tuple(str(m).lower() for m in (raw.get("write_markers") or []))
     max_writes = raw.get("max_writes_per_run")
@@ -107,6 +122,12 @@ def load_endpoint(name: str) -> EndpointProfile:
 
     prompt_path = (ROOT / prompt_file).resolve()
     journal_path = (ROOT / journal_file).resolve()
+
+    consumed = {
+        "url", "token_env", "prompt_file", "journal_file",
+        "write_markers", "max_writes_per_run", "notional_cap_usd",
+        "auth_header", "auth_prefix",
+    }
 
     return EndpointProfile(
         name=name,
@@ -117,7 +138,7 @@ def load_endpoint(name: str) -> EndpointProfile:
         write_markers=markers,
         max_writes_per_run=int(max_writes) if max_writes is not None else None,
         notional_cap_usd=float(notional_cap) if notional_cap is not None else None,
-        extra={k: v for k, v in raw.items()
-               if k not in {"url", "token_env", "prompt_file", "journal_file",
-                            "write_markers", "max_writes_per_run", "notional_cap_usd"}},
+        auth_header=auth_header,
+        auth_prefix=auth_prefix,
+        extra={k: v for k, v in raw.items() if k not in consumed},
     )

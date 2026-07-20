@@ -67,12 +67,25 @@ Tool calls print to stderr; Claude's user-facing text goes to stdout; run detail
 | Field | Required | Purpose |
 | --- | --- | --- |
 | `url` | ✅ | Streamable HTTP MCP endpoint. |
-| `token_env` | ✅ | Name of the env var holding the OAuth bearer token. |
+| `token_env` | ✅ * | Name of the env var holding the auth token. \* Optional if `auth_header: ''`. |
 | `prompt_file` | ✅ | Path to the system prompt, relative to the package root. |
 | `journal_file` | ✅ | Path to the JSONL journal. |
 | `write_markers` | — | Substrings that mark a tool as a write. Empty/omitted = fully read-only endpoint (dry-run is inert). |
 | `max_writes_per_run` | — | Cap on allowed writes per run. Omit for unlimited. |
 | `notional_cap_usd` | — | Trading only. Requires `quantity` + `limit_price` on every write; refuses if `qty * price` exceeds the cap. |
+| `auth_header` | — | HTTP header name for auth. Default `Authorization`. Set to `''` to disable auth entirely (public MCPs). |
+| `auth_prefix` | — | Literal prefix in front of the token in the header. Default `Bearer `. |
+
+Auth-scheme cheatsheet:
+
+| Server pattern | `auth_header` | `auth_prefix` |
+| --- | --- | --- |
+| OAuth bearer (Robinhood, Linear) | *(default)* | *(default)* |
+| Manifold-style `Key <token>` | *(default)* | `Key ` |
+| `X-API-Key: <token>` | `X-API-Key` | `` (empty) |
+| Unauthenticated | `''` | — |
+
+Kalshi and other MCPs that use RSA-signed requests need **stdio transport**, not just a different header — this framework is Streamable-HTTP-only today. Adding stdio is a small change if you need it.
 
 ### Global env vars
 

@@ -158,7 +158,12 @@ async def run(
     final_text_parts: list[str] = []
     final_stop_reason: str | None = None
 
-    async with open_session(profile.url, profile.token) as session:
+    async with open_session(
+        profile.url,
+        profile.token,
+        auth_header=profile.auth_header,
+        auth_prefix=profile.auth_prefix,
+    ) as session:
         tools_resp = await session.list_tools()
         anthropic_tools = [to_anthropic_tool(t) for t in tools_resp.tools]
         print(
