@@ -57,18 +57,36 @@ Tool calls are streamed to stderr; Claude's user-facing text goes to stdout. Ful
 
 ## Safety — read this before setting `DRY_RUN=false`
 
-- The **only hard safety measure** is how you fund the Agentic account. Fund it with what you are prepared to lose. Robinhood's MCP restricts order placement to that account (your main brokerage account is read-only), which is the actual security boundary.
-- `DRY_RUN`, `MAX_TRADES_PER_RUN`, and `MAX_NOTIONAL_PER_TRADE_USD` are **prompt-level** limits. They are enforced by Claude following the system prompt, not by intercepting tool calls (the MCP connector runs tools server-side; there is no local interception point). A well-aligned model will respect them; a jailbroken conversation or a bug in the prompt could exceed them.
-- Do not paste untrusted user input into the instruction. Anything you send becomes autonomous authority. Prefer running with a fixed instruction from a config or hard-coded string.
-- Never commit `.env` or `runs/` (both are gitignored). Run logs may include position sizes and other account-level detail.
+Two layers now:
+
+- **Hard boundary (Robinhood-side):** the MCP restricts order placement to your dedicated Agentic account. Your main brokerage cannot be traded regardless of what happens on this side. Fund the Agentic account with what you are prepared to lose.
+- **Code-enforced boundary (this harness):** `DRY_RUN`, `MAX_TRADES_PER_RUN`, and `MAX_NOTIONAL_PER_TRADE_USD` are now enforced by `safety.py`, which sits between Claude and the MCP server. Violations return a `BLOCKED by harness` error and never touch Robinhood. This makes the limits real, not aspirational.
+
+The write-tool classifier is heuristic — it matches common name patterns like `place_*`, `submit_*`, `cancel_*`, `modify_*`, `buy*`, `sell*`. If Robinhood ships a mutating tool with a different name convention, `safety.WRITE_TOOL_MARKERS` may need an update. When you first connect, the stderr log lists every discovered tool — audit that list once.
+
+Other precautions:
+- Do not paste untrusted user input into the instruction. Anything you send becomes autonomous authority.
+- Never commit `.env` or `journal.jsonl` (both are gitignored). The journal may include position sizes and other account-level detail.
 - If you rotate or revoke the OAuth token, replace `ROBINHOOD_MCP_TOKEN` and re-run the Claude Code `mcp add` flow — do not embed tokens in scripts.
 
 ## How it works (implementation)
 
-- Uses `client.beta.messages.create(...)` with `mcp_servers=[{...robinhood...}]` and `tools=[{"type": "mcp_toolset", "mcp_server_name": "robinhood"}]`, plus beta header `mcp-client-2025-11-20`. Anthropic's platform makes the MCP call to Robinhood on your behalf and inlines `mcp_tool_use` / `mcp_tool_result` blocks in the response.
-- Adaptive thinking (`thinking={"type": "adaptive"}`) with configurable `effort`.
-- Loops on `stop_reason == "pause_turn"` (server-side iteration cap), which the MCP connector may return on long trading sessions; capped at 15 iterations to bound spend.
-- Refusals surface as a stderr line and end the run.
+- **Local MCP client.** `mcp_client.py` opens a Streamable HTTP session to `agent.robinhood.com/mcp/trading` using the `mcp` Python package, listing Robinhood's tools at start-up and forwarding calls one at a time. No `mcp_servers` connector — every tool call passes through our process, which is what makes real enforcement possible.
+- **Manual tool loop.** `agent.py` runs an async `messages.create → tool_use → tool_result` loop with adaptive thinking and configurable effort. Robinhood's MCP tools are passed to Claude as regular `tools=[...]`.
+- **Safety gate (`safety.py`).** Every tool call is classified read vs. write by name pattern (`place_*`, `submit_*`, `cancel_*`, `modify_*`, `buy*`, `sell*`, etc.). Writes are refused when `DRY_RUN=true`, when the per-run write count is at `MAX_TRADES_PER_RUN`, or when computed notional (`qty * limit_price`) exceeds `MAX_NOTIONAL_PER_TRADE_USD`. Market orders that don't include price info are refused — supply a `limit_price`. Refusals return a synthetic `tool_result` with `is_error: true` so Claude can adapt.
+- **Journal (`journal.py`).** Every run appends to `journal.jsonl`: run boundaries, each tool call and its result summary, blocks, errors, refusals, and the final assistant text. On next start-up, the last ~60 entries are rendered into the system prompt as a "Recent history" block, so the agent has continuity across runs.
+
+### File layout
+
+```
+trading-agent/
+├── agent.py          # entry — async tool loop
+├── config.py         # env → typed Config
+├── mcp_client.py     # Streamable HTTP client + result rendering
+├── safety.py         # write-tool classifier + notional/count gate
+├── journal.py        # JSONL journal + history renderer
+└── prompts/system.md # the trading discipline prompt
+```
 
 ## Extending
 

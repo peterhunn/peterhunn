@@ -1,147 +1,220 @@
 """Freeform LLM-driven trading agent connected to Robinhood via MCP.
 
-Usage:
-    uv run python agent.py "<instruction for the agent>"
-    uv run python agent.py            # reads from stdin
+Architecture:
+    1. Open a local MCP session to Robinhood's Streamable HTTP server.
+    2. Fetch its tool list and expose each tool to Claude directly (not via
+       the mcp_servers connector) so we can intercept every tool call.
+    3. Run a manual agent loop: on each `tool_use`, the safety gate decides
+       whether to allow, block (dry-run / notional / count cap), or error.
+       Allowed calls forward to the MCP session; blocked ones return a
+       synthetic tool_result explaining the block so Claude can adapt.
+    4. Every event lands in a JSONL journal. On the next run, the tail of
+       the journal is rendered into the system prompt as recent history.
 
-Safety:
-    - DRY_RUN=true (default) tells the agent to describe trades, not place them.
-      This is prompt-level; the LLM must obey. The definitive safety measure
-      is funding the Robinhood Agentic account with only what you can lose.
-    - MAX_NOTIONAL_PER_TRADE_USD and MAX_TRADES_PER_RUN are also prompt-level.
+Usage:
+    python agent.py "<instruction>"
+    echo "<instruction>" | python agent.py
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
-from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 import anthropic
 
-from config import ROBINHOOD_MCP_URL, Config, load_config
+from config import Config, load_config
+from journal import Journal, render_history
+from mcp_client import open_session, render_tool_result, to_anthropic_tool
+from safety import SafetyGate, is_write_tool
 
 
-MAX_LOOP_ITERATIONS = 15
+MAX_LOOP_ITERATIONS = 20
 
 
-def _mcp_server(config: Config) -> dict[str, Any]:
-    return {
-        "type": "url",
-        "name": "robinhood",
-        "url": ROBINHOOD_MCP_URL,
-        "authorization_token": config.robinhood_mcp_token,
-    }
-
-
-def _render_system(config: Config) -> str:
-    return config.system_prompt.format(
+def _render_system(config: Config, journal: Journal) -> str:
+    base = config.system_prompt.format(
         max_trades_per_run=config.max_trades_per_run,
         max_notional_per_trade_usd=int(config.max_notional_per_trade_usd),
     )
+    history = render_history(journal.recent())
+    if history:
+        base += "\n\n## Recent history (from prior runs)\n\n" + history
+    if config.dry_run:
+        base += (
+            "\n\n## Mode\n\nDRY_RUN is on. The harness will refuse any "
+            "order-mutating tool call and return an error result. Describe "
+            "each trade you would place instead."
+        )
+    return base
 
 
-def _dry_run_banner() -> str:
-    return (
-        "DRY_RUN is ON for this run. Do NOT invoke any order-placement tool. "
-        "Read data as much as you need, then describe each trade you would "
-        "place as if you were calling the tool, including exact arguments. "
-        "End with the trade log."
-    )
-
-
-def _print_text_blocks(content: list[Any]) -> None:
+def _print_assistant(content: list[Any]) -> None:
     for block in content:
         if getattr(block, "type", None) == "text" and block.text:
             print(block.text, flush=True)
 
 
-def _print_tool_activity(content: list[Any]) -> None:
-    for block in content:
-        btype = getattr(block, "type", None)
-        if btype == "mcp_tool_use":
-            args = getattr(block, "input", {})
-            print(
-                f"  → tool call: {block.name} {json.dumps(args, default=str)[:400]}",
-                file=sys.stderr,
-                flush=True,
-            )
-        elif btype == "mcp_tool_result":
-            is_error = getattr(block, "is_error", False)
-            preview = json.dumps(getattr(block, "content", ""), default=str)[:400]
-            tag = "ERROR" if is_error else "ok"
-            print(f"  ← tool result [{tag}]: {preview}", file=sys.stderr, flush=True)
+async def _handle_tool_call(
+    block: Any,
+    session: Any,
+    gate: SafetyGate,
+    journal: Journal,
+) -> dict[str, Any]:
+    """Run one tool_use block through the safety gate and MCP session."""
+    name: str = block.name
+    args: dict[str, Any] = dict(block.input or {})
 
+    print(
+        f"  → {name} {json.dumps(args, default=str)[:400]}",
+        file=sys.stderr,
+        flush=True,
+    )
 
-def _log_run(config: Config, response: Any) -> None:
-    runs_dir = Path(__file__).parent / "runs"
-    runs_dir.mkdir(exist_ok=True)
-    ts = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
-    path = runs_dir / f"{ts}-{'dry' if config.dry_run else 'live'}.json"
+    decision = gate.check(name, args)
+    if not decision.allowed:
+        journal.append(
+            {"type": "tool_blocked", "tool": name, "args": args, "reason": decision.reason}
+        )
+        print(f"  ← BLOCKED: {decision.reason}", file=sys.stderr, flush=True)
+        return {
+            "type": "tool_result",
+            "tool_use_id": block.id,
+            "content": f"BLOCKED by harness: {decision.reason}",
+            "is_error": True,
+        }
+
     try:
-        path.write_text(response.model_dump_json(indent=2), encoding="utf-8")
+        result = await session.call_tool(name, args)
     except Exception as exc:
-        print(f"(could not write run log: {exc})", file=sys.stderr)
+        journal.append(
+            {"type": "tool_error", "tool": name, "args": args, "error": str(exc)}
+        )
+        print(f"  ← ERROR: {exc}", file=sys.stderr, flush=True)
+        return {
+            "type": "tool_result",
+            "tool_use_id": block.id,
+            "content": f"Tool execution error: {exc}",
+            "is_error": True,
+        }
+
+    if is_write_tool(name):
+        gate.record_allowed_write()
+
+    text = render_tool_result(result)
+    is_error = bool(getattr(result, "isError", False))
+    journal.append(
+        {
+            "type": "tool_call",
+            "tool": name,
+            "args": args,
+            "is_error": is_error,
+            "result_summary": text[:800],
+        }
+    )
+    tag = "ERR" if is_error else "ok"
+    print(f"  ← {tag}: {text[:400]}", file=sys.stderr, flush=True)
+    return {
+        "type": "tool_result",
+        "tool_use_id": block.id,
+        "content": text,
+        "is_error": is_error,
+    }
 
 
-def run(user_message: str, config: Config) -> None:
-    client = anthropic.Anthropic(api_key=config.anthropic_api_key)
-
-    system = _render_system(config)
-    if config.dry_run:
-        system = f"{system}\n\n{_dry_run_banner()}"
-
-    messages: list[dict[str, Any]] = [
-        {"role": "user", "content": user_message.strip()}
-    ]
-
+async def run(user_message: str, config: Config) -> None:
+    journal = Journal(config.journal_path)
+    gate = SafetyGate(config)
     mode = "DRY-RUN" if config.dry_run else "LIVE"
+
+    journal.append(
+        {"type": "run_start", "mode": mode, "model": config.model, "instruction": user_message}
+    )
     print(f"[{mode}] model={config.model} effort={config.effort}", file=sys.stderr)
 
-    final_response = None
-    for _ in range(MAX_LOOP_ITERATIONS):
-        response = client.beta.messages.create(
-            model=config.model,
-            max_tokens=16000,
-            system=system,
-            messages=messages,
-            thinking={"type": "adaptive"},
-            output_config={"effort": config.effort},
-            mcp_servers=[_mcp_server(config)],
-            tools=[{"type": "mcp_toolset", "mcp_server_name": "robinhood"}],
-            betas=["mcp-client-2025-11-20"],
-        )
-        final_response = response
+    client = anthropic.AsyncAnthropic(api_key=config.anthropic_api_key)
+    final_text_parts: list[str] = []
+    final_stop_reason: str | None = None
 
-        _print_tool_activity(response.content)
-        _print_text_blocks(response.content)
-
-        if response.stop_reason == "pause_turn":
-            messages.append({"role": "assistant", "content": response.content})
-            continue
-
-        if response.stop_reason == "refusal":
-            details = getattr(response, "stop_details", None)
-            print(
-                f"\n[refused] category={getattr(details, 'category', None)} "
-                f"explanation={getattr(details, 'explanation', None)}",
-                file=sys.stderr,
-            )
-            break
-
-        break
-
-    if final_response is not None:
-        usage = final_response.usage
+    async with open_session(config.robinhood_mcp_token) as session:
+        tools_resp = await session.list_tools()
+        anthropic_tools = [to_anthropic_tool(t) for t in tools_resp.tools]
         print(
-            f"\n[usage] input={usage.input_tokens} output={usage.output_tokens} "
-            f"cache_read={getattr(usage, 'cache_read_input_tokens', 0)} "
-            f"stop={final_response.stop_reason}",
+            f"[mcp] connected — {len(anthropic_tools)} tools available",
             file=sys.stderr,
         )
-        _log_run(config, final_response)
+
+        system = _render_system(config, journal)
+        messages: list[dict[str, Any]] = [{"role": "user", "content": user_message}]
+
+        for _ in range(MAX_LOOP_ITERATIONS):
+            response = await client.messages.create(
+                model=config.model,
+                max_tokens=16000,
+                system=system,
+                messages=messages,
+                tools=anthropic_tools,
+                thinking={"type": "adaptive"},
+                output_config={"effort": config.effort},
+            )
+            _print_assistant(response.content)
+            final_stop_reason = response.stop_reason
+            for b in response.content:
+                if getattr(b, "type", None) == "text" and b.text:
+                    final_text_parts.append(b.text)
+
+            if response.stop_reason == "refusal":
+                details = getattr(response, "stop_details", None)
+                journal.append(
+                    {
+                        "type": "refusal",
+                        "category": getattr(details, "category", None),
+                        "explanation": getattr(details, "explanation", None),
+                    }
+                )
+                print(
+                    f"\n[refused] category={getattr(details, 'category', None)}",
+                    file=sys.stderr,
+                )
+                break
+
+            if response.stop_reason == "end_turn":
+                break
+
+            if response.stop_reason == "tool_use":
+                messages.append({"role": "assistant", "content": response.content})
+                tool_results: list[dict[str, Any]] = []
+                for block in response.content:
+                    if getattr(block, "type", None) != "tool_use":
+                        continue
+                    tool_results.append(
+                        await _handle_tool_call(block, session, gate, journal)
+                    )
+                messages.append({"role": "user", "content": tool_results})
+                continue
+
+            if response.stop_reason == "pause_turn":
+                messages.append({"role": "assistant", "content": response.content})
+                continue
+
+            break
+
+    journal.append(
+        {
+            "type": "run_end",
+            "mode": mode,
+            "stop_reason": final_stop_reason,
+            "writes_used": gate.writes_used,
+            "final_text": "\n".join(final_text_parts)[-1200:],
+        }
+    )
+    print(
+        f"\n[done] stop={final_stop_reason} writes={gate.writes_used}/"
+        f"{config.max_trades_per_run}",
+        file=sys.stderr,
+    )
 
 
 def main() -> None:
@@ -159,7 +232,7 @@ def main() -> None:
         sys.exit(2)
 
     config = load_config()
-    run(instruction, config)
+    asyncio.run(run(instruction.strip(), config))
 
 
 if __name__ == "__main__":

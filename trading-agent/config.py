@@ -20,6 +20,7 @@ class Config:
     max_trades_per_run: int
     max_notional_per_trade_usd: float
     system_prompt: str
+    journal_path: Path
 
 
 def _require(name: str) -> str:
@@ -37,6 +38,10 @@ def load_config() -> Config:
 
     dry_run = os.environ.get("DRY_RUN", "true").strip().lower() != "false"
 
+    journal_path = Path(
+        os.environ.get("JOURNAL_PATH", str(Path(__file__).parent / "journal.jsonl"))
+    )
+
     return Config(
         anthropic_api_key=_require("ANTHROPIC_API_KEY"),
         robinhood_mcp_token=_require("ROBINHOOD_MCP_TOKEN"),
@@ -48,4 +53,5 @@ def load_config() -> Config:
             os.environ.get("MAX_NOTIONAL_PER_TRADE_USD", "250")
         ),
         system_prompt=system_prompt,
+        journal_path=journal_path,
     )
