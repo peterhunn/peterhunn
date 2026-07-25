@@ -20,6 +20,40 @@ def is_write_tool(name: str, markers: tuple[str, ...]) -> bool:
     return any(m in n for m in markers)
 
 
+# Conservative allowlist used by the read-only override. When
+# SafetyGate.read_only is True, any tool whose name does not match one of
+# these markers is refused — regardless of the endpoint's write_markers
+# config. This is the belt-and-suspenders check for --propose-strategy and
+# --reflect, where dry-run is already forced but we want to guarantee no
+# writes even against a misconfigured endpoint whose write_markers list is
+# incomplete.
+READ_TOOL_MARKERS: tuple[str, ...] = (
+    "get_",
+    "list_",
+    "search_",
+    "find_",
+    "read_",
+    "view_",
+    "check_",
+    "describe_",
+    "lookup_",
+    "fetch_",
+    "quote_",
+    "info_",
+    "show_",
+    "count_",
+    "has_",
+    "is_",
+    "browse_",
+    "scan_",
+)
+
+
+def is_read_only_tool(name: str) -> bool:
+    n = name.lower()
+    return any(m in n for m in READ_TOOL_MARKERS)
+
+
 def _pick(args: dict[str, Any], *keys: str) -> Any:
     for k in keys:
         if k in args and args[k] is not None:
@@ -55,12 +89,28 @@ class Decision:
 
 
 class SafetyGate:
-    def __init__(self, profile: EndpointProfile, global_cfg: GlobalConfig) -> None:
+    def __init__(
+        self,
+        profile: EndpointProfile,
+        global_cfg: GlobalConfig,
+        read_only: bool = False,
+    ) -> None:
         self.profile = profile
         self.global_cfg = global_cfg
+        self.read_only = read_only
         self.writes_used = 0
 
     def check(self, tool_name: str, args: dict[str, Any]) -> Decision:
+        # Read-only mode: whitelist by name. If the tool name doesn't
+        # look like a read, refuse — regardless of write_markers config.
+        if self.read_only and not is_read_only_tool(tool_name):
+            return Decision(
+                False,
+                "read-only mode is on for this run "
+                "(--propose-strategy or --reflect). Only tools whose "
+                "names match the read allowlist are permitted.",
+            )
+
         if not is_write_tool(tool_name, self.profile.write_markers):
             return Decision(True)
 

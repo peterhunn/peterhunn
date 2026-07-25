@@ -9,6 +9,8 @@ Usage:
     python agent.py --endpoint robinhood "Review my Agentic account."
     python agent.py --strategy dca-voo             # endpoint inferred, uses strategy's default instruction
     python agent.py --strategy triage-eng-p1 "Include stale P2s too."
+    python agent.py --endpoint robinhood --propose-strategy   # LLM proposes strategies.yaml entries
+    python agent.py --strategy dca-voo --reflect              # LLM critiques the strategy's history
     python agent.py --list-endpoints
     python agent.py --list-strategies
 
@@ -50,6 +52,7 @@ from safety import SafetyGate, is_write_tool
 
 
 MAX_LOOP_ITERATIONS = 20
+ROOT = __import__("pathlib").Path(__file__).parent
 
 
 def _render_system(
@@ -57,8 +60,14 @@ def _render_system(
     global_cfg: GlobalConfig,
     journal: Journal,
     strategy: Strategy | None = None,
+    mode: str = "execute",
 ) -> str:
-    base_template = profile.read_prompt()
+    """Compose the system prompt.
+
+    mode="execute"  — endpoint prompt (+ optional strategy addendum)
+    mode="propose"  — meta-prompt asking the model to propose new strategies
+    mode="reflect"  — meta-prompt asking the model to critique one strategy
+    """
     fmt_kwargs = {
         "endpoint_name": profile.name,
         "max_writes_per_run": profile.max_writes_per_run
@@ -67,23 +76,41 @@ def _render_system(
         "notional_cap_usd": int(profile.notional_cap_usd)
         if profile.notional_cap_usd is not None
         else "n/a",
+        "strategy_name": strategy.name if strategy else "",
     }
+
+    if mode == "propose":
+        template = (ROOT / "prompts" / "propose.md").read_text(encoding="utf-8")
+    elif mode == "reflect":
+        if strategy is None:
+            raise RuntimeError("reflect mode requires --strategy")
+        template = (ROOT / "prompts" / "reflect.md").read_text(encoding="utf-8")
+    else:
+        template = profile.read_prompt()
+
     try:
-        base = base_template.format(**fmt_kwargs)
+        base = template.format(**fmt_kwargs)
     except KeyError as e:
         raise RuntimeError(
-            f"Prompt for endpoint '{profile.name}' references unknown "
-            f"placeholder {{{e.args[0]}}}. Known: {sorted(fmt_kwargs)}"
+            f"Prompt for mode '{mode}' references unknown placeholder "
+            f"{{{e.args[0]}}}. Known: {sorted(fmt_kwargs)}"
         ) from e
 
-    if strategy is not None:
+    if mode == "execute" and strategy is not None:
         base += f"\n\n---\n\n{strategy.prompt_addendum.strip()}\n"
 
-    history = render_history(journal.recent())
+    # Filter history to the strategy being reflected on; otherwise show all.
+    hist_filter = strategy.name if mode == "reflect" else None
+    history = render_history(journal.recent(strategy=hist_filter))
     if history:
-        base += "\n\n## Recent history (from prior runs)\n\n" + history
+        header = (
+            f"## Recent history for strategy `{strategy.name}`"
+            if mode == "reflect"
+            else "## Recent history (from prior runs)"
+        )
+        base += f"\n\n{header}\n\n{history}"
 
-    if global_cfg.dry_run and profile.write_markers:
+    if mode == "execute" and global_cfg.dry_run and profile.write_markers:
         base += (
             "\n\n## Mode\n\nDRY_RUN is on. The harness will refuse any write "
             "tool call and return an error result. Describe each action you "
@@ -159,14 +186,24 @@ async def run(
     profile: EndpointProfile,
     global_cfg: GlobalConfig,
     strategy: Strategy | None = None,
+    mode: str = "execute",
 ) -> None:
     journal = Journal(profile.journal_file)
-    gate = SafetyGate(profile, global_cfg)
-    mode = "DRY-RUN" if global_cfg.dry_run else "LIVE"
+    # propose/reflect: read-only, dry-run forced regardless of env
+    read_only = mode in ("propose", "reflect")
+    effective_cfg = global_cfg
+    if read_only and not global_cfg.dry_run:
+        from dataclasses import replace
+        effective_cfg = replace(global_cfg, dry_run=True)
+
+    gate = SafetyGate(profile, effective_cfg, read_only=read_only)
+    run_mode_tag = mode.upper() if mode != "execute" else (
+        "DRY-RUN" if global_cfg.dry_run else "LIVE"
+    )
 
     journal.append({
         "type": "run_start",
-        "mode": mode,
+        "mode": run_mode_tag,
         "endpoint": profile.name,
         "strategy": strategy.name if strategy else None,
         "model": global_cfg.model,
@@ -174,7 +211,7 @@ async def run(
     })
     strategy_tag = f" strategy={strategy.name}" if strategy else ""
     print(
-        f"[{mode}] endpoint={profile.name}{strategy_tag} "
+        f"[{run_mode_tag}] endpoint={profile.name}{strategy_tag} "
         f"model={global_cfg.model} effort={global_cfg.effort}",
         file=sys.stderr,
     )
@@ -191,7 +228,7 @@ async def run(
             file=sys.stderr,
         )
 
-        system = _render_system(profile, global_cfg, journal, strategy)
+        system = _render_system(profile, effective_cfg, journal, strategy, mode)
         messages: list[dict[str, Any]] = [{"role": "user", "content": user_message}]
 
         for _ in range(MAX_LOOP_ITERATIONS):
@@ -243,19 +280,22 @@ async def run(
 
     journal.append({
         "type": "run_end",
-        "mode": mode,
+        "mode": run_mode_tag,
         "endpoint": profile.name,
         "strategy": strategy.name if strategy else None,
         "stop_reason": final_stop_reason,
         "writes_used": gate.writes_used,
         "final_text": "\n".join(final_text_parts)[-1200:],
     })
-    cap = profile.max_writes_per_run
-    cap_str = str(cap) if cap is not None else "∞"
-    print(
-        f"\n[done] stop={final_stop_reason} writes={gate.writes_used}/{cap_str}",
-        file=sys.stderr,
-    )
+    if read_only:
+        print(f"\n[done] stop={final_stop_reason} (read-only)", file=sys.stderr)
+    else:
+        cap = profile.max_writes_per_run
+        cap_str = str(cap) if cap is not None else "∞"
+        print(
+            f"\n[done] stop={final_stop_reason} writes={gate.writes_used}/{cap_str}",
+            file=sys.stderr,
+        )
 
 
 def main() -> None:
@@ -282,6 +322,20 @@ def main() -> None:
         help="List available strategies and exit.",
     )
     parser.add_argument(
+        "--propose-strategy",
+        action="store_true",
+        help="Meta-mode: use MCP read tools to research the endpoint and "
+        "output proposed strategies.yaml entries. Read-only; forces dry-run. "
+        "Requires --endpoint.",
+    )
+    parser.add_argument(
+        "--reflect",
+        action="store_true",
+        help="Meta-mode: review a strategy's journal history and propose one "
+        "concrete edit to its prompt_addendum. Read-only; forces dry-run. "
+        "Requires --strategy.",
+    )
+    parser.add_argument(
         "instruction",
         nargs="*",
         help="Instruction to send to the agent. If omitted and --strategy "
@@ -299,6 +353,15 @@ def main() -> None:
             print(name)
         return
 
+    if args.propose_strategy and args.reflect:
+        parser.error("--propose-strategy and --reflect are mutually exclusive")
+
+    mode = "execute"
+    if args.propose_strategy:
+        mode = "propose"
+    elif args.reflect:
+        mode = "reflect"
+
     strategy: Strategy | None = None
     if args.strategy:
         strategy = load_strategy(args.strategy)
@@ -314,9 +377,27 @@ def main() -> None:
     else:
         parser.error("pass --endpoint or --strategy (or --list-* to inspect)")
 
+    if mode == "propose" and not args.endpoint and args.strategy:
+        parser.error(
+            "--propose-strategy operates on an endpoint, not a strategy. "
+            "Use --endpoint <name>."
+        )
+    if mode == "reflect" and strategy is None:
+        parser.error("--reflect requires --strategy <name>")
+
     cli_instruction = " ".join(args.instruction).strip()
     if cli_instruction:
         instruction = cli_instruction
+    elif mode == "propose":
+        instruction = (
+            "Research the current state of this endpoint and propose 1–3 "
+            "strategies I could formalize. End with a YAML block."
+        )
+    elif mode == "reflect":
+        instruction = (
+            f"Review recent runs of strategy '{strategy.name}' and propose "
+            "one concrete edit to its prompt_addendum. End with a YAML block."
+        )
     elif strategy and strategy.initial_instruction:
         instruction = strategy.initial_instruction
     else:
@@ -330,7 +411,7 @@ def main() -> None:
 
     global_cfg = load_global()
     profile = load_endpoint(endpoint_name)
-    asyncio.run(run(instruction, profile, global_cfg, strategy))
+    asyncio.run(run(instruction, profile, global_cfg, strategy, mode))
 
 
 if __name__ == "__main__":

@@ -30,20 +30,44 @@ class Journal:
         with self.path.open("a", encoding="utf-8") as f:
             f.write(line + "\n")
 
-    def recent(self, n: int = JOURNAL_LOAD_ENTRIES) -> list[dict[str, Any]]:
+    def recent(
+        self,
+        n: int = JOURNAL_LOAD_ENTRIES,
+        strategy: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return the last N entries. If `strategy` is set, filter to only
+        events from runs tagged with that strategy — we walk the file back
+        to front and include entries whose enclosing run had a matching
+        strategy tag on its `run_start`.
+        """
         if not self.path.exists():
             return []
         lines = self.path.read_text(encoding="utf-8").splitlines()
-        out: list[dict[str, Any]] = []
-        for raw in lines[-n:]:
+        parsed: list[dict[str, Any]] = []
+        for raw in lines:
             raw = raw.strip()
             if not raw:
                 continue
             try:
-                out.append(json.loads(raw))
+                parsed.append(json.loads(raw))
             except json.JSONDecodeError:
                 continue
-        return out
+
+        if strategy is None:
+            return parsed[-n:]
+
+        # Bucket by run_start → run_end and keep runs whose start matched.
+        out: list[dict[str, Any]] = []
+        keeping = False
+        for e in parsed:
+            t = e.get("type")
+            if t == "run_start":
+                keeping = e.get("strategy") == strategy
+            if keeping:
+                out.append(e)
+            if t == "run_end":
+                keeping = False
+        return out[-n:]
 
 
 def render_history(entries: list[dict[str, Any]]) -> str:

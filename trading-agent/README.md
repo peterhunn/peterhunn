@@ -48,6 +48,30 @@ python agent.py --strategy triage-eng-p1 "Also include P2 issues older than 30 d
 
 Tool calls print to stderr; Claude's user-facing text goes to stdout; run detail lands in `journals/<endpoint>.jsonl`.
 
+## Delegating strategy design to the LLM
+
+Two meta-modes let Claude help you author and improve strategies. Both are **read-only** — they force `DRY_RUN=true`, and the SafetyGate refuses any tool call whose name doesn't match a conservative read allowlist (`get_*`, `list_*`, `search_*`, `read_*`, `fetch_*`, `quote_*`, etc.), regardless of the endpoint's `write_markers`. The LLM cannot execute; it can only propose.
+
+**Propose new strategies:**
+
+```bash
+python agent.py --endpoint robinhood --propose-strategy \
+  "Watch what I hold, then suggest 2 strategies I could formalize."
+# → Claude reads positions, orders, popular lists, etc. and ends with a
+# → YAML block. You diff it against strategies.yaml and paste what you like.
+```
+
+**Reflect on an existing strategy:**
+
+```bash
+python agent.py --strategy dca-voo --reflect
+# → Claude reads only this strategy's history from the journal, critiques
+# → what worked and what didn't, and proposes one concrete edit to the
+# → prompt_addendum. Same YAML-block output pattern.
+```
+
+The proposal / critique is text — nothing is auto-applied. Human review is the entire point: the LLM does the analysis, you decide what enters `strategies.yaml`. Self-modifying strategies (agent editing its own prompt without a human gate) are deliberately not built.
+
 ## Strategies
 
 Strategies live in `strategies.yaml`. Each entry binds to one endpoint and layers a prompt addendum on top of that endpoint's base system prompt — a way to keep several tightly-scoped agents (DCA into VOO, weekly issue triage, morning market scan) alongside the general-purpose freeform agent.
