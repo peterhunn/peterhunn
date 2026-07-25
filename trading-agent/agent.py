@@ -1,11 +1,16 @@
 """Generic MCP-driven agent. Point it at any MCP endpoint declared in
-`endpoints.yaml` with `--endpoint <name>`; the endpoint's profile supplies
-the URL, auth env var, system prompt, journal path, and safety rules.
+`endpoints.yaml` with `--endpoint <name>`; layer a named strategy from
+`strategies.yaml` on top with `--strategy <name>`; the endpoint's profile
+supplies the URL, auth env var, system prompt, journal path, and safety
+rules; the strategy adds a prompt addendum and an optional default
+instruction.
 
 Usage:
     python agent.py --endpoint robinhood "Review my Agentic account."
-    python agent.py --endpoint linear "Triage Backlog issues assigned to me."
+    python agent.py --strategy dca-voo             # endpoint inferred, uses strategy's default instruction
+    python agent.py --strategy triage-eng-p1 "Include stale P2s too."
     python agent.py --list-endpoints
+    python agent.py --list-strategies
 
 Behavior:
     - Opens a local Streamable HTTP MCP session for the chosen endpoint.
@@ -29,7 +34,16 @@ from typing import Any
 
 import anthropic
 
-from config import EndpointProfile, GlobalConfig, list_endpoints, load_endpoint, load_global
+from config import (
+    EndpointProfile,
+    GlobalConfig,
+    Strategy,
+    list_endpoints,
+    list_strategies,
+    load_endpoint,
+    load_global,
+    load_strategy,
+)
 from journal import Journal, render_history
 from mcp_client import open_session, render_tool_result, to_anthropic_tool
 from safety import SafetyGate, is_write_tool
@@ -39,7 +53,10 @@ MAX_LOOP_ITERATIONS = 20
 
 
 def _render_system(
-    profile: EndpointProfile, global_cfg: GlobalConfig, journal: Journal
+    profile: EndpointProfile,
+    global_cfg: GlobalConfig,
+    journal: Journal,
+    strategy: Strategy | None = None,
 ) -> str:
     base_template = profile.read_prompt()
     fmt_kwargs = {
@@ -58,6 +75,9 @@ def _render_system(
             f"Prompt for endpoint '{profile.name}' references unknown "
             f"placeholder {{{e.args[0]}}}. Known: {sorted(fmt_kwargs)}"
         ) from e
+
+    if strategy is not None:
+        base += f"\n\n---\n\n{strategy.prompt_addendum.strip()}\n"
 
     history = render_history(journal.recent())
     if history:
@@ -135,7 +155,10 @@ async def _handle_tool_call(
 
 
 async def run(
-    user_message: str, profile: EndpointProfile, global_cfg: GlobalConfig
+    user_message: str,
+    profile: EndpointProfile,
+    global_cfg: GlobalConfig,
+    strategy: Strategy | None = None,
 ) -> None:
     journal = Journal(profile.journal_file)
     gate = SafetyGate(profile, global_cfg)
@@ -145,12 +168,14 @@ async def run(
         "type": "run_start",
         "mode": mode,
         "endpoint": profile.name,
+        "strategy": strategy.name if strategy else None,
         "model": global_cfg.model,
         "instruction": user_message,
     })
+    strategy_tag = f" strategy={strategy.name}" if strategy else ""
     print(
-        f"[{mode}] endpoint={profile.name} model={global_cfg.model} "
-        f"effort={global_cfg.effort}",
+        f"[{mode}] endpoint={profile.name}{strategy_tag} "
+        f"model={global_cfg.model} effort={global_cfg.effort}",
         file=sys.stderr,
     )
 
@@ -166,7 +191,7 @@ async def run(
             file=sys.stderr,
         )
 
-        system = _render_system(profile, global_cfg, journal)
+        system = _render_system(profile, global_cfg, journal, strategy)
         messages: list[dict[str, Any]] = [{"role": "user", "content": user_message}]
 
         for _ in range(MAX_LOOP_ITERATIONS):
@@ -220,6 +245,7 @@ async def run(
         "type": "run_end",
         "mode": mode,
         "endpoint": profile.name,
+        "strategy": strategy.name if strategy else None,
         "stop_reason": final_stop_reason,
         "writes_used": gate.writes_used,
         "final_text": "\n".join(final_text_parts)[-1200:],
@@ -237,7 +263,13 @@ def main() -> None:
     parser.add_argument(
         "--endpoint",
         "-e",
-        help="Name of an endpoint from endpoints.yaml.",
+        help="Name of an endpoint from endpoints.yaml. Inferred from "
+        "--strategy if that is given instead.",
+    )
+    parser.add_argument(
+        "--strategy",
+        "-s",
+        help="Name of a strategy from strategies.yaml.",
     )
     parser.add_argument(
         "--list-endpoints",
@@ -245,9 +277,16 @@ def main() -> None:
         help="List available endpoints and exit.",
     )
     parser.add_argument(
+        "--list-strategies",
+        action="store_true",
+        help="List available strategies and exit.",
+    )
+    parser.add_argument(
         "instruction",
         nargs="*",
-        help="Instruction to send to the agent. If omitted, read from stdin.",
+        help="Instruction to send to the agent. If omitted and --strategy "
+        "supplies an initial_instruction, that is used. Otherwise, read "
+        "from stdin.",
     )
     args = parser.parse_args()
 
@@ -255,11 +294,34 @@ def main() -> None:
         for name in list_endpoints():
             print(name)
         return
+    if args.list_strategies:
+        for name in list_strategies():
+            print(name)
+        return
 
-    if not args.endpoint:
-        parser.error("--endpoint is required (or pass --list-endpoints)")
+    strategy: Strategy | None = None
+    if args.strategy:
+        strategy = load_strategy(args.strategy)
+        if args.endpoint and args.endpoint != strategy.endpoint:
+            parser.error(
+                f"--strategy {args.strategy} binds to endpoint "
+                f"'{strategy.endpoint}', but --endpoint '{args.endpoint}' "
+                "was passed. Drop --endpoint or pass a matching one."
+            )
+        endpoint_name = strategy.endpoint
+    elif args.endpoint:
+        endpoint_name = args.endpoint
+    else:
+        parser.error("pass --endpoint or --strategy (or --list-* to inspect)")
 
-    instruction = " ".join(args.instruction).strip() or sys.stdin.read().strip()
+    cli_instruction = " ".join(args.instruction).strip()
+    if cli_instruction:
+        instruction = cli_instruction
+    elif strategy and strategy.initial_instruction:
+        instruction = strategy.initial_instruction
+    else:
+        instruction = sys.stdin.read().strip()
+
     if not instruction:
         parser.error(
             "provide an instruction as arguments or on stdin, e.g.:\n"
@@ -267,8 +329,8 @@ def main() -> None:
         )
 
     global_cfg = load_global()
-    profile = load_endpoint(args.endpoint)
-    asyncio.run(run(instruction, profile, global_cfg))
+    profile = load_endpoint(endpoint_name)
+    asyncio.run(run(instruction, profile, global_cfg, strategy))
 
 
 if __name__ == "__main__":

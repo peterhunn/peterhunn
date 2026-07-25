@@ -58,7 +58,11 @@ def render_history(entries: list[dict[str, Any]]) -> str:
         t = e.get("type")
         ts = e.get("ts", "")
         if t == "run_start":
-            lines.append(f"[{ts}] RUN mode={e.get('mode')} — {e.get('instruction','')[:120]}")
+            strat = f" strategy={e['strategy']}" if e.get("strategy") else ""
+            lines.append(
+                f"[{ts}] RUN mode={e.get('mode')}{strat} — "
+                f"{e.get('instruction','')[:120]}"
+            )
         elif t == "tool_call":
             args = json.dumps(e.get("args", {}), default=str)[:140]
             res = str(e.get("result_summary", ""))[:160]

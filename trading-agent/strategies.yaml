@@ -1,0 +1,45 @@
+# Named strategies. Each strategy binds to one endpoint and layers a
+# prompt addendum on top of that endpoint's base system prompt. A
+# strategy may also supply a default `initial_instruction` used when the
+# CLI is invoked without a positional instruction.
+#
+# Fields per strategy:
+#   endpoint:             Endpoint name from endpoints.yaml.
+#   prompt_addendum:      Text appended to the endpoint's system prompt.
+#   initial_instruction:  (optional) Used as the user turn if none is
+#                         supplied on the command line.
+
+strategies:
+
+  # Freeform-with-guardrails: constrain the Robinhood agent to a
+  # weekly dollar-cost average into VOO with idempotency.
+  dca-voo:
+    endpoint: robinhood
+    prompt_addendum: |
+      ## Strategy: Weekly DCA into VOO
+
+      - The only symbol you may buy is VOO. Refuse any other trade this run.
+      - Target notional: $50 (harness cap enforces this too).
+      - Order type: limit at the current VOO ask.
+      - Idempotency: read this endpoint's recent history first. If a VOO
+        buy from this strategy has occurred in the last 6 calendar days,
+        skip this run entirely and report that.
+      - No selling this run. Ever. Selling is out of scope for DCA.
+    initial_instruction: "Execute this week's DCA into VOO if it has not already been done."
+
+  # Ops-style example: constrain the Linear agent to a specific triage
+  # workflow rather than open-ended issue triage.
+  triage-eng-p1:
+    endpoint: linear
+    prompt_addendum: |
+      ## Strategy: Weekly ENG P1 triage
+
+      - Scope: issues in team ENG only. Ignore all other teams.
+      - Only touch issues with priority P1 and status Backlog.
+      - For each: read the last comment, the age, and the assignee (or
+        lack thereof).
+      - Actions permitted this run: add a triage comment tagging the
+        team lead, assign an owner, transition to In Progress if there's
+        already recent activity. No status changes to Done or Cancelled.
+      - Cap: touch at most 10 issues per run.
+    initial_instruction: "Run the weekly ENG P1 triage."

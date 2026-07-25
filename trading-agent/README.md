@@ -31,17 +31,50 @@ $EDITOR .env
 ## Run
 
 ```bash
-# List available endpoints
+# List what's available
 python agent.py --list-endpoints
+python agent.py --list-strategies
 
-# Robinhood — DRY-RUN by default
+# Freeform on an endpoint (DRY-RUN by default)
 python agent.py --endpoint robinhood "Review my Agentic account and propose one trade."
 
-# Linear — describe actions in dry-run, act live when DRY_RUN=false
-python agent.py --endpoint linear "Triage 'Backlog' issues assigned to me by priority."
+# Named strategy — endpoint is inferred; instruction defaults to the
+# strategy's initial_instruction
+python agent.py --strategy dca-voo
+
+# Named strategy with an ad-hoc instruction override
+python agent.py --strategy triage-eng-p1 "Also include P2 issues older than 30 days."
 ```
 
 Tool calls print to stderr; Claude's user-facing text goes to stdout; run detail lands in `journals/<endpoint>.jsonl`.
+
+## Strategies
+
+Strategies live in `strategies.yaml`. Each entry binds to one endpoint and layers a prompt addendum on top of that endpoint's base system prompt — a way to keep several tightly-scoped agents (DCA into VOO, weekly issue triage, morning market scan) alongside the general-purpose freeform agent.
+
+```yaml
+strategies:
+  dca-voo:
+    endpoint: robinhood
+    prompt_addendum: |
+      ## Strategy: Weekly DCA into VOO
+      - Only buy VOO. Refuse any other trade this run.
+      - Read journal; if a VOO buy in the last 6 days, skip.
+      - Limit at current ask, $50 notional.
+    initial_instruction: "Execute this week's DCA into VOO if not already done."
+```
+
+**How strategies compose with everything else:**
+- Endpoint choice: inferred from the strategy. If you also pass `--endpoint`, it must match — mismatch is a hard error.
+- Instruction: positional CLI arg wins; else `initial_instruction` from the strategy; else stdin. Whichever comes first, non-empty.
+- Safety gate: unchanged. The endpoint's `write_markers`, `max_writes_per_run`, `notional_cap_usd`, and global `DRY_RUN` all still apply. A strategy can advise tighter behavior in prose ("limit to $50 notional") but cannot loosen a code-enforced limit.
+- Journal: the endpoint's journal, tagged with the strategy name on `run_start` / `run_end` events. That lets you filter later without splitting state across endpoints.
+
+**Cron-driven runs.** A strategy plus its `initial_instruction` is the full spec for one autonomous execution. Wire this into cron once you're confident:
+
+```cron
+35 9 * * 1-5 cd ~/trading-agent && DRY_RUN=false .venv/bin/python agent.py --strategy dca-voo >> logs/dca.log 2>&1
+```
 
 ## Adding a new endpoint
 

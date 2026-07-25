@@ -38,6 +38,14 @@ class GlobalConfig:
 
 
 @dataclass(frozen=True)
+class Strategy:
+    name: str
+    endpoint: str
+    prompt_addendum: str
+    initial_instruction: str = ""
+
+
+@dataclass(frozen=True)
 class EndpointProfile:
     name: str
     transport: str
@@ -97,6 +105,49 @@ def _load_registry() -> dict[str, dict[str, Any]]:
 
 def list_endpoints() -> list[str]:
     return sorted(_load_registry().keys())
+
+
+def _load_strategy_registry() -> dict[str, dict[str, Any]]:
+    path = ROOT / "strategies.yaml"
+    if not path.exists():
+        return {}
+    doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    strategies = doc.get("strategies") or {}
+    if not isinstance(strategies, dict):
+        raise RuntimeError("strategies.yaml must define a top-level `strategies:` mapping")
+    return strategies
+
+
+def list_strategies() -> list[str]:
+    return sorted(_load_strategy_registry().keys())
+
+
+def load_strategy(name: str) -> Strategy:
+    registry = _load_strategy_registry()
+    if name not in registry:
+        available = ", ".join(sorted(registry.keys())) or "(none)"
+        raise RuntimeError(
+            f"Strategy '{name}' not found in strategies.yaml. Available: {available}"
+        )
+    raw = registry[name]
+    endpoint = raw.get("endpoint")
+    addendum = raw.get("prompt_addendum", "")
+    if not endpoint or not addendum:
+        raise RuntimeError(
+            f"Strategy '{name}' is missing endpoint or prompt_addendum"
+        )
+    # Verify the endpoint is real (fail fast, before opening any session).
+    if endpoint not in _load_registry():
+        raise RuntimeError(
+            f"Strategy '{name}' references endpoint '{endpoint}' which is "
+            "not declared in endpoints.yaml."
+        )
+    return Strategy(
+        name=name,
+        endpoint=endpoint,
+        prompt_addendum=str(addendum),
+        initial_instruction=str(raw.get("initial_instruction", "")),
+    )
 
 
 def load_endpoint(name: str) -> EndpointProfile:
