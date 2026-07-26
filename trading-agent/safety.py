@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from config import EndpointProfile, GlobalConfig
+from config import EndpointProfile, GlobalConfig, Strategy
 
 
 def is_write_tool(name: str, markers: tuple[str, ...]) -> bool:
@@ -88,17 +88,39 @@ class Decision:
     reason: str = ""
 
 
+def _tightest(a, b):
+    """Return the smaller of two optional numeric caps. None means unset."""
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return min(a, b)
+
+
 class SafetyGate:
     def __init__(
         self,
         profile: EndpointProfile,
         global_cfg: GlobalConfig,
+        strategy: Strategy | None = None,
         read_only: bool = False,
     ) -> None:
         self.profile = profile
+        self.strategy = strategy
         self.global_cfg = global_cfg
         self.read_only = read_only
         self.writes_used = 0
+
+        # Effective caps: strategy override wins when tighter (loader has
+        # already rejected looser overrides at load time).
+        self.effective_max_writes = _tightest(
+            profile.max_writes_per_run,
+            strategy.max_writes_per_run if strategy else None,
+        )
+        self.effective_notional_cap = _tightest(
+            profile.notional_cap_usd,
+            strategy.notional_cap_usd if strategy else None,
+        )
 
     def check(self, tool_name: str, args: dict[str, Any]) -> Decision:
         # Read-only mode: whitelist by name. If the tool name doesn't
@@ -121,15 +143,23 @@ class SafetyGate:
                 "Describe the action you would take instead.",
             )
 
-        cap = self.profile.max_writes_per_run
+        cap = self.effective_max_writes
         if cap is not None and self.writes_used >= cap:
+            source = "strategy" if (
+                self.strategy is not None
+                and self.strategy.max_writes_per_run is not None
+                and (
+                    self.profile.max_writes_per_run is None
+                    or self.strategy.max_writes_per_run <= self.profile.max_writes_per_run
+                )
+            ) else "endpoint"
             return Decision(
                 False,
-                f"max_writes_per_run ({cap}) already reached for endpoint "
-                f"'{self.profile.name}'. Stop and produce a summary.",
+                f"max_writes_per_run ({cap}, from {source}) already reached. "
+                "Stop and produce a summary.",
             )
 
-        if self.profile.notional_cap_usd is not None:
+        if self.effective_notional_cap is not None:
             notional = compute_notional(args)
             if notional is None:
                 return Decision(
@@ -138,11 +168,11 @@ class SafetyGate:
                     "Supply an explicit quantity and limit_price so the "
                     "notional cap can be validated.",
                 )
-            if notional > self.profile.notional_cap_usd:
+            if notional > self.effective_notional_cap:
                 return Decision(
                     False,
-                    f"notional ${notional:.2f} exceeds notional_cap_usd "
-                    f"(${self.profile.notional_cap_usd:.2f}). Reduce "
+                    f"notional ${notional:.2f} exceeds cap "
+                    f"${self.effective_notional_cap:.2f}. Reduce "
                     "quantity or limit price.",
                 )
 

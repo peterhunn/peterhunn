@@ -44,6 +44,11 @@ class Strategy:
     prompt_addendum: str
     initial_instruction: str = ""
     enabled: bool = True
+    # Optional per-strategy safety overrides. If set, MUST be tighter than
+    # (or equal to) the endpoint's corresponding cap. Load-time validation
+    # rejects looser values.
+    notional_cap_usd: float | None = None
+    max_writes_per_run: int | None = None
 
 
 @dataclass(frozen=True)
@@ -63,6 +68,9 @@ class EndpointProfile:
     # stdio transport
     command: str = ""
     args: tuple[str, ...] = ()
+    # Optional per-endpoint webhook for run events (live writes, refusals,
+    # live run summaries). Resolved from notify_webhook_env at load time.
+    notify_webhook_url: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
 
     def read_prompt(self) -> str:
@@ -174,12 +182,36 @@ def load_strategy(name: str) -> Strategy:
             "not declared in endpoints.yaml."
         )
     enabled_raw = raw.get("enabled", True)
+
+    # Per-strategy safety overrides — must be tighter than the endpoint.
+    endpoint_raw = _load_registry()[endpoint]
+    ep_notional = endpoint_raw.get("notional_cap_usd")
+    ep_writes = endpoint_raw.get("max_writes_per_run")
+
+    strat_notional_raw = raw.get("notional_cap_usd")
+    strat_notional = float(strat_notional_raw) if strat_notional_raw is not None else None
+    if strat_notional is not None and ep_notional is not None and strat_notional > float(ep_notional):
+        raise RuntimeError(
+            f"strategy '{name}' notional_cap_usd={strat_notional} would loosen "
+            f"endpoint '{endpoint}' cap {ep_notional}. Overrides must tighten (≤), not loosen."
+        )
+
+    strat_writes_raw = raw.get("max_writes_per_run")
+    strat_writes = int(strat_writes_raw) if strat_writes_raw is not None else None
+    if strat_writes is not None and ep_writes is not None and strat_writes > int(ep_writes):
+        raise RuntimeError(
+            f"strategy '{name}' max_writes_per_run={strat_writes} would loosen "
+            f"endpoint '{endpoint}' cap {ep_writes}. Overrides must tighten (≤), not loosen."
+        )
+
     return Strategy(
         name=name,
         endpoint=endpoint,
         prompt_addendum=str(addendum),
         initial_instruction=str(raw.get("initial_instruction", "")),
         enabled=bool(enabled_raw),
+        notional_cap_usd=strat_notional,
+        max_writes_per_run=strat_writes,
     )
 
 
@@ -242,10 +274,19 @@ def load_endpoint(name: str) -> EndpointProfile:
     prompt_path = (ROOT / prompt_file).resolve()
     journal_path = (ROOT / journal_file).resolve()
 
+    # Optional webhook — resolved from an env var name. Missing env var
+    # is fine (means no webhook configured); missing or empty value skips
+    # notifications for this endpoint.
+    webhook_env = raw.get("notify_webhook_env")
+    notify_webhook_url = ""
+    if webhook_env:
+        notify_webhook_url = os.environ.get(webhook_env, "").strip()
+
     consumed = {
         "url", "token_env", "prompt_file", "journal_file",
         "write_markers", "max_writes_per_run", "notional_cap_usd",
         "auth_header", "auth_prefix", "transport", "command", "args",
+        "notify_webhook_env",
     }
 
     return EndpointProfile(
@@ -262,5 +303,6 @@ def load_endpoint(name: str) -> EndpointProfile:
         auth_prefix=auth_prefix,
         command=command,
         args=args,
+        notify_webhook_url=notify_webhook_url,
         extra={k: v for k, v in raw.items() if k not in consumed},
     )

@@ -108,6 +108,65 @@ Slash commands inside the designer:
 
 The designer needs a TTY (interactive shell) and reads from stdin. `$EDITOR`/`$VISUAL` picks the editor; falls back to `nano`/`vim`/`vi`/`code`. Existing strategies are hand-editable in `strategies.yaml` at any time — the designer is a fast path, not the only path.
 
+## Notifications
+
+Silent autonomous runs are the failure mode you can't recover from. Add a webhook to any endpoint and the agent will POST notable events to it in real time:
+
+- **`live_write`** — a mutating tool actually executed against the MCP (`DRY_RUN=false`, safety gate allowed).
+- **`refusal`** — the model refused for safety reasons.
+- **`live_run_summary`** — end of a live run where at least one write happened.
+
+Config in `endpoints.yaml`:
+
+```yaml
+robinhood:
+  ...
+  notify_webhook_env: ROBINHOOD_WEBHOOK_URL
+```
+
+Then in `.env`:
+
+```
+ROBINHOOD_WEBHOOK_URL=https://hooks.slack.com/services/T00/B00/xxx
+```
+
+The payload is Slack-compatible (has a `text` field), so Slack incoming webhooks work with no adapter. Custom receivers can key on the `event` field:
+
+```json
+{
+  "text": "[robinhood/dca-voo] LIVE_WRITE: place_equity_order({\"symbol\":\"VOO\",\"quantity\":1,\"limit_price\":482})",
+  "endpoint": "robinhood",
+  "strategy": "dca-voo",
+  "event": "live_write",
+  "message": "...",
+  "details": {"tool": "place_equity_order", "args": {...}}
+}
+```
+
+Notifications are best-effort — failures log to stderr and never break the run. Read-only paths (`--propose-strategy`, `--reflect`, dry-run) never notify.
+
+## Per-strategy safety overrides
+
+`notional_cap_usd` and `max_writes_per_run` are enforced per-endpoint by default, but a strategy can tighten them for itself:
+
+```yaml
+strategies:
+  dca-voo:
+    endpoint: robinhood            # endpoint's cap is $250, 3 writes
+    notional_cap_usd: 50           # this strategy caps at $50
+    max_writes_per_run: 1          # ...and 1 write per run
+    prompt_addendum: |
+      ...
+```
+
+**Overrides must tighten, not loosen.** A strategy setting `notional_cap_usd: 500` on an endpoint whose cap is `250` is rejected at load time with a clear error — the endpoint's cap is the ceiling. This lets you keep one endpoint (one Robinhood connection, one Kalshi worker) shared across strategies with different risk budgets.
+
+The safety gate reports which layer caught the block:
+
+```
+BLOCKED by harness: max_writes_per_run (1, from strategy) already reached.
+```
+
 ## Cost accounting
 
 Every `run_end` in `journals/<endpoint>.jsonl` now records:

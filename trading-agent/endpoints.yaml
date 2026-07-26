@@ -40,6 +40,9 @@ endpoints:
     write_markers: [place_, submit_, cancel_, modify_, replace_order, buy, sell]
     max_writes_per_run: 3
     notional_cap_usd: 250
+    # Optional: any HTTP endpoint that accepts a JSON POST works. A Slack
+    # incoming webhook is the easiest — the payload has a `text` field.
+    notify_webhook_env: ROBINHOOD_WEBHOOK_URL
 
   # Example second endpoint — swap URL + env var for your Linear workspace's
   # MCP server (typically obtained the same way as Robinhood, via

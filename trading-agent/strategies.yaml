@@ -15,6 +15,11 @@ strategies:
   # weekly dollar-cost average into VOO with idempotency.
   dca-voo:
     endpoint: robinhood
+    # Per-strategy tighter cap: this strategy trades $50 max even though
+    # the endpoint allows up to $250. Overrides MUST be tighter than the
+    # endpoint's — loosening is rejected at load time.
+    notional_cap_usd: 50
+    max_writes_per_run: 1
     prompt_addendum: |
       ## Strategy: Weekly DCA into VOO
 

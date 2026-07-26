@@ -48,6 +48,7 @@ from config import (
 )
 from journal import Journal, render_history
 from mcp_client import open_session, render_tool_result, to_anthropic_tool
+from notify import fire_and_forget as notify
 from pricing import cost_usd
 from safety import SafetyGate, is_write_tool
 
@@ -131,6 +132,7 @@ async def _handle_tool_call(
     session: Any,
     gate: SafetyGate,
     journal: Journal,
+    pending_notifications: list[Any] | None = None,
 ) -> dict[str, Any]:
     name: str = block.name
     args: dict[str, Any] = dict(block.input or {})
@@ -160,8 +162,21 @@ async def _handle_tool_call(
             "is_error": True,
         }
 
-    if is_write_tool(name, gate.profile.write_markers):
+    is_write = is_write_tool(name, gate.profile.write_markers)
+    if is_write:
         gate.record_allowed_write()
+        # Live-mode write executed — fire a notification.
+        if not gate.global_cfg.dry_run and pending_notifications is not None:
+            task = notify(
+                gate.profile.notify_webhook_url,
+                endpoint=gate.profile.name,
+                strategy=gate.strategy.name if gate.strategy else None,
+                event="live_write",
+                message=f"{name}({json.dumps(args, default=str)[:200]})",
+                details={"tool": name, "args": args},
+            )
+            if task is not None:
+                pending_notifications.append(task)
 
     text = render_tool_result(result)
     is_error = bool(getattr(result, "isError", False))
@@ -197,7 +212,8 @@ async def run(
         from dataclasses import replace
         effective_cfg = replace(global_cfg, dry_run=True)
 
-    gate = SafetyGate(profile, effective_cfg, read_only=read_only)
+    gate = SafetyGate(profile, effective_cfg, strategy=strategy, read_only=read_only)
+    pending_notifications: list[Any] = []
     run_mode_tag = mode.upper() if mode != "execute" else (
         "DRY-RUN" if global_cfg.dry_run else "LIVE"
     )
@@ -259,12 +275,24 @@ async def run(
 
             if response.stop_reason == "refusal":
                 details = getattr(response, "stop_details", None)
+                cat = getattr(details, "category", None)
+                expl = getattr(details, "explanation", None)
                 journal.append({
                     "type": "refusal",
-                    "category": getattr(details, "category", None),
-                    "explanation": getattr(details, "explanation", None),
+                    "category": cat,
+                    "explanation": expl,
                 })
-                print(f"\n[refused] category={getattr(details, 'category', None)}", file=sys.stderr)
+                print(f"\n[refused] category={cat}", file=sys.stderr)
+                task = notify(
+                    profile.notify_webhook_url,
+                    endpoint=profile.name,
+                    strategy=strategy.name if strategy else None,
+                    event="refusal",
+                    message=f"model refused ({cat}): {expl or ''}",
+                    details={"category": cat, "explanation": expl},
+                )
+                if task is not None:
+                    pending_notifications.append(task)
                 break
 
             if response.stop_reason == "end_turn":
@@ -277,7 +305,9 @@ async def run(
                     if getattr(block, "type", None) != "tool_use":
                         continue
                     tool_results.append(
-                        await _handle_tool_call(block, session, gate, journal)
+                        await _handle_tool_call(
+                            block, session, gate, journal, pending_notifications
+                        )
                     )
                 messages.append({"role": "user", "content": tool_results})
                 continue
@@ -300,6 +330,31 @@ async def run(
         "cost_usd": round(run_cost_usd, 4),
         "final_text": "\n".join(final_text_parts)[-1200:],
     })
+
+    # Live run summary — only when at least one write actually executed.
+    if not global_cfg.dry_run and not read_only and gate.writes_used > 0:
+        task = notify(
+            profile.notify_webhook_url,
+            endpoint=profile.name,
+            strategy=strategy.name if strategy else None,
+            event="live_run_summary",
+            message=(
+                f"{gate.writes_used} write(s), stop={final_stop_reason}, "
+                f"cost=${run_cost_usd:.4f}"
+            ),
+            details={
+                "writes_used": gate.writes_used,
+                "stop_reason": final_stop_reason,
+                "cost_usd": round(run_cost_usd, 4),
+                "final_text": "\n".join(final_text_parts)[-1200:],
+            },
+        )
+        if task is not None:
+            pending_notifications.append(task)
+
+    # Drain any pending notifications before exiting.
+    if pending_notifications:
+        await asyncio.gather(*pending_notifications, return_exceptions=True)
     cost_str = f"cost=${run_cost_usd:.4f}"
     if read_only:
         print(f"\n[done] stop={final_stop_reason} (read-only) {cost_str}", file=sys.stderr)
