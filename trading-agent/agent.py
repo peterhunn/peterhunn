@@ -354,10 +354,27 @@ def main() -> None:
         nargs="?",
         const="",
         metavar="NAME",
-        help="Open the interactive designer to author or edit a strategy "
-        "in natural language. Optional NAME pre-fills or edits an existing "
-        "strategy of that name. Pair with --endpoint to pre-bind the "
-        "target endpoint.",
+        help="Open the interactive terminal designer to author or edit a "
+        "strategy in natural language. Optional NAME pre-fills or edits an "
+        "existing strategy of that name. Pair with --endpoint to pre-bind "
+        "the target endpoint.",
+    )
+    parser.add_argument(
+        "--web",
+        action="store_true",
+        help="Launch the browser-based strategy designer (two-pane UI: "
+        "chat + live-editable YAML). Binds to 127.0.0.1.",
+    )
+    parser.add_argument(
+        "--web-port",
+        type=int,
+        default=8765,
+        help="Port for --web (default 8765).",
+    )
+    parser.add_argument(
+        "--web-no-browser",
+        action="store_true",
+        help="With --web, do not auto-open the browser.",
     )
     parser.add_argument(
         "instruction",
@@ -375,6 +392,11 @@ def main() -> None:
     if args.list_strategies:
         for name in list_strategies():
             print(name)
+        return
+
+    if args.web:
+        from web import run as run_web
+        run_web(port=args.web_port, open_browser=not args.web_no_browser)
         return
 
     if args.design_strategy is not None:

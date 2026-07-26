@@ -48,6 +48,19 @@ python agent.py --strategy triage-eng-p1 "Also include P2 issues older than 30 d
 
 Tool calls print to stderr; Claude's user-facing text goes to stdout; run detail lands in `journals/<endpoint>.jsonl`.
 
+## Web UI (browser strategy designer)
+
+```bash
+python agent.py --web            # opens http://127.0.0.1:8765 automatically
+python agent.py --web --web-port 9000 --web-no-browser
+```
+
+Two-pane layout: chat with Claude on the left, live-editable YAML on the right. When Claude emits a fenced YAML block in a reply, the right pane auto-updates. You can also hand-edit the pane at any time. **Save** merges the current pane content into `strategies.yaml` (add or replace by strategy key).
+
+Top bar: endpoint dropdown (from `endpoints.yaml`), strategy dropdown (— new — or an existing strategy to load into the pane for editing), status.
+
+Binds to `127.0.0.1` only. No auth — do not expose to a network.
+
 ## Authoring strategies in natural language (no YAML typing)
 
 `--design-strategy` opens an interactive conversation. Claude asks what
