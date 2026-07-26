@@ -70,6 +70,69 @@ class Journal:
         return out[-n:]
 
 
+def summarize_runs(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Group journal entries into per-run records for UI display.
+
+    A run spans run_start → run_end. Interleaved tool_call / tool_blocked /
+    tool_error / refusal entries attach to the current run. Entries outside
+    any run (shouldn't happen normally) are ignored.
+    """
+    runs: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+
+    for e in entries:
+        t = e.get("type")
+        if t == "run_start":
+            current = {
+                "started_at": e.get("ts"),
+                "mode": e.get("mode"),
+                "endpoint": e.get("endpoint"),
+                "strategy": e.get("strategy"),
+                "model": e.get("model"),
+                "instruction": str(e.get("instruction", "")),
+                "tool_calls": [],
+                "blocked_calls": [],
+                "errors": [],
+                "refusal": None,
+                "ended_at": None,
+                "stop_reason": None,
+                "writes_used": 0,
+                "cost_usd": 0.0,
+                "final_text": "",
+            }
+        elif current and t == "tool_call":
+            current["tool_calls"].append({
+                "tool": e.get("tool"),
+                "is_error": bool(e.get("is_error", False)),
+                "summary": str(e.get("result_summary", ""))[:280],
+            })
+        elif current and t == "tool_blocked":
+            current["blocked_calls"].append({
+                "tool": e.get("tool"),
+                "reason": str(e.get("reason", "")),
+            })
+        elif current and t == "tool_error":
+            current["errors"].append({
+                "tool": e.get("tool"),
+                "error": str(e.get("error", ""))[:280],
+            })
+        elif current and t == "refusal":
+            current["refusal"] = {
+                "category": e.get("category"),
+                "explanation": str(e.get("explanation", "")),
+            }
+        elif t == "run_end":
+            if current is not None:
+                current["ended_at"] = e.get("ts")
+                current["stop_reason"] = e.get("stop_reason")
+                current["writes_used"] = int(e.get("writes_used", 0) or 0)
+                current["cost_usd"] = float(e.get("cost_usd", 0.0) or 0.0)
+                current["final_text"] = str(e.get("final_text", ""))
+                runs.append(current)
+                current = None
+    return runs
+
+
 def _cost_summary(entries: list[dict[str, Any]]) -> str | None:
     """Roll up cost stats from run_end entries. Returns None if none exist."""
     costs = [

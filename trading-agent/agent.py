@@ -377,6 +377,12 @@ def main() -> None:
         help="With --web, do not auto-open the browser.",
     )
     parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Run a disabled strategy anyway. Without this, --strategy X "
+        "refuses if X is marked enabled: false in strategies.yaml.",
+    )
+    parser.add_argument(
         "instruction",
         nargs="*",
         help="Instruction to send to the agent. If omitted and --strategy "
@@ -422,6 +428,12 @@ def main() -> None:
                 f"--strategy {args.strategy} binds to endpoint "
                 f"'{strategy.endpoint}', but --endpoint '{args.endpoint}' "
                 "was passed. Drop --endpoint or pass a matching one."
+            )
+        if not strategy.enabled and not args.force and mode == "execute":
+            parser.error(
+                f"strategy '{strategy.name}' is disabled (enabled: false in "
+                "strategies.yaml). Toggle it back on in the web UI, edit the "
+                "YAML directly, or pass --force to override just this run."
             )
         endpoint_name = strategy.endpoint
     elif args.endpoint:

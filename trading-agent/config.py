@@ -43,6 +43,7 @@ class Strategy:
     endpoint: str
     prompt_addendum: str
     initial_instruction: str = ""
+    enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -122,6 +123,36 @@ def list_strategies() -> list[str]:
     return sorted(_load_strategy_registry().keys())
 
 
+def strategies_index() -> list[dict[str, Any]]:
+    """Return metadata for every strategy: name, endpoint, enabled."""
+    out = []
+    for name in sorted(_load_strategy_registry().keys()):
+        raw = _load_strategy_registry()[name]
+        out.append({
+            "name": name,
+            "endpoint": raw.get("endpoint", ""),
+            "enabled": bool(raw.get("enabled", True)),
+        })
+    return out
+
+
+def set_strategy_enabled(name: str, enabled: bool) -> None:
+    """Toggle a strategy's enabled flag by rewriting strategies.yaml.
+    Preserves everything else about the file."""
+    path = ROOT / "strategies.yaml"
+    if not path.exists():
+        raise RuntimeError("strategies.yaml not found")
+    doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    strategies = doc.get("strategies") or {}
+    if name not in strategies:
+        raise RuntimeError(f"strategy '{name}' not found in strategies.yaml")
+    strategies[name]["enabled"] = bool(enabled)
+    path.write_text(
+        yaml.safe_dump(doc, sort_keys=False, default_flow_style=False, width=100),
+        encoding="utf-8",
+    )
+
+
 def load_strategy(name: str) -> Strategy:
     registry = _load_strategy_registry()
     if name not in registry:
@@ -142,11 +173,13 @@ def load_strategy(name: str) -> Strategy:
             f"Strategy '{name}' references endpoint '{endpoint}' which is "
             "not declared in endpoints.yaml."
         )
+    enabled_raw = raw.get("enabled", True)
     return Strategy(
         name=name,
         endpoint=endpoint,
         prompt_addendum=str(addendum),
         initial_instruction=str(raw.get("initial_instruction", "")),
+        enabled=bool(enabled_raw),
     )
 
 

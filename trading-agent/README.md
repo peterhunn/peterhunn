@@ -55,9 +55,27 @@ python agent.py --web            # opens http://127.0.0.1:8765 automatically
 python agent.py --web --web-port 9000 --web-no-browser
 ```
 
-Two-pane layout: chat with Claude on the left, live-editable YAML on the right. When Claude emits a fenced YAML block in a reply, the right pane auto-updates. You can also hand-edit the pane at any time. **Save** merges the current pane content into `strategies.yaml` (add or replace by strategy key).
+Two-pane layout with tabs on the right:
 
-Top bar: endpoint dropdown (from `endpoints.yaml`), strategy dropdown (— new — or an existing strategy to load into the pane for editing), status.
+- **Left**: chat with Claude. YAML in replies is extracted and pushed to the right pane.
+- **Right, YAML tab**: live-editable draft. Save merges into `strategies.yaml` (add or replace by strategy key).
+- **Right, History tab**: per-run cards for the loaded strategy, plus summary stats (total runs, total writes, total cost, avg cost per run, last run). Each card shows mode badge (LIVE / DRY-RUN / PROPOSE / REFLECT), stop reason, writes used, cost, the instruction, tool calls made, calls blocked by the safety gate, tool errors, refusals, and the final assistant text.
+
+**Top bar controls:**
+- Endpoint dropdown (from `endpoints.yaml`).
+- Strategy dropdown — `— new —` or an existing strategy. Disabled strategies show `[off]` after the name.
+- **Enable/disable pill**: click to toggle the selected strategy on or off. Live = green, disabled = red. Writes `enabled: true|false` directly into `strategies.yaml`.
+
+**Effect of disabling.** A disabled strategy is refused at the CLI:
+
+```bash
+$ python agent.py --strategy dca-voo
+strategy 'dca-voo' is disabled (enabled: false in strategies.yaml).
+Toggle it back on in the web UI, edit the YAML directly, or pass
+--force to override just this run.
+```
+
+`--force` overrides for a single run. Read-only meta modes (`--propose-strategy`, `--reflect`) still work on disabled strategies (they don't execute anything).
 
 Binds to `127.0.0.1` only. No auth — do not expose to a network.
 
