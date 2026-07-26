@@ -70,6 +70,21 @@ class Journal:
         return out[-n:]
 
 
+def _cost_summary(entries: list[dict[str, Any]]) -> str | None:
+    """Roll up cost stats from run_end entries. Returns None if none exist."""
+    costs = [
+        float(e["cost_usd"]) for e in entries
+        if e.get("type") == "run_end" and isinstance(e.get("cost_usd"), (int, float))
+    ]
+    if not costs:
+        return None
+    avg = sum(costs) / len(costs)
+    return (
+        f"Recent per-run cost across {len(costs)} runs: "
+        f"avg ${avg:.4f}, min ${min(costs):.4f}, max ${max(costs):.4f}"
+    )
+
+
 def render_history(entries: list[dict[str, Any]]) -> str:
     """Compact, model-facing summary of past runs. Deliberately terse — this
     goes into the system prompt on every call, so keep it dense and factual.
@@ -78,6 +93,10 @@ def render_history(entries: list[dict[str, Any]]) -> str:
         return ""
 
     lines: list[str] = []
+    cost_line = _cost_summary(entries)
+    if cost_line:
+        lines.append(cost_line)
+        lines.append("")
     for e in entries:
         t = e.get("type")
         ts = e.get("ts", "")

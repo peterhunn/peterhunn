@@ -48,6 +48,55 @@ python agent.py --strategy triage-eng-p1 "Also include P2 issues older than 30 d
 
 Tool calls print to stderr; Claude's user-facing text goes to stdout; run detail lands in `journals/<endpoint>.jsonl`.
 
+## Authoring strategies in natural language (no YAML typing)
+
+`--design-strategy` opens an interactive conversation. Claude asks what
+you want; you answer in plain English; Claude emits YAML as it goes; you
+refine by talking back. `/save` writes the current draft to
+`strategies.yaml` and opens `$EDITOR` on the file for a final polish.
+
+```bash
+# New strategy on Robinhood
+python agent.py --endpoint robinhood --design-strategy
+
+# Pre-fill a name (creates or edits, depending on whether it exists)
+python agent.py --endpoint kalshi --design-strategy ev-positive-kalshi
+
+# Edit an existing strategy — endpoint is inferred from the strategy
+python agent.py --design-strategy dca-voo
+```
+
+Slash commands inside the designer:
+
+| Command | Action |
+| --- | --- |
+| `/save` | Append the current YAML draft to `strategies.yaml`, then open `$EDITOR`. |
+| `/edit` | Open `strategies.yaml` in `$EDITOR` now, no save. |
+| `/show` | Print the current YAML draft. |
+| `/quit` | Exit without saving. |
+
+The designer needs a TTY (interactive shell) and reads from stdin. `$EDITOR`/`$VISUAL` picks the editor; falls back to `nano`/`vim`/`vi`/`code`. Existing strategies are hand-editable in `strategies.yaml` at any time — the designer is a fast path, not the only path.
+
+## Cost accounting
+
+Every `run_end` in `journals/<endpoint>.jsonl` now records:
+
+```json
+{
+  "type": "run_end",
+  "usage": {"input_tokens": 12403, "output_tokens": 1847, "cache_read_input_tokens": 8192, "cache_creation_input_tokens": 0},
+  "cost_usd": 0.1082
+}
+```
+
+Pricing lives in `pricing.py` (USD per 1M tokens per model). The recent-history block injected into the next run's system prompt now leads with:
+
+```
+Recent per-run cost across 12 runs: avg $0.0421, min $0.0093, max $0.1174
+```
+
+Strategies can reason about their own operating cost — the `ev-positive-kalshi` example uses this to compute break-even order sizes.
+
 ## Delegating strategy design to the LLM
 
 Two meta-modes let Claude help you author and improve strategies. Both are **read-only** — they force `DRY_RUN=true`, and the SafetyGate refuses any tool call whose name doesn't match a conservative read allowlist (`get_*`, `list_*`, `search_*`, `read_*`, `fetch_*`, `quote_*`, etc.), regardless of the endpoint's `write_markers`. The LLM cannot execute; it can only propose.

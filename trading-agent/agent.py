@@ -48,6 +48,7 @@ from config import (
 )
 from journal import Journal, render_history
 from mcp_client import open_session, render_tool_result, to_anthropic_tool
+from pricing import cost_usd
 from safety import SafetyGate, is_write_tool
 
 
@@ -219,6 +220,12 @@ async def run(
     client = anthropic.AsyncAnthropic(api_key=global_cfg.anthropic_api_key)
     final_text_parts: list[str] = []
     final_stop_reason: str | None = None
+    usage_totals: dict[str, int] = {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 0,
+    }
 
     async with open_session(profile) as session:
         tools_resp = await session.list_tools()
@@ -246,6 +253,9 @@ async def run(
             for b in response.content:
                 if getattr(b, "type", None) == "text" and b.text:
                     final_text_parts.append(b.text)
+            u = response.usage
+            for k in usage_totals:
+                usage_totals[k] += getattr(u, k, 0) or 0
 
             if response.stop_reason == "refusal":
                 details = getattr(response, "stop_details", None)
@@ -278,6 +288,7 @@ async def run(
 
             break
 
+    run_cost_usd = cost_usd(global_cfg.model, usage_totals)
     journal.append({
         "type": "run_end",
         "mode": run_mode_tag,
@@ -285,15 +296,18 @@ async def run(
         "strategy": strategy.name if strategy else None,
         "stop_reason": final_stop_reason,
         "writes_used": gate.writes_used,
+        "usage": usage_totals,
+        "cost_usd": round(run_cost_usd, 4),
         "final_text": "\n".join(final_text_parts)[-1200:],
     })
+    cost_str = f"cost=${run_cost_usd:.4f}"
     if read_only:
-        print(f"\n[done] stop={final_stop_reason} (read-only)", file=sys.stderr)
+        print(f"\n[done] stop={final_stop_reason} (read-only) {cost_str}", file=sys.stderr)
     else:
         cap = profile.max_writes_per_run
         cap_str = str(cap) if cap is not None else "∞"
         print(
-            f"\n[done] stop={final_stop_reason} writes={gate.writes_used}/{cap_str}",
+            f"\n[done] stop={final_stop_reason} writes={gate.writes_used}/{cap_str} {cost_str}",
             file=sys.stderr,
         )
 
@@ -336,6 +350,16 @@ def main() -> None:
         "Requires --strategy.",
     )
     parser.add_argument(
+        "--design-strategy",
+        nargs="?",
+        const="",
+        metavar="NAME",
+        help="Open the interactive designer to author or edit a strategy "
+        "in natural language. Optional NAME pre-fills or edits an existing "
+        "strategy of that name. Pair with --endpoint to pre-bind the "
+        "target endpoint.",
+    )
+    parser.add_argument(
         "instruction",
         nargs="*",
         help="Instruction to send to the agent. If omitted and --strategy "
@@ -351,6 +375,12 @@ def main() -> None:
     if args.list_strategies:
         for name in list_strategies():
             print(name)
+        return
+
+    if args.design_strategy is not None:
+        from designer import run_designer
+        name_hint = args.design_strategy or None
+        run_designer(args.endpoint, name_hint)
         return
 
     if args.propose_strategy and args.reflect:

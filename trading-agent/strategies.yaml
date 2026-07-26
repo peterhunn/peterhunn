@@ -27,6 +27,61 @@ strategies:
       - No selling this run. Ever. Selling is out of scope for DCA.
     initial_instruction: "Execute this week's DCA into VOO if it has not already been done."
 
+  # EV-positive prediction-market trader. Requires a working Kalshi endpoint
+  # (see the commented `kalshi:` block in endpoints.yaml). The strategy is
+  # expressed in prose because the agent needs to compute subjective
+  # probability from evidence — you cannot rule-derive that. The math
+  # (edge, EV, break-even against token cost) IS deterministic and the
+  # prompt walks the model through it step by step.
+  ev-positive-kalshi:
+    endpoint: kalshi
+    prompt_addendum: |
+      ## Strategy: EV-positive contracts with edge threshold
+
+      For every candidate contract, before placing any order, compute:
+        subjective_p  = your P(YES resolves), grounded in evidence you
+                        can point to from this session's tool results.
+        market_p      = current YES ask (in cents) / 100
+        edge_pp       = (subjective_p - market_p) * 100    # percentage points
+
+      Trading rules:
+
+      1. Require edge_pp >= 8. Below that, do nothing on that contract.
+
+      2. Fee model (Kalshi taker; verify against the tool result):
+           fees_per_contract_cents = 1        # ~$0.01/contract
+         Compute per-contract expected value in cents:
+           price_c   = current YES ask in cents
+           EV_gross  = subjective_p * (100 - price_c) - (1 - subjective_p) * price_c
+           EV_net    = EV_gross - fees_per_contract_cents
+
+      3. Amortized agent cost: read the "Recent per-run cost" line at the
+         top of the recent-history block. Convert to cents:
+           run_cost_cents = recent_avg_usd * 100
+         For an order of N contracts, per-contract agent cost = run_cost_cents / N.
+         Require:
+           EV_net > run_cost_cents / N
+         Solving for N: minimum viable N = ceil(run_cost_cents / EV_net).
+         If minimum N exceeds what the harness would allow (notional cap,
+         orderbook depth, or your own conviction sizing), skip.
+
+      4. Liquidity: refuse contracts whose top-of-book YES/NO spread
+         exceeds 10 cents. Refuse to lift more than 25% of visible depth
+         at your limit price.
+
+      5. Order type: limit only. Place at (price_c - 1) for a resting
+         limit that leaves a cent for potential improvement; if you need
+         immediacy, cross the spread by at most 2 cents.
+
+      6. Before every order call, state one line:
+           <ticker>: subj=<p>%, market=<mp>%, edge=<e>pp, price=<pc>¢,
+             N=<n>, EV_net=<ev>¢/contract, run_cost=<rc>¢, break_even_N=<be>
+         Refuse to trade if you cannot state all fields.
+
+      7. After each order call, read the order back and report the fill,
+         partial, or rejection plainly. No hedged summaries.
+    initial_instruction: "Scan liquid Kalshi contracts for EV-positive trades and execute any that clear all rules."
+
   # Ops-style example: constrain the Linear agent to a specific triage
   # workflow rather than open-ended issue triage.
   triage-eng-p1:
