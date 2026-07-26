@@ -1,52 +1,275 @@
 # MCP-Connected Agent
 
-A Python agent that drives Claude against any MCP endpoint declared in `endpoints.yaml`. Ships with a Robinhood Agentic Trading profile and a Linear example. Point it at a new endpoint by adding an entry to the YAML and a prompt file — no code changes.
+A Python agent that drives Claude against any MCP (Model Context Protocol) endpoint declared in `endpoints.yaml`. Ships with profiles for Robinhood, Linear, Manifold, and a commented Kalshi example. New endpoints are YAML + a prompt file — no code changes.
 
-The directory is still called `trading-agent/` because that's how the branch was created; it is no longer trading-specific.
+The directory is called `trading-agent/` for historical reasons; it is no longer trading-specific.
 
 ## What it does
 
-- Opens a local Streamable HTTP MCP session to the endpoint you pick.
-- Lists that endpoint's tools and exposes them to Claude via the regular Messages API `tools=[...]` parameter (not the `mcp_servers` server-side connector — every tool call passes through this process).
-- Runs an adaptive-thinking agent loop with a manual tool loop.
-- Enforces per-endpoint safety rules in code (dry-run, write count cap, optional notional cap) before any mutating tool reaches the server. Refused calls come back to Claude as `is_error` results so it can adapt.
-- Journals every event to a per-endpoint JSONL file; the tail is injected into the next run's system prompt so the agent has continuity across sessions.
+- Opens an MCP session (Streamable HTTP or stdio) to the endpoint you pick.
+- Lists that endpoint's tools and exposes them to Claude via the Messages API `tools=[...]` parameter, so every tool call passes through this process.
+- Runs an adaptive-thinking agent loop.
+- Enforces per-endpoint safety rules in code (dry-run, write count cap, optional notional cap) before any mutating tool reaches the server; refused calls come back to Claude as errors so it can adapt.
+- Journals every event to a per-endpoint JSONL file. The tail is injected into the next run's system prompt so the agent has continuity across sessions.
+- Optionally posts webhook notifications on live writes, refusals, and live run summaries.
 
-## Prerequisites
+---
 
-1. Python ≥ 3.10.
-2. An Anthropic API key.
-3. For each MCP endpoint you want to use, an **OAuth bearer token**. Both Robinhood and Linear (and most other hosted MCPs) use OAuth 2.0; the fastest way to obtain a token today is to add the server in Claude Code (`npm i -g @anthropic-ai/claude-code`, then `claude mcp add <name> --transport http <url>`) and copy the stored bearer token out of `~/.claude/` into the corresponding env var.
+## Quickstart
 
-## Install
+Five steps. **Do not skip the dry-run stage.** See [Readiness checklist](#readiness-checklist) before flipping any endpoint to live.
+
+### 1. Install
+
+Requires Python ≥ 3.10 and an Anthropic API key.
 
 ```bash
 cd trading-agent
-python -m venv .venv && source .venv/bin/activate
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -e .
 cp .env.example .env
-$EDITOR .env
 ```
 
-## Run
+Put your Anthropic API key in `.env`:
+
+```
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+### 2. Pick an endpoint
+
+The framework ships four example endpoints. Do full setup for **one** first; you can add others later.
+
+| Endpoint | Auth | Setup effort | Real or play |
+| --- | --- | --- | --- |
+| **manifold** | API key | 5 min | Play money — **best first choice** |
+| **linear** | OAuth token | 10 min | Real ops mutations |
+| **robinhood** | OAuth token | 15 min | Real money (equities only) |
+| **kalshi** | RSA key pair + local MCP subprocess | 30 min | Real money (event contracts) |
+
+Detailed per-endpoint setup is in [Endpoint setup](#endpoint-setup) below.
+
+### 3. Confirm the tool list matches your write markers
+
+The single biggest failure mode is that the endpoint's real tool names don't match the `write_markers` heuristic in `endpoints.yaml`. Audit them **before** you ever set `DRY_RUN=false`:
 
 ```bash
-# List what's available
-python agent.py --list-endpoints
-python agent.py --list-strategies
-
-# Freeform on an endpoint (DRY-RUN by default)
-python agent.py --endpoint robinhood "Review my Agentic account and propose one trade."
-
-# Named strategy — endpoint is inferred; instruction defaults to the
-# strategy's initial_instruction
-python agent.py --strategy dca-voo
-
-# Named strategy with an ad-hoc instruction override
-python agent.py --strategy triage-eng-p1 "Also include P2 issues older than 30 days."
+python agent.py --endpoint <name> "List every tool you have available. \
+  For each, one sentence on what it does. Do not call anything else."
 ```
 
-Tool calls print to stderr; Claude's user-facing text goes to stdout; run detail lands in `journals/<endpoint>.jsonl`.
+Read the stderr line `[mcp] connected via ... — N tools`; then compare the tool names in Claude's answer to your endpoint's `write_markers`. Every mutating tool must contain at least one marker as a substring. If any don't (e.g. `zap_position` when your markers are `place_, submit_, cancel_`), edit `endpoints.yaml` and add the missing marker before proceeding.
+
+### 4. Run in dry-run
+
+`DRY_RUN=true` is the default. Nothing mutating will actually execute; the safety gate returns errors instead. Do at least five dry-run cycles and read the journal:
+
+```bash
+python agent.py --endpoint <name> "Review my account and propose one action."
+cat journals/<name>.jsonl | tail -20
+```
+
+Or use the web UI:
+
+```bash
+python agent.py --web
+# opens http://127.0.0.1:8765 — pick the endpoint, chat, watch the History tab
+```
+
+### 5. Go live (per endpoint, deliberately)
+
+Only after step 4:
+
+1. **Fund the endpoint conservatively.** For Robinhood, put in the Agentic account the maximum you're prepared to lose. Robinhood's MCP restricts trading to that account; your main brokerage cannot be touched.
+2. **Set a webhook** so you find out immediately when a real write happens (see [Notifications](#notifications)).
+3. Flip `DRY_RUN=false` in `.env`.
+4. Do a single live run with a tightly-scoped instruction. Verify the notification arrived, the journal recorded the write, and the endpoint's UI shows the result.
+5. Only then consider cron / recurring runs.
+
+---
+
+## Endpoint setup
+
+### Robinhood
+
+**Prerequisites**
+- A Robinhood account with an Agentic account opened, funded, and an AI agent authorized. Complete this on a desktop browser: <https://robinhood.com/us/en/support/articles/agentic-trading-overview/>. This step **must** happen before anything below.
+- Equities only as of mid-2026. Event contracts / options are on their roadmap.
+
+**Get the OAuth bearer token**
+1. `npm install -g @anthropic-ai/claude-code`
+2. `claude mcp add robinhood-trading --transport http https://agent.robinhood.com/mcp/trading` and complete the browser OAuth flow it prints.
+3. Locate the token. On macOS/Linux it's typically in `~/.claude/` (grep for `robinhood-trading` or `Bearer` there). Copy the string that comes after `Bearer `.
+4. Put it in `.env`:
+   ```
+   ROBINHOOD_MCP_TOKEN=<the-token>
+   ```
+
+Tokens expire — re-run the `claude mcp add` flow when Robinhood starts returning 401s.
+
+**Try it**
+```bash
+python agent.py --endpoint robinhood "Show my Agentic account balance."
+```
+
+**Before flipping DRY_RUN=false**
+- Audit `write_markers` per step 3 of the Quickstart. Robinhood's current marker list is `[place_, submit_, cancel_, modify_, replace_order, buy, sell]` — if any of Robinhood's tools use different verbs, add them.
+- Consider a tighter per-strategy cap (see [Per-strategy safety overrides](#per-strategy-safety-overrides)).
+
+### Manifold Markets (recommended first)
+
+Play money, single-header auth, hosted server. Best for getting the whole loop working before touching real money.
+
+1. Log in to <https://manifold.markets> and copy your API key from your profile page.
+2. In `.env`:
+   ```
+   MANIFOLD_API_KEY=<your-key>
+   ```
+3. **Community MCP required.** There is no first-party hosted Manifold MCP as of mid-2026. Either run one (search "manifold mcp server" on GitHub) or note the placeholder URL in `endpoints.yaml` needs to be replaced with whatever MCP you use. Manifold's own REST API is well-documented so a thin MCP wrapper is straightforward if you can't find one.
+4. Update `endpoints.yaml`'s `manifold.url` to your MCP's URL.
+
+```bash
+python agent.py --endpoint manifold "Show my mana balance and open positions."
+```
+
+### Linear
+
+1. `claude mcp add linear-workspace --transport http https://mcp.linear.app/mcp` and complete the OAuth flow.
+2. Extract the bearer token from `~/.claude/` and put in `.env`:
+   ```
+   LINEAR_MCP_TOKEN=<the-token>
+   ```
+
+```bash
+python agent.py --endpoint linear "List my open issues assigned to me."
+```
+
+### Kalshi (stdio, community MCP)
+
+Kalshi's own auth uses RSA-signed requests, so all community MCPs run as **local subprocesses**. The RSA key never leaves your machine — the subprocess signs each request and this framework just talks to it over stdio.
+
+1. Fund your Kalshi account and generate an API key pair in account settings. You get a **key ID** and a **private RSA PEM file**.
+2. Install a community MCP. Two options:
+   - [`IQAIcom/mcp-kalshi`](https://github.com/IQAIcom/mcp-kalshi)
+   - [`joinQuantish/kalshi-mcp`](https://github.com/joinQuantish/kalshi-mcp)
+
+   Follow the MCP's README for the exact `npx`/`uvx`/`pip install` invocation.
+
+3. Put the credentials in `.env`:
+   ```
+   KALSHI_API_KEY=<the-key-id>
+   KALSHI_PRIVATE_KEY_PATH=/absolute/path/to/kalshi-private-key.pem
+   ```
+   Both are inherited by the stdio subprocess automatically.
+4. Uncomment the `kalshi:` block in `endpoints.yaml` and swap `command`/`args` for whatever your chosen MCP prescribes.
+5. Uncomment `# KALSHI_API_KEY=` and `# KALSHI_PRIVATE_KEY_PATH=` lines in `.env.example` if using the shipped template.
+
+```bash
+python agent.py --endpoint kalshi "Scan liquid contracts for edges > 8 percentage points."
+```
+
+### Adding your own endpoint
+
+See [Adding a new endpoint](#adding-a-new-endpoint) below. Short version: append a block to `endpoints.yaml`, set the token env var in `.env`, write `prompts/<name>.md`, run `python agent.py --endpoint <name> "..."`.
+
+---
+
+## Common workflows
+
+**One-shot query against an endpoint:**
+```bash
+python agent.py --endpoint <name> "Your instruction here."
+```
+
+**Design a strategy in the browser (no YAML typing):**
+```bash
+python agent.py --web
+# → Pick endpoint, chat, /save via the button, edit inline
+```
+
+**Design a strategy in the terminal:**
+```bash
+python agent.py --endpoint robinhood --design-strategy
+# → /save, /edit, /show, /quit
+```
+
+**Run a saved strategy:**
+```bash
+python agent.py --strategy dca-voo               # uses initial_instruction
+python agent.py --strategy dca-voo "Skip if SPY is below its 50-day MA."
+```
+
+**Review a strategy's history:**
+Open the web UI, load the strategy, click the History tab. Or read `journals/<endpoint>.jsonl` directly.
+
+**Turn a strategy on/off:**
+Web UI toggle pill, or manually set `enabled: false` in `strategies.yaml`. A disabled strategy refuses to run unless you pass `--force`.
+
+**Have Claude propose new strategies:**
+```bash
+python agent.py --endpoint robinhood --propose-strategy \
+  "Watch my positions and suggest 2 strategies I could formalize."
+# read-only, outputs YAML at the end; paste what you want into strategies.yaml
+```
+
+**Have Claude reflect on a strategy's history:**
+```bash
+python agent.py --strategy dca-voo --reflect
+# read-only, proposes one edit to the prompt_addendum
+```
+
+**Schedule with cron:**
+```cron
+35 9 * * 1-5 cd ~/trading-agent && DRY_RUN=false .venv/bin/python agent.py --strategy dca-voo >> logs/dca.log 2>&1
+```
+Start with `DRY_RUN=true` in cron for a week; check the logs and webhook history; only then arm.
+
+---
+
+## Readiness checklist
+
+Before setting `DRY_RUN=false` on any endpoint, verify all of these:
+
+- [ ] `pip install -e .` completes clean in a fresh venv.
+- [ ] `python agent.py --list-endpoints` shows what you expect.
+- [ ] `python agent.py --web` renders correctly and lets you toggle a strategy.
+- [ ] You've done a full dry-run cycle against the endpoint and read the resulting journal entry.
+- [ ] You've audited the discovered tool list against the endpoint's `write_markers` (see Quickstart step 3).
+- [ ] The endpoint's account is funded with an amount you're comfortable losing entirely.
+- [ ] A webhook is configured and you've verified a test event reaches it.
+- [ ] For strategies: `notional_cap_usd` and `max_writes_per_run` are set tighter than the endpoint's ceiling if you want stricter per-strategy limits.
+- [ ] For strategies with `initial_instruction`: run manually in dry-run first to confirm the instruction is well-scoped.
+
+---
+
+## Troubleshooting
+
+**`Missing required env var ROBINHOOD_MCP_TOKEN`**
+The env var isn't loaded. Check `.env` exists and contains the var (no quotes needed), and that you started the CLI from the `trading-agent/` directory. `python-dotenv` loads `.env` at process start.
+
+**Every write refused with "harness could not compute notional"**
+Your endpoint has `notional_cap_usd` set but the tool arguments don't include a recognized quantity/price field. Either add a `limit_price` to your instruction (e.g. "at a limit near the ask"), or expand `_pick(args, ...)` in `safety.py` to include the field names your endpoint actually uses.
+
+**`refused to run: strategy 'X' is disabled`**
+The strategy has `enabled: false` in `strategies.yaml`. Toggle in the web UI, edit the file directly, or run once with `--force`.
+
+**HTTP 401 on the first tool call**
+OAuth token expired. Re-run `claude mcp add <name> --transport http <url>` and copy the new token into `.env`.
+
+**Kalshi MCP subprocess exits immediately**
+The subprocess couldn't find `KALSHI_API_KEY` or the PEM path. Confirm both are in `.env` and the PEM path is absolute and readable. Test the MCP directly per its own README before wiring it here.
+
+**Web UI loads but chat 502s**
+Look at the terminal running `python agent.py --web` — the exception is printed there. Common causes: invalid Anthropic API key, network to `api.anthropic.com` blocked, or the strategy's prompt file has a placeholder like `{unknown_var}` that fails string formatting.
+
+**No history in the History tab**
+Either the strategy has never run (dry-runs count — did you run at all?), or the endpoint's journal is at a different path than `journals/<endpoint>.jsonl`. Check the endpoint's `journal_file` in `endpoints.yaml`.
+
+**Notifications not arriving**
+Confirm `notify_webhook_env` in `endpoints.yaml` points at a var actually set in `.env`. Confirm the URL accepts POSTs (test with `curl -X POST <url> -H "Content-Type: application/json" -d '{"text":"test"}'`). Read stderr — notification failures log there.
+
+---
 
 ## Web UI (browser strategy designer)
 
