@@ -48,30 +48,118 @@ INDEX_HTML = """<!DOCTYPE html>
 <meta charset="utf-8">
 <title>Strategy Designer</title>
 <style>
+  /* Theme variables — light default; dark applies via [data-theme="dark"] on <html>. */
+  :root {
+    --bg-app: #f5f5f4;
+    --bg-pane: #fafaf9;
+    --bg-elev: #f5f5f4;
+    --bg-header: #1c1917;
+    --bg-header-btn: #292524;
+    --bg-header-btn-hover: #44403c;
+    --border: #e7e5e4;
+    --border-strong: #d6d3d1;
+    --text: #1c1917;
+    --text-muted: #78716c;
+    --text-faint: #a8a29e;
+    --text-header: #fafaf9;
+    --text-header-muted: #a8a29e;
+    --text-header-border: #44403c;
+    --accent: #1c1917;
+    --accent-text: #fafaf9;
+    --ok-bg: #14532d; --ok-fg: #dcfce7;
+    --warn-bg: #78350f; --warn-fg: #fef3c7;
+    --err-bg: #7c2d12; --err-fg: #fee2e2;
+    --info-bg: #1e3a8a; --info-fg: #dbeafe;
+    --user-color: #7c2d12;
+    --assistant-color: #14532d;
+    --code-bg: #f5f5f4;
+    --code-text: #1c1917;
+    --codeblock-bg: #1c1917;
+    --codeblock-text: #fafaf9;
+  }
+  :root[data-theme="dark"] {
+    --bg-app: #0c0a09;
+    --bg-pane: #1c1917;
+    --bg-elev: #292524;
+    --bg-header: #0c0a09;
+    --bg-header-btn: #1c1917;
+    --bg-header-btn-hover: #292524;
+    --border: #292524;
+    --border-strong: #44403c;
+    --text: #f5f5f4;
+    --text-muted: #a8a29e;
+    --text-faint: #78716c;
+    --text-header: #fafaf9;
+    --text-header-muted: #78716c;
+    --text-header-border: #292524;
+    --accent: #fafaf9;
+    --accent-text: #0c0a09;
+    --ok-bg: #14532d; --ok-fg: #86efac;
+    --warn-bg: #78350f; --warn-fg: #fcd34d;
+    --err-bg: #7c2d12; --err-fg: #fca5a5;
+    --info-bg: #1e3a8a; --info-fg: #93c5fd;
+    --user-color: #fca5a5;
+    --assistant-color: #86efac;
+    --code-bg: #292524;
+    --code-text: #fafaf9;
+    --codeblock-bg: #0c0a09;
+    --codeblock-text: #fafaf9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg-app: #0c0a09;
+      --bg-pane: #1c1917;
+      --bg-elev: #292524;
+      --bg-header: #0c0a09;
+      --bg-header-btn: #1c1917;
+      --bg-header-btn-hover: #292524;
+      --border: #292524;
+      --border-strong: #44403c;
+      --text: #f5f5f4;
+      --text-muted: #a8a29e;
+      --text-faint: #78716c;
+      --text-header: #fafaf9;
+      --text-header-muted: #78716c;
+      --text-header-border: #292524;
+      --accent: #fafaf9;
+      --accent-text: #0c0a09;
+      --ok-fg: #86efac;
+      --warn-fg: #fcd34d;
+      --err-fg: #fca5a5;
+      --info-fg: #93c5fd;
+      --user-color: #fca5a5;
+      --assistant-color: #86efac;
+      --code-bg: #292524;
+      --code-text: #fafaf9;
+      --codeblock-bg: #0c0a09;
+    }
+  }
+
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: #f5f5f4;
-    color: #1c1917;
+    background: var(--bg-app);
+    color: var(--text);
     display: flex;
     flex-direction: column;
   }
   header {
-    background: #1c1917;
-    color: #fafaf9;
+    background: var(--bg-header);
+    color: var(--text-header);
     padding: 10px 16px;
     display: flex;
-    gap: 16px;
+    gap: 12px;
     align-items: center;
     font-size: 14px;
+    flex-wrap: wrap;
   }
   header h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: 0.02em; }
   header label { display: flex; align-items: center; gap: 6px; font-size: 13px; }
   header select, header button {
-    background: #292524;
-    color: #fafaf9;
-    border: 1px solid #44403c;
+    background: var(--bg-header-btn);
+    color: var(--text-header);
+    border: 1px solid var(--text-header-border);
     border-radius: 4px;
     padding: 5px 10px;
     font-family: inherit;
@@ -79,11 +167,27 @@ INDEX_HTML = """<!DOCTYPE html>
     cursor: pointer;
   }
   header select { min-width: 140px; }
-  header select option[data-off="1"] { color: #a8a29e; }
-  header button:hover:not(:disabled) { background: #44403c; }
+  header select option[data-off="1"] { color: var(--text-faint); }
+  header button:hover:not(:disabled) { background: var(--bg-header-btn-hover); }
   header button:disabled { opacity: 0.4; cursor: not-allowed; }
   header .spacer { flex: 1; }
-  header .status { font-size: 12px; color: #a8a29e; font-family: ui-monospace, monospace; }
+  header .status { font-size: 12px; color: var(--text-header-muted); font-family: ui-monospace, monospace; }
+  .cfg-badges { display: flex; gap: 6px; align-items: center; }
+  .cfg-badge {
+    padding: 3px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-family: ui-monospace, monospace;
+    background: var(--bg-header-btn);
+    color: var(--text-header-muted);
+    border: 1px solid var(--text-header-border);
+  }
+  .cfg-badge.dry { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--warn-bg); }
+  .cfg-badge.live { background: var(--err-bg); color: var(--err-fg); border-color: var(--err-bg); }
+  #theme-toggle {
+    padding: 5px 10px;
+    font-size: 14px;
+  }
   #toggle {
     border-radius: 999px;
     padding: 4px 12px;
@@ -108,12 +212,12 @@ INDEX_HTML = """<!DOCTYPE html>
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 1px;
-    background: #d6d3d1;
+    background: var(--border-strong);
     overflow: hidden;
     min-height: 0;
   }
   .pane {
-    background: #fafaf9;
+    background: var(--bg-pane);
     display: flex;
     flex-direction: column;
     min-height: 0;
@@ -121,9 +225,9 @@ INDEX_HTML = """<!DOCTYPE html>
   .pane-header {
     padding: 8px 14px;
     font-size: 12px;
-    color: #78716c;
-    background: #f5f5f4;
-    border-bottom: 1px solid #e7e5e4;
+    color: var(--text-muted);
+    background: var(--bg-elev);
+    border-bottom: 1px solid var(--border);
     text-transform: uppercase;
     letter-spacing: 0.06em;
     display: flex;
@@ -132,22 +236,23 @@ INDEX_HTML = """<!DOCTYPE html>
   }
   .pane-header .right { margin-left: auto; display: flex; gap: 8px; }
   .pane-header button {
-    background: #fafaf9;
-    border: 1px solid #d6d3d1;
+    background: var(--bg-pane);
+    border: 1px solid var(--border-strong);
     border-radius: 4px;
     padding: 3px 10px;
     font-size: 12px;
     cursor: pointer;
-    color: #1c1917;
+    color: var(--text);
+    font-family: inherit;
   }
-  .pane-header button:hover { background: #f5f5f4; }
+  .pane-header button:hover:not(:disabled) { background: var(--bg-elev); }
   .pane-header button.primary {
-    background: #1c1917;
-    color: #fafaf9;
-    border-color: #1c1917;
+    background: var(--accent);
+    color: var(--accent-text);
+    border-color: var(--accent);
   }
-  .pane-header button.primary:hover { background: #292524; }
-  .pane-header button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .pane-header button.primary:hover:not(:disabled) { opacity: 0.85; }
+  .pane-header button:disabled { opacity: 0.4; cursor: not-allowed; }
   #chat {
     flex: 1;
     overflow-y: auto;
@@ -160,52 +265,78 @@ INDEX_HTML = """<!DOCTYPE html>
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    color: #78716c;
+    color: var(--text-muted);
     margin-bottom: 4px;
   }
-  .msg.user .role { color: #7c2d12; }
-  .msg.assistant .role { color: #14532d; }
-  .msg .body { white-space: pre-wrap; word-wrap: break-word; }
+  .msg.user .role { color: var(--user-color); }
+  .msg.assistant .role { color: var(--assistant-color); }
+  .msg .body { white-space: normal; word-wrap: break-word; }
+  .msg .body p { margin: 0 0 8px 0; white-space: pre-wrap; }
+  .msg .body p:last-child { margin-bottom: 0; }
   .msg .body code {
-    background: #f5f5f4;
+    background: var(--code-bg);
+    color: var(--code-text);
     padding: 1px 4px;
     border-radius: 3px;
     font-family: ui-monospace, "SF Mono", Menlo, monospace;
     font-size: 12.5px;
   }
+  .msg .body strong { font-weight: 600; }
+  .msg .body em { font-style: italic; }
+  .msg .body ul { margin: 4px 0 8px 0; padding-left: 22px; }
+  .msg .body li { margin-bottom: 2px; }
   .msg .body pre {
-    background: #1c1917;
-    color: #fafaf9;
+    background: var(--codeblock-bg);
+    color: var(--codeblock-text);
     padding: 10px 12px;
     border-radius: 4px;
     font-size: 12.5px;
     font-family: ui-monospace, "SF Mono", Menlo, monospace;
     overflow-x: auto;
     line-height: 1.4;
+    margin: 6px 0;
   }
   .msg .body pre code { background: transparent; padding: 0; color: inherit; }
+  .typing {
+    display: inline-block;
+    color: var(--text-muted);
+    font-style: italic;
+  }
+  .typing .dots::after {
+    content: "";
+    animation: typing-dots 1.4s steps(4, end) infinite;
+  }
+  @keyframes typing-dots {
+    0%, 20%   { content: "";    }
+    40%       { content: ".";   }
+    60%       { content: "..";  }
+    80%, 100% { content: "..."; }
+  }
   #input-row {
     display: flex;
     gap: 8px;
     padding: 12px 14px;
-    border-top: 1px solid #e7e5e4;
-    background: #f5f5f4;
+    border-top: 1px solid var(--border);
+    background: var(--bg-elev);
   }
   #input {
     flex: 1;
     font-family: inherit;
     font-size: 14px;
     padding: 8px 10px;
-    border: 1px solid #d6d3d1;
+    border: 1px solid var(--border-strong);
     border-radius: 4px;
-    background: white;
+    background: var(--bg-pane);
+    color: var(--text);
     resize: none;
     min-height: 42px;
-    max-height: 160px;
+    max-height: 220px;
+    line-height: 1.4;
+    overflow-y: auto;
   }
   #send {
-    background: #1c1917;
-    color: #fafaf9;
+    background: var(--accent);
+    color: var(--accent-text);
     border: 0;
     border-radius: 4px;
     padding: 0 18px;
@@ -214,8 +345,8 @@ INDEX_HTML = """<!DOCTYPE html>
     font-weight: 500;
     cursor: pointer;
   }
-  #send:hover { background: #292524; }
-  #send:disabled { background: #a8a29e; cursor: wait; }
+  #send:hover:not(:disabled) { opacity: 0.85; }
+  #send:disabled { opacity: 0.4; cursor: wait; }
   #yaml {
     flex: 1;
     font-family: ui-monospace, "SF Mono", Menlo, monospace;
@@ -223,23 +354,25 @@ INDEX_HTML = """<!DOCTYPE html>
     padding: 14px;
     border: 0;
     outline: 0;
-    background: #fafaf9;
-    color: #1c1917;
+    background: var(--bg-pane);
+    color: var(--text);
     resize: none;
     tab-size: 2;
     line-height: 1.5;
   }
   #save-note {
     padding: 8px 14px;
-    background: #f5f5f4;
-    border-top: 1px solid #e7e5e4;
+    background: var(--bg-elev);
+    border-top: 1px solid var(--border);
     font-size: 12px;
-    color: #78716c;
+    color: var(--text-muted);
     min-height: 32px;
   }
-  #save-note.ok { color: #14532d; }
-  #save-note.err { color: #7c2d12; }
-  .placeholder { color: #a8a29e; font-style: italic; }
+  #save-note.ok { color: var(--ok-bg); }
+  #save-note.err { color: var(--err-bg); }
+  :root[data-theme="dark"] #save-note.ok, @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) #save-note.ok { color: var(--ok-fg); } }
+  :root[data-theme="dark"] #save-note.err, @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) #save-note.err { color: var(--err-fg); } }
+  .placeholder { color: var(--text-faint); font-style: italic; }
 
   .tabs { display: flex; gap: 4px; }
   .tab {
@@ -249,16 +382,36 @@ INDEX_HTML = """<!DOCTYPE html>
     font-size: 12px;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    color: #78716c;
+    color: var(--text-muted);
     cursor: pointer;
     border-radius: 4px;
     font-family: inherit;
   }
-  .tab.active { background: #1c1917; color: #fafaf9; }
+  .tab.active { background: var(--accent); color: var(--accent-text); }
   .tab:disabled { opacity: 0.4; cursor: not-allowed; }
   .tab-content { display: none; flex: 1; min-height: 0; flex-direction: column; }
   .tab-content.active { display: flex; }
 
+  #history-filters {
+    padding: 8px 14px;
+    background: var(--bg-elev);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    font-size: 12px;
+  }
+  #history-filters select, #history-filters input {
+    background: var(--bg-pane);
+    color: var(--text);
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-family: inherit;
+    font-size: 12px;
+  }
+  #history-filters input { flex: 1; }
+  #history-filters .count { color: var(--text-muted); font-family: ui-monospace, monospace; }
   #history {
     flex: 1;
     overflow-y: auto;
@@ -266,30 +419,32 @@ INDEX_HTML = """<!DOCTYPE html>
     font-size: 13px;
   }
   #history-summary {
-    background: #f5f5f4;
-    border: 1px solid #e7e5e4;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
     border-radius: 4px;
     padding: 10px 14px;
     margin-bottom: 12px;
     font-size: 12px;
-    color: #57534e;
+    color: var(--text-muted);
     font-family: ui-monospace, monospace;
   }
   .run {
-    border: 1px solid #e7e5e4;
+    border: 1px solid var(--border);
     border-radius: 4px;
     padding: 12px 14px;
     margin-bottom: 10px;
-    background: #fafaf9;
+    background: var(--bg-pane);
   }
+  .run.hidden { display: none; }
   .run-head {
     display: flex;
     align-items: center;
     gap: 10px;
     margin-bottom: 6px;
     font-size: 12px;
+    flex-wrap: wrap;
   }
-  .run-head .ts { color: #78716c; font-family: ui-monospace, monospace; }
+  .run-head .ts { color: var(--text-muted); font-family: ui-monospace, monospace; }
   .badge {
     padding: 2px 8px;
     border-radius: 999px;
@@ -298,17 +453,18 @@ INDEX_HTML = """<!DOCTYPE html>
     letter-spacing: 0.06em;
     text-transform: uppercase;
   }
-  .badge.live { background: #14532d; color: #dcfce7; }
-  .badge.dry-run { background: #78350f; color: #fef3c7; }
-  .badge.propose, .badge.reflect { background: #1e3a8a; color: #dbeafe; }
+  .badge.live { background: var(--ok-bg); color: var(--ok-fg); }
+  .badge.dry-run { background: var(--warn-bg); color: var(--warn-fg); }
+  .badge.propose, .badge.reflect { background: var(--info-bg); color: var(--info-fg); }
   .run-meta {
-    color: #57534e;
+    color: var(--text-muted);
     font-family: ui-monospace, monospace;
     font-size: 11px;
   }
   .run-instr {
     font-style: italic;
-    color: #44403c;
+    color: var(--text);
+    opacity: 0.85;
     margin: 6px 0;
     font-size: 12.5px;
   }
@@ -318,24 +474,35 @@ INDEX_HTML = """<!DOCTYPE html>
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    color: #78716c;
+    color: var(--text-muted);
     font-weight: 600;
   }
   .run-section ul { margin: 0; padding-left: 18px; }
-  .run-section li { line-height: 1.5; color: #292524; }
-  .run-section li.err { color: #7c2d12; }
-  .run-section li.blocked { color: #78350f; }
+  .run-section li { line-height: 1.5; color: var(--text); cursor: default; }
+  .run-section li.expandable { cursor: pointer; }
+  .run-section li.expandable:hover { color: var(--text-muted); }
+  .run-section li.expandable.expanded {
+    white-space: pre-wrap;
+    background: var(--bg-elev);
+    padding: 6px 8px;
+    border-radius: 4px;
+    margin: 4px 0;
+  }
+  .run-section li.err { color: var(--err-bg); }
+  .run-section li.blocked { color: var(--warn-bg); }
+  :root[data-theme="dark"] .run-section li.err, @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .run-section li.err { color: var(--err-fg); } }
+  :root[data-theme="dark"] .run-section li.blocked, @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .run-section li.blocked { color: var(--warn-fg); } }
   .run-final {
-    background: #fafaf9;
-    border-left: 3px solid #d6d3d1;
+    background: var(--bg-elev);
+    border-left: 3px solid var(--border-strong);
     padding: 6px 10px;
     margin-top: 8px;
     white-space: pre-wrap;
-    color: #292524;
+    color: var(--text);
     font-size: 12.5px;
     line-height: 1.5;
   }
-  .no-history { color: #a8a29e; font-style: italic; padding: 30px; text-align: center; }
+  .no-history { color: var(--text-faint); font-style: italic; padding: 30px; text-align: center; }
 </style>
 </head>
 <body>
@@ -345,6 +512,8 @@ INDEX_HTML = """<!DOCTYPE html>
   <label>load <select id="strategy"><option value="">— new —</option></select></label>
   <button id="toggle" data-state="none" disabled title="Enable or disable the selected strategy">off</button>
   <div class="spacer"></div>
+  <div class="cfg-badges" id="cfg-badges" title="Global config (from .env). Restart to change."></div>
+  <button id="theme-toggle" title="Toggle light/dark theme">◐</button>
   <span class="status" id="status">ready</span>
 </header>
 <main>
@@ -368,7 +537,8 @@ INDEX_HTML = """<!DOCTYPE html>
         <button class="tab" data-tab="history" id="tab-history-btn" disabled title="Load a strategy to view its history">History</button>
       </div>
       <div class="right">
-        <button id="save" class="primary">save</button>
+        <button id="copy-yaml" title="Copy YAML pane to clipboard">copy</button>
+        <button id="save" class="primary" title="Save YAML to strategies.yaml (Cmd/Ctrl+S)">save</button>
       </div>
     </div>
     <div id="tab-yaml" class="tab-content active">
@@ -376,6 +546,17 @@ INDEX_HTML = """<!DOCTYPE html>
       <div id="save-note"></div>
     </div>
     <div id="tab-history" class="tab-content">
+      <div id="history-filters">
+        <select id="hist-mode">
+          <option value="">all modes</option>
+          <option value="live">live only</option>
+          <option value="dry-run">dry-run only</option>
+          <option value="propose">propose</option>
+          <option value="reflect">reflect</option>
+        </select>
+        <input id="hist-search" type="text" placeholder="search text (instruction, tool names, final text)…">
+        <span class="count" id="hist-count"></span>
+      </div>
       <div id="history"><div class="no-history">Load a strategy to see its run history.</div></div>
     </div>
   </div>
@@ -392,6 +573,52 @@ async function api(path, body) {
   return data;
 }
 
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+function renderInlineMd(text) {
+  // Bold **x**, italic *x*, inline code `x`. Escape first, then apply.
+  let s = escapeHtml(text);
+  s = s.replace(/`([^`]+)`/g, (_, code) => "<code>" + code + "</code>");
+  s = s.replace(/\\*\\*([^\\*]+)\\*\\*/g, "<strong>$1</strong>");
+  s = s.replace(/(^|\\W)\\*([^\\*\\s][^\\*]*?)\\*(?!\\*)/g, "$1<em>$2</em>");
+  return s;
+}
+
+function renderBlock(text, body) {
+  // Split into paragraphs and lists.
+  const lines = text.split("\\n");
+  let listBuf = null;
+  const flushList = () => {
+    if (listBuf) { body.appendChild(listBuf); listBuf = null; }
+  };
+  let paraBuf = [];
+  const flushPara = () => {
+    if (paraBuf.length) {
+      const p = document.createElement("p");
+      p.innerHTML = renderInlineMd(paraBuf.join("\\n"));
+      body.appendChild(p);
+      paraBuf = [];
+    }
+  };
+  for (const line of lines) {
+    const listMatch = line.match(/^\\s*[-*]\\s+(.*)/);
+    if (listMatch) {
+      flushPara();
+      if (!listBuf) { listBuf = document.createElement("ul"); }
+      const li = document.createElement("li");
+      li.innerHTML = renderInlineMd(listMatch[1]);
+      listBuf.appendChild(li);
+    } else {
+      flushList();
+      paraBuf.push(line);
+    }
+  }
+  flushList();
+  flushPara();
+}
+
 function renderMsg(role, text) {
   const wrap = document.createElement("div");
   wrap.className = "msg " + role;
@@ -401,28 +628,46 @@ function renderMsg(role, text) {
   wrap.appendChild(roleEl);
   const body = document.createElement("div");
   body.className = "body";
-  // Simple markdown-ish rendering: fenced code blocks
+  // Split on fenced code blocks first; each non-code chunk goes through
+  // paragraph + list + inline rendering.
   const parts = text.split(/```(\\w*)\\n([\\s\\S]*?)\\n```/g);
   for (let i = 0; i < parts.length; i++) {
     if (i % 3 === 0) {
-      const span = document.createElement("span");
-      span.textContent = parts[i];
-      body.appendChild(span);
+      if (parts[i]) renderBlock(parts[i], body);
     } else if (i % 3 === 1) {
       const pre = document.createElement("pre");
       const code = document.createElement("code");
       code.textContent = parts[i+1] || "";
       pre.appendChild(code);
       body.appendChild(pre);
-      i++; // skip the content part
+      i++;
     }
   }
   wrap.appendChild(body);
   const chat = $("chat");
   const placeholder = chat.querySelector(".placeholder");
   if (placeholder) placeholder.remove();
+  // Auto-scroll only if we're already near the bottom.
+  const stickToBottom = chat.scrollTop + chat.clientHeight >= chat.scrollHeight - 30;
+  chat.appendChild(wrap);
+  if (stickToBottom) chat.scrollTop = chat.scrollHeight;
+}
+
+function showTyping() {
+  hideTyping();
+  const wrap = document.createElement("div");
+  wrap.className = "msg assistant typing-msg";
+  wrap.innerHTML = '<div class="role">claude</div><div class="body"><span class="typing">thinking<span class="dots"></span></span></div>';
+  const chat = $("chat");
+  const placeholder = chat.querySelector(".placeholder");
+  if (placeholder) placeholder.remove();
   chat.appendChild(wrap);
   chat.scrollTop = chat.scrollHeight;
+}
+
+function hideTyping() {
+  const t = document.querySelector(".typing-msg");
+  if (t) t.remove();
 }
 
 async function refreshEndpoints() {
@@ -491,9 +736,12 @@ async function loadStrategy(name) {
 async function toggleStrategy() {
   const name = $("strategy").value;
   if (!name) return;
-  const nextEnabled = $("toggle").dataset.state !== "enabled";
+  const isEnabled = $("toggle").dataset.state === "enabled";
+  if (isEnabled && !confirm(`Disable strategy '${name}'? It will refuse to run without --force until re-enabled.`)) {
+    return;
+  }
   try {
-    const res = await api("/api/strategies/" + encodeURIComponent(name) + "/toggle", {enabled: nextEnabled});
+    const res = await api("/api/strategies/" + encodeURIComponent(name) + "/toggle", {enabled: !isEnabled});
     setToggleState(res.enabled);
     await refreshStrategies();
     $("strategy").value = name;
@@ -537,6 +785,18 @@ function renderHistory(payload) {
   for (const r of runs.slice().reverse()) {
     const card = document.createElement("div");
     card.className = "run";
+    card.dataset.mode = (r.mode || "").toLowerCase();
+
+    // Build searchable text for filtering
+    const searchParts = [
+      r.instruction || "",
+      (r.tool_calls || []).map(t => t.tool + " " + (t.summary || "")).join(" "),
+      (r.blocked_calls || []).map(b => b.tool + " " + b.reason).join(" "),
+      (r.errors || []).map(e => e.tool + " " + e.error).join(" "),
+      r.final_text || "",
+    ];
+    card.dataset.search = searchParts.join(" ").toLowerCase();
+
     const head = document.createElement("div");
     head.className = "run-head";
     const badge = document.createElement("span");
@@ -556,7 +816,19 @@ function renderHistory(payload) {
     if (r.instruction) {
       const instr = document.createElement("div");
       instr.className = "run-instr";
-      instr.textContent = '"' + r.instruction.slice(0, 200) + (r.instruction.length > 200 ? '…' : '') + '"';
+      const short = r.instruction.length > 200 ? r.instruction.slice(0, 200) + "…" : r.instruction;
+      instr.textContent = '"' + short + '"';
+      if (r.instruction.length > 200) {
+        instr.classList.add("expandable");
+        instr.title = "click to expand";
+        instr.addEventListener("click", () => {
+          if (instr.classList.toggle("expanded")) {
+            instr.textContent = '"' + r.instruction + '"';
+          } else {
+            instr.textContent = '"' + short + '"';
+          }
+        });
+      }
       card.appendChild(instr);
     }
 
@@ -571,7 +843,19 @@ function renderHistory(payload) {
       for (const it of items) {
         const li = document.createElement("li");
         if (cls) li.className = cls;
-        li.textContent = it;
+        const short = it.length > 200 ? it.slice(0, 200) + "…" : it;
+        li.textContent = short;
+        if (it.length > 200) {
+          li.classList.add("expandable");
+          li.title = "click to expand";
+          li.addEventListener("click", () => {
+            if (li.classList.toggle("expanded")) {
+              li.textContent = it;
+            } else {
+              li.textContent = short;
+            }
+          });
+        }
         ul.appendChild(li);
       }
       sec.appendChild(ul);
@@ -597,6 +881,23 @@ function renderHistory(payload) {
     }
     c.appendChild(card);
   }
+
+  applyHistoryFilters();
+}
+
+function applyHistoryFilters() {
+  const mode = $("hist-mode").value.toLowerCase();
+  const q = $("hist-search").value.trim().toLowerCase();
+  const cards = document.querySelectorAll("#history .run");
+  let shown = 0;
+  cards.forEach((card) => {
+    const modeOk = !mode || card.dataset.mode === mode;
+    const textOk = !q || card.dataset.search.includes(q);
+    const visible = modeOk && textOk;
+    card.classList.toggle("hidden", !visible);
+    if (visible) shown++;
+  });
+  $("hist-count").textContent = `${shown} / ${cards.length}`;
 }
 
 async function loadHistory(name) {
@@ -615,16 +916,19 @@ async function send() {
   const text = input.value.trim();
   if (!text) return;
   input.value = "";
+  autoResizeInput();
   renderMsg("user", text);
   state.messages.push({role: "user", content: text});
   $("send").disabled = true;
   $("status").textContent = "thinking…";
+  showTyping();
   try {
     const res = await api("/api/chat", {
       messages: state.messages,
       endpoint: state.endpoint,
       strategy_name: $("strategy").value || null,
     });
+    hideTyping();
     renderMsg("assistant", res.reply);
     state.messages.push({role: "assistant", content: res.reply});
     if (res.extracted_yaml) {
@@ -633,12 +937,67 @@ async function send() {
       $("save-note").className = "";
     }
   } catch (e) {
+    hideTyping();
     renderMsg("assistant", "[error] " + e.message);
   } finally {
     $("send").disabled = false;
     $("status").textContent = "ready";
     input.focus();
   }
+}
+
+function autoResizeInput() {
+  const el = $("input");
+  el.style.height = "auto";
+  el.style.height = Math.min(220, el.scrollHeight) + "px";
+}
+
+async function copyYaml() {
+  const txt = $("yaml").value;
+  if (!txt) return;
+  try {
+    await navigator.clipboard.writeText(txt);
+    $("save-note").textContent = "copied to clipboard.";
+    $("save-note").className = "ok";
+  } catch (e) {
+    $("save-note").textContent = "copy failed: " + e.message;
+    $("save-note").className = "err";
+  }
+}
+
+function initTheme() {
+  const saved = localStorage.getItem("theme");
+  if (saved === "light" || saved === "dark") {
+    document.documentElement.setAttribute("data-theme", saved);
+  }
+}
+function toggleTheme() {
+  const now = document.documentElement.getAttribute("data-theme");
+  const media = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  const current = now || media;
+  const next = current === "dark" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", next);
+  localStorage.setItem("theme", next);
+}
+
+async function loadConfig() {
+  try {
+    const cfg = await api("/api/config");
+    const el = $("cfg-badges");
+    el.innerHTML = "";
+    const mode = document.createElement("span");
+    mode.className = "cfg-badge " + (cfg.dry_run ? "dry" : "live");
+    mode.textContent = cfg.dry_run ? "DRY-RUN" : "LIVE";
+    const model = document.createElement("span");
+    model.className = "cfg-badge";
+    model.textContent = cfg.model;
+    const effort = document.createElement("span");
+    effort.className = "cfg-badge";
+    effort.textContent = "effort:" + cfg.effort;
+    el.appendChild(mode);
+    el.appendChild(model);
+    el.appendChild(effort);
+  } catch (e) { /* silent — badges are cosmetic */ }
 }
 
 async function save() {
@@ -667,9 +1026,19 @@ async function save() {
 
 $("send").onclick = send;
 $("save").onclick = save;
+$("copy-yaml").onclick = copyYaml;
 $("toggle").onclick = toggleStrategy;
+$("theme-toggle").onclick = toggleTheme;
 $("input").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); }
+});
+$("input").addEventListener("input", autoResizeInput);
+document.addEventListener("keydown", (e) => {
+  // Cmd/Ctrl+S saves from anywhere
+  if (e.key === "s" && (e.metaKey || e.ctrlKey)) {
+    e.preventDefault();
+    save();
+  }
 });
 $("endpoint").onchange = (e) => { state.endpoint = e.target.value; };
 $("strategy").onchange = (e) => loadStrategy(e.target.value);
@@ -677,6 +1046,8 @@ $("clear-chat").onclick = () => {
   state.messages = [];
   $("chat").innerHTML = '<div class="placeholder">Chat cleared. Describe the strategy you want.</div>';
 };
+$("hist-mode").onchange = applyHistoryFilters;
+$("hist-search").addEventListener("input", applyHistoryFilters);
 document.querySelectorAll(".tab").forEach((btn) => {
   btn.addEventListener("click", async () => {
     if (btn.disabled) return;
@@ -689,9 +1060,9 @@ document.querySelectorAll(".tab").forEach((btn) => {
   });
 });
 
+initTheme();
 (async () => {
-  await refreshEndpoints();
-  await refreshStrategies();
+  await Promise.all([refreshEndpoints(), refreshStrategies(), loadConfig()]);
 })();
 </script>
 </body>
@@ -722,6 +1093,18 @@ class SaveResponse(BaseModel):
 @app.get("/", response_class=HTMLResponse)
 async def index() -> str:
     return INDEX_HTML
+
+
+@app.get("/api/config")
+async def api_config() -> dict[str, Any]:
+    """Global runtime config surfaced to the UI so the header can show
+    what mode/model/effort will apply on the next run."""
+    cfg = load_global()
+    return {
+        "model": cfg.model,
+        "effort": cfg.effort,
+        "dry_run": cfg.dry_run,
+    }
 
 
 @app.get("/api/endpoints")
