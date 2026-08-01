@@ -3,13 +3,13 @@
 #
 # Usage:
 #   export OPENCLAW_FORK=https://github.com/<you>/openclaw.git
-#   export SLM_MODEL=qwen2.5-coder:7b     # optional, this is the default
+#   export SLM_MODEL=gemma4     # optional, this is the default
 #   ./bootstrap-mac.sh
 
 set -euo pipefail
 
 : "${OPENCLAW_FORK:?Set OPENCLAW_FORK to your fork of openclaw/openclaw (git URL).}"
-SLM_MODEL="${SLM_MODEL:-qwen2.5-coder:7b}"
+SLM_MODEL="${SLM_MODEL:-gemma4}"
 OLLAMA_URL="${OLLAMA_URL:-http://127.0.0.1:11434}"
 CHECKOUT_DIR="${CHECKOUT_DIR:-$HOME/src/openclaw}"
 

@@ -8,14 +8,14 @@
 // OpenClaw's marker for loopback/LAN hosts and is not a real credential.
 {
   "models": {
-    "default": "qwen2.5-coder:7b",
+    "default": "gemma4",
     "providers": {
       "ollama": {
         "api": "ollama",
         "baseUrl": "http://127.0.0.1:11434",
         "apiKey": "ollama-local",
         "models": [
-          "qwen2.5-coder:7b"
+          "gemma4"
           // Add more tags here after `ollama pull <tag>`.
           // "qwen2.5-coder:14b",
           // "gemma3:12b",
