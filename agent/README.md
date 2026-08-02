@@ -268,6 +268,148 @@ If `lsof` shows the agent talking to `*.openai.com`, `*.anthropic.com`,
 or any other cloud endpoint, an extension slipped through — disable it
 with `openclaw extensions disable <id>` and rerun.
 
+## Family setup with Fleet
+
+Pointing everyone at one OpenClaw instance is the wrong shape — OpenClaw is
+built for **one trusted operator per Gateway**. Sessions route traffic;
+they don't authorize one family member against another. Practical
+translation: kids would see your inbox.
+
+The right shape is `openclaw fleet` (docs: `docs/gateway/multi-tenant-hosting.md`).
+Each family member gets a **cell**: a full Gateway in a hardened
+container, isolated state, isolated credentials, its own Gmail/GCal OAuth,
+its own Telegram bot. All cells run on the same Mac host and share the
+underlying Ollama daemon, so model weights load once.
+
+Fleet needs Docker or Podman on the host. On a Mac, install
+[OrbStack](https://orbstack.dev) (free personal use, lighter than Docker
+Desktop) or Docker Desktop.
+
+### Provisioning cells
+
+```bash
+openclaw fleet create peter
+openclaw fleet create partner
+openclaw fleet create kid1
+openclaw fleet create kid2
+openclaw fleet ls
+```
+
+Each `create` prints a Gateway token **once** — store it in your password
+manager, you can't recover it later. Each cell publishes to
+`127.0.0.1:<allocated-port>` on the host; use `openclaw fleet ls` to see
+which port belongs to whom.
+
+Each cell then goes through its own bring-up (its own `openclaw onboard`,
+its own `gog auth add`, its own Telegram bot). Yes it's repetitive; that
+isolation is the point.
+
+### Kids' cells: strip the sharp edges
+
+For each kid cell, disable the tools that can send email, spend money, or
+touch the shell:
+
+```bash
+openclaw --cell kid1 extensions disable openshell
+openclaw --cell kid1 extensions disable gog          # or restrict to read-only
+openclaw --cell kid1 extensions disable webhooks
+openclaw --cell kid1 config set tools.email.send.mode "draft-only"
+```
+
+Constrain their automations to homework/reminders/summaries — nothing
+that reaches outside the house. Consider a smaller model tag for kids
+(`gemma4` vs `gemma4:27b`) — less overkill, less memory, still capable.
+
+### Shared family state
+
+Don't try to share memory *between* cells. Share **systems of record**
+instead: a shared Google Family Calendar, a shared Google Doc for the
+weekly plan, a shared Sheet for chores/allowance. Each cell reaches
+those through its own OAuth. Private assistants, shared source of truth.
+
+### Backup + encryption
+
+- Cell state lives under `<state-dir>/fleet/cells/<name>/` — covered by
+  Time Machine if you have it on.
+- Turn on **FileVault** (System Settings → Privacy & Security → FileVault).
+  Non-negotiable if the Mac is a family device.
+- Auth-profile secrets are under
+  `<state-dir>/fleet/auth-profile-secrets/<tenant>/` — same backup story.
+
+### Fleet is experimental
+
+The Fleet CLI is flagged experimental in the docs — commands and flags
+can change between releases without a deprecation window. Fine for a
+family; wouldn't run a business on it.
+
+## Calling external agents (MCP)
+
+OpenClaw can hand work off to other agents you (or someone else) built.
+Three interop paths — pick based on what the other agent already speaks:
+
+| Path | Package | When to use |
+|---|---|---|
+| **MCP server** | `mcp-http` | Recommended default. Standard protocol, works with everything (Claude Desktop, Cursor, ChatGPT desktop, etc.) without rewriting. |
+| **ACP** | `acp-core` | OpenClaw's peer-to-peer agent protocol. Use when you want bidirectional conversation between agents, not just tool calls. |
+| **Plain HTTP tool** | `plugin-sdk` | Fastest. Wrap any existing REST endpoint as a custom tool. |
+
+### Example: your trading agent
+
+Assuming your trading agent exposes an MCP server on `127.0.0.1:8710` with
+tools `get_positions`, `propose_trade`, `execute_order`:
+
+```jsonc
+// ~/Library/Application Support/openclaw/config.jsonc
+{
+  "mcp": {
+    "servers": {
+      "trader": {
+        "transport": "http",
+        "url": "http://127.0.0.1:8710",
+        "toolsAllowed": ["get_positions", "propose_trade", "execute_order"]
+      }
+    }
+  }
+}
+```
+
+Then in a chat / automation:
+
+```
+you (Telegram)  →  OpenClaw (Gemma 4 parses intent, drafts proposal)
+                →  trader.propose_trade({...})
+                →  OpenClaw asks you on Telegram: "Sell 100 AAPL @ market, confirm?"
+                →  you: "yes"
+                →  trader.execute_order(proposalId, confirmationToken)
+```
+
+### Non-negotiable trading guardrails
+
+Same shape as the draft-first email pattern, higher stakes:
+
+- **Two-call design**: `propose_trade` returns a signed proposal id;
+  `execute_order` requires that id **and** a fresh user confirmation
+  token. Model can call `propose`; only a user-confirmed action calls
+  `execute`. Enforce this in the trading agent, not in a prompt.
+- **Hard caps in the trading agent** (never the model): per-order size,
+  per-day dollar volume, per-symbol whitelist, market-hours only,
+  no-shorting flag. Model asks for anything; agent refuses out-of-policy.
+- **Never let Gemma 4 auto-execute.** Not because it's local — because
+  it's an 8B model. Frontier models shouldn't auto-execute either. This
+  is a policy rule, not a capability rule.
+- **Full audit trail**: enable `diagnostics-otel` and export to a local
+  Prometheus + a permanent log store. Every proposal, every
+  confirmation, every fill — timestamped, model-attributed. This is
+  your receipt if a broker asks.
+- **Dedicated confirmation channel**: don't confirm trades over the
+  same Telegram bot you use for reminders. Second bot, 2FA'd account,
+  minimal contact list. A compromised general-purpose channel becomes
+  a compromised trading loop.
+
+The same pattern applies to any high-stakes external agent — deploy
+agent, billing agent, HR agent. Split proposal from execution; enforce
+policy in the agent, not in the model prompt.
+
 ## Why a fork and not just `brew install openclaw`?
 
 Because "AI in the cloud is not aligned with you; it's aligned with the
