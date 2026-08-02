@@ -279,6 +279,20 @@ Restoring from a lost disk: `rsync -aP /Volumes/Backup/ollama-models/
 Repeat the `ollama show ... > provenance` snapshot **any time you swap
 the default model** so the record stays current.
 
+## Roadmap items (post-base, capture-only for now)
+
+Longer-horizon capabilities documented in `roadmap/`. Do not start any
+of these until base May has run stably for ≥ 4 weeks and the current
+optional add-ons list below is settled. Read the roadmap docs when it's
+time to actually build.
+
+- **Money agent** (`roadmap/money-agent.md`) — bills, groceries,
+  subscriptions. Passive → assisted → autonomous, dedicated finance
+  agent behind an MCP boundary, dedicated money confirmation channel.
+- **Smart home** (`roadmap/smart-home.md`) — Google Home + Rainbird
+  irrigation via Home Assistant. HA as middleware, four maturity
+  layers, physical override always wins.
+
 ## Optional add-ons (add only after the base is stable ~1 week)
 
 - **iMessage / phone number** — see README "Give your agent a phone number"
