@@ -1,0 +1,69 @@
+// OpenClaw configuration for treating an Obsidian vault as May's second brain.
+//
+// Merge into your main config (~/Library/Application Support/openclaw/config.jsonc)
+// under the top-level keys shown below. Edit the vaultPath and folder names to
+// match your actual vault layout.
+{
+  // Layer 1 — direct read/write
+  "agents": {
+    "defaults": {
+      "contextRoots": {
+        "obsidian": "~/Documents/Obsidian/MyVault"
+      }
+    }
+  },
+
+  // Layer 2 — semantic search backed by local Ollama embeddings
+  "memory": {
+    "sources": {
+      "obsidian": {
+        "path": "~/Documents/Obsidian/MyVault",
+        "backend": "lancedb",
+        "embed": {
+          "provider": "ollama",
+          "model": "nomic-embed-text"
+        },
+        "watch": true,
+        // Skip Obsidian internals and any folder you don't want indexed
+        "ignore": [
+          ".obsidian/**",
+          ".trash/**",
+          "Archive/**",
+          "**/*.excalidraw.md"
+        ]
+      }
+    }
+  },
+
+  // Layer 3 — write-back with guardrails
+  "tools": {
+    "obsidian": {
+      "vaultPath": "~/Documents/Obsidian/MyVault",
+      "writePolicy": {
+        // Safe classes — no confirmation prompt
+        "autoAppend": [
+          "Daily/**",
+          "Inbox/**",
+          "Meetings/**"
+        ],
+        // Everything else requires your OK on your primary channel (Telegram)
+        "requireConfirm": [
+          "**/*.md"
+        ],
+        // Hard denies — never touched even with confirmation
+        "denyPatterns": [
+          ".obsidian/**",
+          ".trash/**",
+          "Archive/**"
+        ]
+      },
+      "captureDefaults": {
+        "inboxFolder": "Inbox",
+        "dailyNoteFolder": "Daily",
+        "dailyNoteFormat": "YYYY-MM-DD",
+        // Heading May appends under when writing to today's daily note
+        "dailyAppendHeading": "## Captured"
+      }
+    }
+  }
+}
