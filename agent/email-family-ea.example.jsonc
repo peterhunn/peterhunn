@@ -1,0 +1,93 @@
+// OpenClaw configuration for May as executive assistant to the Hunn family.
+//
+// Merge into your main config (~/Library/Application Support/openclaw/config.jsonc).
+// Assumes `gog` has been authorized against all four hunnfamily.com accounts
+// (see README "Give May her own email + family EA access").
+{
+  "identities": {
+    "may": {
+      "primaryEmail": "may@hunnfamily.com",
+      "displayName": "May",
+      "role": "executive assistant to the Hunn family"
+    },
+    "peter":  { "primaryEmail": "peter@hunnfamily.com",  "displayName": "Peter Hunn" },
+    "shweta": { "primaryEmail": "shweta@hunnfamily.com", "displayName": "Shweta Hunn" },
+    "office": { "primaryEmail": "office@hunnfamily.com", "displayName": "Hunn Family Office" }
+  },
+
+  "tools": {
+    "gmail": {
+      // Accounts May can operate — must already be in `gog auth list`
+      "accounts": {
+        "may@hunnfamily.com": {
+          "read":  true,
+          "send": {
+            "policy": "auto-within-allowlist",
+            "signature": "\n\n— May, executive assistant to the Hunn family.\nReply to peter@ or shweta@ for anything time-sensitive."
+          }
+        },
+        "office@hunnfamily.com": {
+          "read":  true,
+          "send": {
+            "policy": "draft-first",
+            "approvers": ["peter", "shweta"],   // either can approve
+            "approvalChannel": {
+              "peter":  "me",
+              "shweta": "shweta"
+            },
+            "signature": "\n\n— (sent by May on behalf of the office@ mailbox)"
+          }
+        },
+        "peter@hunnfamily.com": {
+          "read":  true,
+          "send": {
+            "policy": "draft-first",
+            "approvers": ["peter"],
+            "approvalChannel": { "peter": "me" }
+            // No signature override — May drafts, Peter's own signature is applied on send
+          }
+        },
+        "shweta@hunnfamily.com": {
+          "read":  true,
+          "send": {
+            "policy": "draft-first",
+            "approvers": ["shweta"],
+            "approvalChannel": { "shweta": "shweta" }
+          }
+        }
+      },
+
+      // Global send guardrails, apply on top of per-account policy
+      "outbound": {
+        "allowlist": [
+          // may@ auto-send is only permitted TO these recipients
+          "peter@hunnfamily.com",
+          "shweta@hunnfamily.com",
+          "office@hunnfamily.com"
+          // add family, close contacts, trusted vendors as May proves useful
+        ],
+        "rateLimit": {
+          "perRecipientPerDay": 10,
+          "totalPerDay": 60
+        }
+      },
+
+      // Cross-account coordination: anything May sends that concerns BOTH
+      // Peter and Shweta drafts to both channels; either can approve, either
+      // can veto. She never picks a side by herself.
+      "crossAccountRule": {
+        "detectMentionsOf": ["peter", "shweta"],
+        "requireDraftToBoth": true,
+        "vetoIsFinal": true
+      }
+    }
+  },
+
+  // Which calendar is authoritative for whose time
+  "calendars": {
+    "peter":  "peter@hunnfamily.com",
+    "shweta": "shweta@hunnfamily.com",
+    "family": "office@hunnfamily.com",     // shared / kids' schedule / bills / renewals
+    "may":    "may@hunnfamily.com"          // slots May is holding, tentative offers
+  }
+}

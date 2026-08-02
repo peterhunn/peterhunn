@@ -142,6 +142,60 @@ runs --id <job-id>` shows what happened.
 
 ---
 
+## 6b. Family EA email — May's identity + Peter/Shweta/office mailboxes 🌐 then ⌨️
+
+Prerequisite: everyone whose mailbox May will access has read and signed
+`CONSENT.md`. Copy it into `~/.openclaw/workspace/CONSENT.md` before
+running the OAuth grants — May reads it as bootstrap context.
+
+**Browser** (`admin.google.com`):
+
+- **Users → Add new user** → `may@hunnfamily.com` (adds one Workspace
+  license, ~$6/mo)
+
+**Terminal** (each `gog auth add` opens a browser — whoever owns the
+account must be logged into that browser and consent):
+
+```bash
+gog auth add may@hunnfamily.com    --services gmail,calendar,drive
+gog auth add office@hunnfamily.com --services gmail,calendar
+gog auth add peter@hunnfamily.com  --services gmail,calendar   # Peter consents
+gog auth add shweta@hunnfamily.com --services gmail,calendar   # Shweta consents
+
+gog auth list       # verify all four
+```
+
+**Second Telegram channel for Shweta** (so she approves her own drafts):
+
+- Shweta on Telegram: `@BotFather` → `/newbot` → `/setname May (Shweta)`
+  → copy token. DM the bot once. Get chat id from
+  `https://api.telegram.org/bot<TOKEN>/getUpdates`.
+
+```bash
+openclaw channels add telegram
+# name: "shweta"
+# paste her bot token and chat id
+openclaw channels list
+```
+
+**Merge the family EA config**:
+
+```bash
+open -a TextEdit ~/src/agent/email-family-ea.example.jsonc
+open -a TextEdit "$HOME/Library/Application Support/openclaw/config.jsonc"
+# copy the identities + tools.gmail + calendars blocks over, save.
+
+openclaw doctor    # validate
+```
+
+Smoke test:
+
+```bash
+openclaw chat "search my inbox for anything from shweta this week and summarize"
+openclaw chat "draft a reply to <latest email in peter@> — casual tone, one paragraph"
+# expected: draft lands on Peter's Telegram for approval
+```
+
 ## 7. Obsidian second brain (optional but strongly recommended) ⌨️
 
 ```bash
