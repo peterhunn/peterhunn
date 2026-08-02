@@ -145,6 +145,129 @@ openclaw extensions disable <id>  # per-extension teardown
 `openclaw doctor --fix` will flag any config referring to a provider
 whose extension you've disabled.
 
+## Personal automation quickstart
+
+Once `bootstrap-mac.sh` finishes, this is the recipe for turning it into a
+real assistant that reads your email, watches your calendar, and pings you
+on your phone — all local, zero recurring fees.
+
+Ingredients: **Gmail + Google Calendar** via the `gog` skill, **Telegram**
+as the assistant→you channel (free, works on iOS/Android/desktop), and
+**OpenClaw automations** for scheduling.
+
+Swap Telegram for Signal, Matrix, iMessage, or Discord — same shape.
+Swap `gog` for `himalaya` if you're on Fastmail / Proton / iCloud / IMAP.
+
+### 1. Install the two CLIs
+
+```bash
+brew install gogcli himalaya    # only install the one you need
+```
+
+### 2. Authorize Google Workspace (free OAuth)
+
+1. In [Google Cloud Console](https://console.cloud.google.com), create a
+   personal project, enable **Gmail API** and **Google Calendar API**, and
+   create an **OAuth 2.0 Client ID** of type "Desktop". Download the
+   `client_secret.json`. All of this is free.
+2. Authorize `gog` once:
+   ```bash
+   gog auth credentials ~/Downloads/client_secret.json
+   gog auth add you@gmail.com --services gmail,calendar
+   gog auth list
+   ```
+
+Sanity check:
+
+```bash
+gog gmail search 'newer_than:1d' --max 5
+gog calendar events primary --from "$(date -Iseconds)" --to "$(date -v+7d -Iseconds)"
+```
+
+### 3. Wire up Telegram as your notification channel
+
+1. Message [@BotFather](https://t.me/BotFather) on Telegram, `/newbot`,
+   copy the token.
+2. Message your new bot once so it can DM you back, then find your chat id
+   (open `https://api.telegram.org/bot<TOKEN>/getUpdates`).
+3. Add the channel to OpenClaw:
+   ```bash
+   openclaw channels add telegram
+   # follow prompts: paste token, paste chat id, name it "me"
+   openclaw channels list
+   ```
+
+Test it:
+
+```bash
+openclaw send --channel me "Hello from local Gemma."
+```
+
+### 4. Morning brief — 07:00 every weekday
+
+One automation that reads today's calendar + overnight unread mail, hands
+both to Gemma to summarize, and DMs you the result on Telegram.
+
+```bash
+openclaw automations create \
+  --cron "0 7 * * 1-5" --tz "$(readlink /etc/localtime | sed 's|.*/zoneinfo/||')" \
+  --name "morning-brief" \
+  --session main \
+  --channel me \
+  --system-event "Produce my morning brief:
+    - Today's calendar via: gog calendar events primary --from <today> --to <tomorrow>
+    - Unread mail since 6pm yesterday via: gog gmail search 'is:unread newer_than:14h' --max 25
+    Return: (1) top 3 meetings with prep notes, (2) mail worth acting on today,
+    (3) anything I said I'd follow up on. Keep it under 200 words."
+```
+
+### 5. Inbox triage — every 15 minutes during work hours
+
+Reuses the bundled `taskflow-inbox-triage` skill pattern: classify → route.
+
+```bash
+openclaw automations create \
+  --cron "*/15 9-18 * * 1-5" --tz "$(readlink /etc/localtime | sed 's|.*/zoneinfo/||')" \
+  --name "inbox-triage" \
+  --session main \
+  --channel me \
+  --system-event "Run skills/taskflow-inbox-triage over new mail (newer_than:20m).
+    Business threads: draft a reply and Telegram me for approval before sending.
+    Personal + urgent: Telegram me now.
+    Everything else: hold for the 6pm end-of-day summary."
+```
+
+For near-realtime instead of every-15-minutes, swap the cron for the
+**Gmail PubSub** trigger — see `docs/automation/cron-jobs.md#gmail-pubsub-integration`
+in the fork. Google Pub/Sub is free at personal message volumes.
+
+### 6. Draft-and-send loop (safe by default)
+
+`gog` supports drafts. Any automation that composes on your behalf should
+create a draft first and Telegram you the draft id, then a `send` command
+you can execute or approve:
+
+```bash
+gog gmail drafts create --to a@b.com --subject "Re: Hi" --body-file -
+gog gmail drafts send <draftId>
+```
+
+The `himalaya` SKILL enforces the same "confirm before send/delete/move"
+rule; keep that guardrail on until you trust the model's judgement.
+
+### 7. Verifying everything is local
+
+```bash
+openclaw models list --provider ollama       # should show gemma4
+openclaw extensions list                     # should show only local + gog/himalaya/telegram
+openclaw automations list                    # your morning-brief + inbox-triage
+lsof -i -n | grep -i 'ollama\|openclaw'      # only loopback sockets, no outbound https
+```
+
+If `lsof` shows the agent talking to `*.openai.com`, `*.anthropic.com`,
+or any other cloud endpoint, an extension slipped through — disable it
+with `openclaw extensions disable <id>` and rerun.
+
 ## Why a fork and not just `brew install openclaw`?
 
 Because "AI in the cloud is not aligned with you; it's aligned with the
