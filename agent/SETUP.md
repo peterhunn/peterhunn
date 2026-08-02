@@ -247,6 +247,38 @@ searching your Obsidian vault, and DMing you the morning brief.
 
 ---
 
+## 7b. Preserve your model — three insurance policies ⌨️
+
+Once everything's verified, spend five minutes making sure a lost disk
+or a vanished model registry can't take May down. Local weights are only
+autonomous if you actually keep a local copy of them.
+
+```bash
+# 1. Note total footprint, then back up ~/.ollama/models
+du -sh ~/.ollama/models/
+# Option A: rely on Time Machine (verify ~/.ollama is included)
+# Option B: explicit one-shot copy to an external drive
+rsync -aP ~/.ollama/models/ /Volumes/Backup/ollama-models/
+
+# 2. Record model provenance so you can prove/reproduce which version is yours
+mkdir -p ~/.openclaw/model-provenance
+ollama list                        > ~/.openclaw/model-provenance/list-$(date +%F).txt
+ollama show gemma4  --modelfile    > ~/.openclaw/model-provenance/gemma4-$(date +%F).txt
+ollama show nomic-embed-text --modelfile \
+                                   > ~/.openclaw/model-provenance/nomic-embed-text-$(date +%F).txt
+
+# 3. Pre-pull one fallback model while it's easy — insurance for the day
+#    a registry stops serving your primary model
+ollama pull qwen2.5:14b            # strong general-purpose alternative (~9 GB)
+ollama pull llama3.2:3b            # small always-runnable fallback (~2 GB)
+```
+
+Restoring from a lost disk: `rsync -aP /Volumes/Backup/ollama-models/
+~/.ollama/models/` and Ollama picks the models up on next launch.
+
+Repeat the `ollama show ... > provenance` snapshot **any time you swap
+the default model** so the record stays current.
+
 ## Optional add-ons (add only after the base is stable ~1 week)
 
 - **iMessage / phone number** — see README "Give your agent a phone number"
