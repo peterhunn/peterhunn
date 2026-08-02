@@ -520,6 +520,63 @@ transcription of arbitrary calls; multiple numbers or A2P/10DLC-registered
 business SMS. None of that applies to a personal/family setup with a
 spare SIM.
 
+## Name your agent — meet May
+
+The agent's name is **May**. She's Peter's personal agent.
+
+OpenClaw injects a set of workspace bootstrap files into the system prompt
+every turn (`docs/gateway/config-agents.md`). Three of them shape her
+identity:
+
+- **`IDENTITY.md`** — who she is, what she does, what she doesn't
+- **`SOUL.md`** — her operating values, in priority order
+- **`USER.md`** — who Peter is, so she can be useful to him
+
+Starter versions of all three are in `agent/identity/`. On first Mac bring-up:
+
+```bash
+mkdir -p ~/.openclaw/workspace
+cp agent/identity/IDENTITY.md agent/identity/SOUL.md agent/identity/USER.md \
+   ~/.openclaw/workspace/
+$EDITOR ~/.openclaw/workspace/USER.md    # fill in the blanks
+```
+
+Then restart the Gateway. She'll introduce herself as May.
+
+### Sync the name across every surface
+
+`IDENTITY.md` sets what she *thinks* she's called. Match that on every
+channel she appears on:
+
+| Surface | Where to set the name |
+|---|---|
+| Telegram bot | @BotFather → `/setname May` and `/setabouttext` |
+| iMessage | Settings → Apple ID → Name = "May" on the agent Apple ID |
+| Gmail sender name | Google Account → Personal info → set for the agent OAuth account |
+| Email signature | Add `— May, on behalf of Peter` as the default sig in `gog send` |
+| OpenClaw display | `openclaw config set agents.defaults.displayName "May"` |
+| Fleet cell name | For the family setup, this cell is `peter`; May is who lives inside it |
+
+The rule of thumb: if anyone new interacts with her and can't tell she's
+May, one surface didn't get updated.
+
+### Tuning her personality later
+
+The three files in `agent/identity/` are the source of truth in this repo;
+your workspace copies at `~/.openclaw/workspace/` are what the running
+agent reads. Two patterns:
+
+- **Small tweaks live in the workspace.** Edit `~/.openclaw/workspace/*.md`
+  directly, restart the Gateway. Faster iteration.
+- **Anything you want to keep**, copy back into `agent/identity/` and
+  commit. That way a fresh Mac bring-up starts with the current May, not
+  the day-one May.
+
+For per-context specialization (e.g. a stricter version of May for the
+trading loop), use OpenClaw's `agents.entries.*` config to define a
+separate agent id with its own IDENTITY override — inherits the same
+model, different persona.
+
 ## Why a fork and not just `brew install openclaw`?
 
 Because "AI in the cloud is not aligned with you; it's aligned with the
