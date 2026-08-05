@@ -128,14 +128,17 @@ openclaw automations create \
   --name "morning-brief" \
   --session main \
   --channel me \
-  --system-event "Produce my morning brief:
-    - Today's calendar via: gog calendar events primary --from <today> --to <tomorrow>
-    - Unread mail since 6pm yesterday via: gog gmail search 'is:unread newer_than:14h' --max 25
-    Return: (1) top 3 meetings with prep notes, (2) mail worth acting on today,
-    (3) anything I said I'd follow up on. Keep it under 200 words."
+  --system-event "$(cat ~/src/agent/prompts/morning-brief.md)"
+# If your OpenClaw build supports --system-event-file, prefer that:
+#   --system-event-file ~/src/agent/prompts/morning-brief.md
 
 openclaw automations list
 ```
+
+Prompts live under `prompts/` — see `prompts/README.md`. Edit them
+without touching automation config; add more (`inbox-triage`,
+`meeting-prep`, `email-draft`, `end-of-day`) and register additional
+automations pointing at those files.
 
 Confirm at 07:00 tomorrow that it lands. If not, `openclaw automations
 runs --id <job-id>` shows what happened.

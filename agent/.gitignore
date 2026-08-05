@@ -1,0 +1,66 @@
+# OS
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.#*
+\#*#
+
+# Node / OpenClaw build outputs (if you ever build in this repo)
+node_modules/
+dist/
+build/
+.pnpm-store/
+.turbo/
+
+# Secrets — do not commit any of these
+*.env
+.env.*
+client_secret*.json
+credentials*.json
+service-account*.json
+*.pem
+*.key
+*.pfx
+*-private.jsonc
+
+# OpenClaw state / workspace (in case anyone runs setup from this dir)
+.openclaw/
+**/.openclaw/
+openclaw.log
+openclaw.log.*
+
+# Model files (never commit weights; back them up separately)
+*.gguf
+*.bin
+*.safetensors
+ollama-models/
+model-provenance/
+
+# Ollama caches
+.ollama/
+
+# Playwright / browser automation
+playwright-report/
+test-results/
+.playwright/
+downloads/
+
+# Filled-in consent + house rules should live in ~/.openclaw/workspace/,
+# not in this repo. Track only the *.template.md variants here if you
+# ever produce them.
+CONSENT.signed.md
+HOUSE-RULES.signed.md
+
+# Temp
+*.tmp
+*.bak
+*.orig
+.trash/
