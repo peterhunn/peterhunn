@@ -2,7 +2,7 @@
 //
 // Merge into your main config (~/Library/Application Support/openclaw/config.jsonc).
 // Assumes `gog` has been authorized against all four hunnfamily.com accounts
-// (see README "Give May her own email + family EA access").
+// (see docs/family-ea-email.md).
 {
   "identities": {
     "may": {

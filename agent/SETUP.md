@@ -298,10 +298,10 @@ time to actually build.
 
 ## Optional add-ons (add only after the base is stable ~1 week)
 
-- **iMessage / phone number** — see README "Give your agent a phone number"
-- **Inbox triage automation** — README "Personal automation quickstart" step 5
-- **Family with Fleet** — README "Family setup with Fleet" (needs OrbStack)
-- **External agents (trading, etc.)** — README "Calling external agents (MCP)"
+- **iMessage / phone number** — [`docs/phone-number.md`](docs/phone-number.md)
+- **Inbox triage automation** — [`docs/personal-automation.md`](docs/personal-automation.md)
+- **Family with Fleet** — [`docs/family-fleet.md`](docs/family-fleet.md) (needs OrbStack)
+- **External agents (trading, etc.)** — [`docs/external-agents.md`](docs/external-agents.md)
 
 Do these one at a time. Each one adds surface area for things to break.
 
