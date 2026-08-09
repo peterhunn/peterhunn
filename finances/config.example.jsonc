@@ -1,0 +1,36 @@
+// Copy to ~/.finances/config.jsonc and edit.
+{
+  "dataDir": "~/.finances",
+  "host": "127.0.0.1",
+  "port": 8720,
+  "users": [
+    { "name": "peter",  "displayName": "Peter Hunn"  },
+    { "name": "shweta", "displayName": "Shweta Hunn" }
+  ],
+  "defaultOwner": "household",
+  "categoriesFile": "~/.finances/categories.yaml",
+
+  "plaid": {
+    "enabled": false,
+    "clientId": "",
+    "secret": "",
+    "env": "development",             // "sandbox" | "development" | "production"
+    "syncEveryMinutes": 240,
+    "products": ["transactions"]
+  },
+
+  "gmail": {
+    // Reuses May's gog auth. If gog is not installed, gmail bill parsing
+    // is skipped.
+    "billScanAccounts": [
+      "peter@hunnfamily.com",
+      "office@hunnfamily.com"
+    ],
+    "scanEveryMinutes": 720
+  },
+
+  "audit": {
+    "logFile": "~/.finances/audit.log",
+    "rotateWeekly": true
+  }
+}

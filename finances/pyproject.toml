@@ -1,0 +1,40 @@
+[project]
+name = "finances"
+version = "0.1.0"
+description = "Local-first household finance tracking for the Hunn family."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "jinja2>=3.1",
+    "click>=8.1",
+    "python-dateutil>=2.9",
+    "pyyaml>=6.0",
+    "mcp>=1.2",
+    "plaid-python>=27.0",
+    "keyring>=25.4",
+]
+
+[project.scripts]
+finances = "finances.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/finances"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.28",
+    "ruff>=0.7",
+]

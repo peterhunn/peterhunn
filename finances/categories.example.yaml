@@ -1,0 +1,110 @@
+# Categories tree. Edit freely. Loaded by `finances db init` and
+# `finances categories reload`.
+#
+# Rules below match transactions to a category. First match wins;
+# priority is by list order.
+
+categories:
+  - Income:
+      - Salary
+      - Interest
+      - Refund
+      - Other income
+  - Food & Household:
+      - Groceries
+      - Restaurants
+      - Coffee
+      - Takeout / delivery
+      - Household supplies
+  - Housing:
+      - Mortgage
+      - Rent
+      - Utilities
+      - Internet
+      - Home maintenance
+      - Property tax
+      - Insurance (home)
+  - Transport:
+      - Fuel
+      - Public transport
+      - Rideshare
+      - Vehicle maintenance
+      - Insurance (auto)
+      - Parking
+  - Health:
+      - Medical
+      - Pharmacy
+      - Dental
+      - Fitness
+      - Insurance (health)
+  - Kids:
+      - Childcare
+      - Schooling
+      - Activities
+      - Kids clothing
+      - Kids health
+  - Personal:
+      - Clothing
+      - Personal care
+      - Hobbies
+      - Books & media
+      - Subscriptions (personal)
+  - Family life:
+      - Travel
+      - Entertainment
+      - Gifts
+      - Charity
+      - Family subscriptions
+  - Financial:
+      - Bank fees
+      - Investment contributions
+      - Loan payments
+      - Transfers
+  - Uncategorized:
+      - Needs review
+
+rules:
+  # Groceries
+  - match: { merchant: "(whole foods|trader joe|wegmans|safeway|aldi|kroger|sainsbury|tesco|waitrose|ocado)" }
+    set:   { category: "Groceries" }
+    priority: 10
+
+  # Coffee
+  - match: { merchant: "(starbucks|blue bottle|philz|pret|costa|caffe nero)" }
+    set:   { category: "Coffee" }
+    priority: 10
+
+  # Fuel
+  - match: { merchant: "(shell|chevron|bp |exxon|mobil|arco|76 gas|texaco)" }
+    set:   { category: "Fuel" }
+    priority: 10
+
+  # Rideshare
+  - match: { merchant: "(uber|lyft|bolt)" }
+    set:   { category: "Rideshare" }
+    priority: 10
+
+  # Streaming
+  - match: { merchant: "(netflix|spotify|apple\\.com/bill|hulu|disney|hbo|max\\.com)" }
+    set:   { category: "Subscriptions (personal)" }
+    priority: 10
+
+  # Utilities (edit to match your providers)
+  - match: { merchant: "(comed|pge|con edison|national grid|british gas|thames water)" }
+    set:   { category: "Utilities" }
+    priority: 10
+
+  # Mortgage — replace with your servicer
+  - match: { merchant: "(rocket mortgage|chase mortgage|wells.*mortgage|halifax.*mortgage)" }
+    set:   { category: "Mortgage" }
+    priority: 5
+
+  # Income
+  - match: { min_amount: 0.01 }
+    set:   { category: "Other income" }
+    priority: 500       # fallback for positive amounts
+
+  # Default catch-all
+  - match: {}
+    set:   { category: "Needs review" }
+    priority: 999
