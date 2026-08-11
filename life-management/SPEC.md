@@ -19,6 +19,7 @@ area — those are addressed in separate documents.
 | `manager-console.md` | Human Life Manager console: queues, exceptions, quality, capacity. |
 | `data-model.md` | Storage, identity, encryption, tenancy, retention, portability. |
 | `models.md` | Model tiering, router, self-hosting policy, evals, cost controls. |
+| `operating-plan.md` | Phased operating plan: first 25 customers, hiring, SOPs, pricing, milestones. |
 
 ## System overview
 
