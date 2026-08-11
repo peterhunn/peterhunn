@@ -18,6 +18,7 @@ area — those are addressed in separate documents.
 | `permissions.md` | Autonomy ladder, policy DSL, approvals, spend limits, audit. |
 | `manager-console.md` | Human Life Manager console: queues, exceptions, quality, capacity. |
 | `data-model.md` | Storage, identity, encryption, tenancy, retention, portability. |
+| `models.md` | Model tiering, router, self-hosting policy, evals, cost controls. |
 
 ## System overview
 
