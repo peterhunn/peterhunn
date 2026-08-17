@@ -16,6 +16,7 @@
     "@atelier/db": "workspace:*",
     "@atelier/domain": "workspace:*",
     "fastify": "^5.0.0",
+    "fastify-plugin": "^5.0.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {

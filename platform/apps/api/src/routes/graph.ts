@@ -31,6 +31,7 @@ export const graphRoutes = (db: Db): FastifyPluginAsync => async (app) => {
 
   app.get<{ Params: { householdId: string } }>(
     "/households/:householdId/nodes",
+    { config: { audit: { action: "graph.list_nodes", resourceType: "graph" } } },
     async (req, reply) => {
       const hh = requireHousehold(req.params.householdId);
       if (!hh) return reply.code(404).send({ error: "household_not_found" });
@@ -43,6 +44,7 @@ export const graphRoutes = (db: Db): FastifyPluginAsync => async (app) => {
 
   app.post<{ Params: { householdId: string } }>(
     "/households/:householdId/nodes",
+    { config: { audit: { action: "graph.create_node", resourceType: "node" } } },
     async (req, reply) => {
       const hh = requireHousehold(req.params.householdId);
       if (!hh) return reply.code(404).send({ error: "household_not_found" });
@@ -65,6 +67,7 @@ export const graphRoutes = (db: Db): FastifyPluginAsync => async (app) => {
 
   app.get<{ Params: { householdId: string } }>(
     "/households/:householdId/edges",
+    { config: { audit: { action: "graph.list_edges", resourceType: "graph" } } },
     async (req, reply) => {
       const hh = requireHousehold(req.params.householdId);
       if (!hh) return reply.code(404).send({ error: "household_not_found" });
@@ -80,6 +83,7 @@ export const graphRoutes = (db: Db): FastifyPluginAsync => async (app) => {
 
   app.post<{ Params: { householdId: string } }>(
     "/households/:householdId/edges",
+    { config: { audit: { action: "graph.create_edge", resourceType: "edge" } } },
     async (req, reply) => {
       const hh = requireHousehold(req.params.householdId);
       if (!hh) return reply.code(404).send({ error: "household_not_found" });

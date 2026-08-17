@@ -13,17 +13,28 @@ const CreateHouseholdBody = z.object({
 export const householdRoutes = (db: Db): FastifyPluginAsync => async (app) => {
   const repo = householdRepo(db);
 
-  app.get("/households", async () => ({
-    households: repo.list(),
-  }));
-
-  app.get<{ Params: { id: string } }>("/households/:id", async (req, reply) => {
-    const household = repo.get(req.params.id as HouseholdId);
-    if (!household) return reply.code(404).send({ error: "not_found" });
-    return { household };
+  app.get("/households", async (req) => {
+    const all = repo.list();
+    if (req.actor.type === "manager") {
+      const granted = new Set(req.actor.householdIds);
+      return { households: all.filter((h) => granted.has(h.id)) };
+    }
+    return { households: all };
   });
 
+  app.get<{ Params: { householdId: string } }>(
+    "/households/:householdId",
+    async (req, reply) => {
+      const household = repo.get(req.params.householdId as HouseholdId);
+      if (!household) return reply.code(404).send({ error: "not_found" });
+      return { household };
+    },
+  );
+
   app.post("/households", async (req, reply) => {
+    if (req.actor.type !== "manager" && req.actor.type !== "system") {
+      return reply.code(403).send({ error: "not_permitted" });
+    }
     const body = CreateHouseholdBody.safeParse(req.body);
     if (!body.success) {
       return reply.code(400).send({ error: "invalid_body", issues: body.error.issues });
