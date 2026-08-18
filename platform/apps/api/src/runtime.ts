@@ -14,19 +14,44 @@ import {
   approvalRepo,
   graphRepo,
   householdRepo,
+  modelCallRepo,
   policyRepo,
   taskRepo,
   type Db,
 } from "@atelier/db";
 import { evaluate as evaluatePolicy } from "@atelier/policy";
+import { ModelRegistry, Router, callModel } from "@atelier/router";
 import {
   isKnownNodeType,
   nowIso,
   type ActionRequest,
   type HouseholdId,
+  type HouseholdRiskTier,
+  type ModelCall,
+  type ModelResponse,
   type NodeId,
   type NodeType,
 } from "@atelier/domain";
+
+// One process-wide registry and router. Both are stateless — the
+// registry's shape is code today, and the router is pure logic over
+// its inputs. Swapping to a config-driven registry later slots in
+// here without touching the runtime factory below.
+const REGISTRY = new ModelRegistry();
+const ROUTER = new Router(REGISTRY);
+
+// Per-household inference budget by subscription tier — Phase 0
+// heuristic. Real numbers come from the pricing model; these are
+// deliberately conservative so the router surfaces "approaching" /
+// "over" in demo scenarios.
+const MONTHLY_INFERENCE_BUDGET_USD: Record<string, number> = {
+  life: 25,
+  executive: 60,
+  private: 150,
+};
+
+export const getRegistry = (): ModelRegistry => REGISTRY;
+export const getRouter = (): Router => ROUTER;
 
 export const buildToolRegistry = (): ToolRegistry => {
   const r = new ToolRegistry();
@@ -37,12 +62,38 @@ export const buildToolRegistry = (): ToolRegistry => {
   return r;
 };
 
+const budgetStatus = (spent: number, cap: number): "under" | "approaching" | "over" => {
+  if (cap <= 0) return "under";
+  const ratio = spent / cap;
+  if (ratio >= 1) return "over";
+  if (ratio >= 0.8) return "approaching";
+  return "under";
+};
+
 export const buildOrchestrator = (db: Db): Orchestrator => {
   const policies = policyRepo(db);
   const actions = actionRepo(db);
   const households = householdRepo(db);
   const tasks = taskRepo(db);
   const approvals = approvalRepo(db);
+  const modelCalls = modelCallRepo(db);
+
+  const householdCache = new Map<
+    string,
+    { riskTier: HouseholdRiskTier; cap: number }
+  >();
+  const loadHousehold = (id: HouseholdId) => {
+    const cached = householdCache.get(id);
+    if (cached) return cached;
+    const hh = households.get(id);
+    if (!hh) throw new Error(`household not found: ${id}`);
+    const rec = {
+      riskTier: hh.riskTier,
+      cap: MONTHLY_INFERENCE_BUDGET_USD[hh.tier] ?? 25,
+    };
+    householdCache.set(id, rec);
+    return rec;
+  };
 
   return new Orchestrator({
     agents: [householdAgent, calendarAgent],
@@ -84,15 +135,38 @@ export const buildOrchestrator = (db: Db): Orchestrator => {
           { householdId: hh, request: req },
         ),
     },
-    actions: {
-      record: (i) => actions.record(i),
-    },
+    actions: { record: (i) => actions.record(i) },
     approvals: {
-      enqueue: (i) =>
-        approvals.create({
-          ...i,
-          proposedBy: i.proposedBy,
-        }),
+      enqueue: (i) => approvals.create({ ...i, proposedBy: i.proposedBy }),
+    },
+    models: {
+      callModel: async (
+        householdId: HouseholdId,
+        runId: string,
+        taskId: string,
+        call: ModelCall,
+      ): Promise<ModelResponse> => {
+        return callModel(
+          {
+            router: ROUTER,
+            recorder: { record: (i) => modelCalls.record(i) },
+            budget: {
+              status: (h) => {
+                const { cap } = loadHousehold(h);
+                const rollup = modelCalls.rollup(h, 30);
+                return budgetStatus(rollup.totalUsd, cap);
+              },
+              riskTier: (h) => loadHousehold(h).riskTier,
+            },
+          },
+          call,
+          {
+            householdId,
+            triggeringRunId: runId,
+            triggeringTaskId: taskId,
+          },
+        );
+      },
     },
   });
 };
@@ -143,5 +217,25 @@ export const buildGraphWriter = (
         replacementId as NodeId | undefined,
       );
     },
+  };
+};
+
+export const inferenceBudgetFor = (
+  db: Db,
+  householdId: HouseholdId,
+): { totalUsd: number; totalCalls: number; capUsd: number; status: "under" | "approaching" | "over"; byTier: Record<string, { calls: number; usd: number }> } => {
+  const households = householdRepo(db);
+  const hh = households.get(householdId);
+  const cap =
+    hh && MONTHLY_INFERENCE_BUDGET_USD[hh.tier] !== undefined
+      ? MONTHLY_INFERENCE_BUDGET_USD[hh.tier]!
+      : 25;
+  const rollup = modelCallRepo(db).rollup(householdId, 30);
+  return {
+    totalUsd: rollup.totalUsd,
+    totalCalls: rollup.totalCalls,
+    capUsd: cap,
+    status: budgetStatus(rollup.totalUsd, cap),
+    byTier: rollup.byTier,
   };
 };

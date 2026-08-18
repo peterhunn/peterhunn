@@ -1,5 +1,5 @@
 {
-  "name": "@atelier/agents",
+  "name": "@atelier/router",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -15,10 +15,7 @@
     "clean": "rm -rf dist .turbo *.tsbuildinfo"
   },
   "dependencies": {
-    "@atelier/domain": "workspace:*",
-    "@atelier/policy": "workspace:*",
-    "@atelier/router": "workspace:*",
-    "zod": "^3.23.8"
+    "@atelier/domain": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.5.4",

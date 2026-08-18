@@ -431,3 +431,42 @@ form.login {
   cursor: not-allowed;
 }
 
+/* Budget bar */
+
+.budget-bar {
+  margin: 12px 0 8px;
+  padding: 14px 16px;
+  background: var(--paper-2);
+  border: 1px solid var(--rule-soft);
+  border-radius: 4px;
+}
+
+.budget-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.budget-label {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.budget-track {
+  width: 100%;
+  height: 4px;
+  background: var(--rule-soft);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.budget-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+

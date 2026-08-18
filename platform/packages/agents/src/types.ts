@@ -4,6 +4,8 @@ import {
   type ActionOutcome,
   type ActorType,
   type HouseholdId,
+  type ModelCall,
+  type ModelResponse,
   type PolicyDecision,
   type SideEffectClass,
 } from "@atelier/domain";
@@ -83,6 +85,7 @@ export interface AgentContext {
       attrs?: Record<string, unknown>;
     },
   ) => Promise<AgentToolResult<O>>;
+  readonly callModel: (call: ModelCall) => Promise<ModelResponse>;
   readonly logger: { info: (msg: string, ctx?: unknown) => void };
 }
 

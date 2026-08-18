@@ -8,12 +8,13 @@ Product and architecture spec lives in `../life-management/`.
 ```
 platform/
 ├── packages/
-│   ├── domain/     # Life Graph types, provenance, ontology, identity, policy (no framework)
+│   ├── domain/     # Life Graph types, provenance, ontology, identity, policy, models (no framework)
 │   ├── db/         # Drizzle schema, migrations, repositories
 │   ├── policy/     # Autonomy-rung evaluator, scope matcher, rolling limits
-│   └── agents/     # Orchestrator, agent + tool contracts, one concrete agent
+│   ├── agents/    # Orchestrator, agent + tool contracts, household + calendar agents
+│   └── router/     # Model registry, tier-aware router, callModel + mock provider
 ├── apps/
-│   ├── api/        # Fastify HTTP service (auth + audit + graph + policy + actions + orchestrator)
+│   ├── api/        # Fastify HTTP service (auth + audit + graph + policy + actions + orchestrator + models)
 │   └── console/    # Next.js manager console
 └── scripts/
     └── seed.ts     # Mint a dev manager, household, graph nodes, policies, and a bearer token
@@ -116,11 +117,16 @@ and audit paths end to end.
 - Console: cross-household approval Inbox on the dashboard; per-
   household Awaiting decision cards on the household page; Approve /
   Reject controls with optional edit note.
-
-## What is deliberately not yet built
-
-- Additional specialist agents (calendar, inbox, travel, etc.).
-- Real provider integrations behind the tools.
-- Real auth (passkeys, SSO). Approving as a manager on a
-  customer-approval item is currently a phase-0 proxy path.
-- Router + model registry (see `../life-management/models.md`).
+- Model registry — four tiers (T0 rules / T1 small / T2 mid / T3
+  frontier). Router picks a specific model per task class with hard
+  rules (execute+hazardous → T3 always; HNW household → T3 pin) and
+  fallback chains that only ever escalate up-tier. Mock provider so
+  the flow runs without external API calls. Every call lands in the
+  `model_calls` ledger with input/output hashes, cost estimate,
+  latency, and the router's reasons.
+- Per-household inference budget rollup (30-day window) driven by
+  subscription tier; router demotes back to the declared min when
+  the household is over budget, never silently degrades below it.
+  Console: budget bar on the household page (green / amber / red),
+  Models page in the top nav listing every registered model and
+  task class.

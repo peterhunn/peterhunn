@@ -6,3 +6,4 @@ export * from "./ontology.js";
 export * from "./identity.js";
 export * from "./policy.js";
 export * from "./approvals.js";
+export * from "./models.js";

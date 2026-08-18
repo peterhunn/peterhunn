@@ -82,6 +82,32 @@ export const calendarAgent: Agent = {
 
   async handle(intent: Intent, ctx: AgentContext): Promise<AgentTaskOutput> {
     if (intent.kind === "calendar.appointment.create") {
+      // A T1 model touch so this agent exercises the router + budget.
+      // Real production usage would parse a free-text "book my dentist
+      // next Tuesday at 3" into a structured intent; here we run a
+      // trivial classification purely to record a model call and let
+      // the budget bar reflect activity.
+      try {
+        await ctx.callModel({
+          taskClass: "calendar.parse",
+          messages: [
+            {
+              role: "system",
+              content:
+                "Classify a calendar intent into one of: personal, professional, family. Return one word.",
+            },
+            {
+              role: "user",
+              content: JSON.stringify(intent.attrs),
+            },
+          ],
+          maxOutputTokens: 8,
+        });
+      } catch (err) {
+        ctx.logger.info("router callModel failed (non-fatal)", {
+          message: (err as Error).message,
+        });
+      }
       return handleCreate(intent, ctx);
     }
     if (intent.kind === "calendar.appointment.reschedule") {

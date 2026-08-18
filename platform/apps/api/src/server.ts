@@ -11,6 +11,7 @@ import { auditRoutes } from "./routes/audit.js";
 import { policyRoutes } from "./routes/policies.js";
 import { orchestratorRoutes } from "./routes/orchestrator.js";
 import { approvalRoutes } from "./routes/approvals.js";
+import { modelRoutes } from "./routes/models.js";
 
 export const buildServer = (db: Db) => {
   const app = Fastify({ logger: { level: process.env["LOG_LEVEL"] ?? "info" } });
@@ -26,6 +27,7 @@ export const buildServer = (db: Db) => {
   app.register(policyRoutes(db));
   app.register(orchestratorRoutes(db));
   app.register(approvalRoutes(db));
+  app.register(modelRoutes(db));
 
   return app;
 };

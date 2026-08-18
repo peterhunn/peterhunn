@@ -26,6 +26,7 @@ export default async function HouseholdPage({
     actionsRes,
     tasksRes,
     approvalsRes,
+    budget,
   ] = await Promise.all([
     client.me(),
     client
@@ -40,6 +41,7 @@ export default async function HouseholdPage({
     client.listActions(id as HouseholdId).catch(() => ({ actions: [] })),
     client.listTasks(id as HouseholdId).catch(() => ({ tasks: [] })),
     client.listApprovals(id as HouseholdId).catch(() => ({ approvals: [] })),
+    client.inferenceBudget(id as HouseholdId).catch(() => null),
   ]);
 
   if (!hhRes) notFound();
@@ -71,6 +73,28 @@ export default async function HouseholdPage({
           <div className="empty" style={{ borderColor: "var(--danger)", color: "var(--danger)" }}>
             Household is <strong>frozen</strong>
             {hh.frozenReason ? ` — ${hh.frozenReason}` : ""}. Everything is in Observe.
+          </div>
+        ) : null}
+
+        {budget ? (
+          <div className="budget-bar">
+            <div className="budget-line">
+              <span className="budget-label">Inference budget (30d)</span>
+              <span className={`tag ${budget.status === "under" ? "confirmed" : budget.status === "approaching" ? "candidate" : "retired"}`}>
+                {budget.status}
+              </span>
+              <span className="mono">
+                ${budget.totalUsd.toFixed(4)} of ${budget.capUsd.toFixed(2)} · {budget.totalCalls} calls
+              </span>
+            </div>
+            <div className="budget-track">
+              <div
+                className="budget-fill"
+                style={{
+                  width: `${Math.min(100, (budget.totalUsd / Math.max(budget.capUsd, 0.0001)) * 100)}%`,
+                }}
+              />
+            </div>
           </div>
         ) : null}
 

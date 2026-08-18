@@ -17,6 +17,7 @@ import {
   type ApprovalSink,
   type GraphView,
   type AgentGraphWriter,
+  type ModelRuntime,
 } from "../src/index.js";
 
 const HH = "hh_test" as HouseholdId;
@@ -102,6 +103,12 @@ const mkGraph = (nodes: Array<{ id: string; type: string; data: Record<string, u
   listNodes: (opts) => (opts?.type ? nodes.filter((n) => n.type === opts.type) : nodes),
 });
 
+const mkModels = (): ModelRuntime => ({
+  callModel: async () => {
+    throw new Error("model calls are not expected in these tests");
+  },
+});
+
 const mkWriter = (): AgentGraphWriter & { written: unknown[]; superseded: string[] } => {
   const written: unknown[] = [];
   const superseded: string[] = [];
@@ -148,6 +155,7 @@ describe("orchestrator + household agent + vendor tool", () => {
       policy: mkPolicy(),
       actions: recorder,
       approvals: mkApprovals(),
+      models: mkModels(),
     });
 
     const res = await orch.run({ householdId: HH, actor, graph, writer: mkWriter(), intent: scheduleIntent });
@@ -172,6 +180,7 @@ describe("orchestrator + household agent + vendor tool", () => {
       policy: mkPolicy(),
       actions: recorder,
       approvals: mkApprovals(),
+      models: mkModels(),
     });
 
     const res = await orch.run({ householdId: HH, actor, graph, writer: mkWriter(), intent: scheduleIntent });
@@ -199,6 +208,7 @@ describe("orchestrator + household agent + vendor tool", () => {
       }),
       actions: recorder,
       approvals: mkApprovals(),
+      models: mkModels(),
     });
 
     const res = await orch.run({ householdId: HH, actor, graph, writer: mkWriter(), intent: scheduleIntent });
@@ -225,6 +235,7 @@ describe("orchestrator + household agent + vendor tool", () => {
       }),
       actions: recorder,
       approvals,
+      models: mkModels(),
     });
 
     const res = await orch.run({ householdId: HH, actor, graph, writer: mkWriter(), intent: scheduleIntent });
@@ -243,6 +254,7 @@ describe("orchestrator + household agent + vendor tool", () => {
       policy: mkPolicy(),
       actions: mkRecorder(),
       approvals: mkApprovals(),
+      models: mkModels(),
     });
 
     const res = await orch.run({

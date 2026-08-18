@@ -2,8 +2,10 @@ import type {
   Actor,
   ApprovalItem,
   HouseholdId,
+  ModelSpec,
   PolicyDecision,
   PolicySpec,
+  TaskClassSpec,
 } from "@atelier/domain";
 
 const API_URL = process.env.ATELIER_API_URL ?? "http://localhost:3001";
@@ -144,6 +146,17 @@ export const api = (token: string) => ({
       `/households/${id}/approvals/${approvalId}/reject`,
       body,
     ),
+  listModels: () => request<{ models: ModelSpec[] }>(token, "GET", "/models"),
+  listTaskClasses: () =>
+    request<{ taskClasses: TaskClassSpec[] }>(token, "GET", "/models/task-classes"),
+  inferenceBudget: (id: HouseholdId) =>
+    request<{
+      totalUsd: number;
+      totalCalls: number;
+      capUsd: number;
+      status: "under" | "approaching" | "over";
+      byTier: Record<string, { calls: number; usd: number }>;
+    }>(token, "GET", `/households/${id}/inference-budget`),
 });
 
 export interface TaskSummary {

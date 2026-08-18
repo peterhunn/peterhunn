@@ -8,6 +8,8 @@ export function ConsoleNav({ managerName }: { managerName: string }) {
         ATELIER
       </Link>
       <div className="nav-right">
+        <Link href="/dashboard">Households</Link>
+        <Link href="/models">Models</Link>
         <span>{managerName}</span>
         <form action={logout}>
           <button className="link-btn" type="submit">

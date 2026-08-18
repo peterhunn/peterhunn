@@ -14,6 +14,8 @@ import type {
   ActionRequest,
   ActorType,
   HouseholdId,
+  ModelCall,
+  ModelResponse,
   PolicyDecision,
   PolicyId,
   SideEffectClass,
@@ -110,6 +112,15 @@ export interface ApprovalSink {
   }): { id: string };
 }
 
+export interface ModelRuntime {
+  callModel(
+    householdId: HouseholdId,
+    runId: string,
+    taskId: string,
+    call: ModelCall,
+  ): Promise<ModelResponse>;
+}
+
 export interface OrchestratorDeps {
   readonly agents: readonly Agent[];
   readonly tools: ToolRegistry;
@@ -117,6 +128,7 @@ export interface OrchestratorDeps {
   readonly policy: PolicyRuntime;
   readonly actions: ActionRecorder;
   readonly approvals: ApprovalSink;
+  readonly models: ModelRuntime;
   readonly logger?: { info: (msg: string, ctx?: unknown) => void };
 }
 
@@ -205,6 +217,8 @@ export class Orchestrator {
             request,
             subject: intent.subjectPrincipalId,
           }),
+        callModel: (call) =>
+          this.deps.models.callModel(householdId, run.id, task.id, call),
         logger,
       };
 

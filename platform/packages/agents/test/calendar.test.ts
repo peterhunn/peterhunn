@@ -10,6 +10,7 @@ import {
   type ApprovalSink,
   type GraphView,
   type Intent,
+  type ModelRuntime,
   type PolicyRuntime,
   type TaskLedger,
 } from "../src/index.js";
@@ -72,6 +73,12 @@ const mkApprovals = (): ApprovalSink & { queued: unknown[] } => {
   return { queued, enqueue: (i) => { queued.push(i); return { id: `apr_${++n}` }; } };
 };
 
+const mkModels = (): ModelRuntime => ({
+  callModel: async () => {
+    throw new Error("model calls not expected in these tests");
+  },
+});
+
 const mkWriter = (): AgentGraphWriter & { written: Array<{ type: string; data: Record<string, unknown> }>; superseded: string[] } => {
   const written: Array<{ type: string; data: Record<string, unknown> }> = [];
   const superseded: string[] = [];
@@ -122,6 +129,7 @@ describe("calendar agent", () => {
       policy: mkPolicy(() => ({})),
       actions: recorder,
       approvals: mkApprovals(),
+      models: mkModels(),
     });
     const res = await orch.run({
       householdId: HH,
@@ -148,6 +156,7 @@ describe("calendar agent", () => {
       policy: mkPolicy(() => ({})),
       actions: recorder,
       approvals: mkApprovals(),
+      models: mkModels(),
     });
     const res = await orch.run({
       householdId: HH,
@@ -181,6 +190,7 @@ describe("calendar agent", () => {
       policy: mkPolicy(() => ({})),
       actions: recorder,
       approvals: mkApprovals(),
+      models: mkModels(),
     });
     const res = await orch.run({
       householdId: HH,
@@ -233,6 +243,7 @@ describe("calendar agent", () => {
       }),
       actions: recorder,
       approvals,
+      models: mkModels(),
     });
     const res = await orch.run({
       householdId: HH,
