@@ -52,9 +52,87 @@ const cannedResponse = (model: ModelSpec, call: ModelCall): string => {
     case "calendar.parse":
       return JSON.stringify({ category: "professional" });
 
+    case "orchestrator.simple":
+    case "orchestrator.cross_domain":
+      return JSON.stringify(plannerPlan(userMsg));
+
     default:
       return `mock:${model.id}:${call.taskClass}`;
   }
+};
+
+// Simplified planner heuristic — a real T2/T3 model does the reasoning
+// in production; this canned version matches a small number of common
+// phrases so the console demo produces plausible plans without any
+// external LLM.
+const plannerPlan = (
+  prompt: string,
+): {
+  reasoning: string;
+  intents: Array<{ kind: string; attrs: Record<string, unknown> }>;
+} => {
+  const lower = prompt.toLowerCase();
+  const intents: Array<{ kind: string; attrs: Record<string, unknown> }> = [];
+  const reasons: string[] = [];
+
+  if (/hvac|plumb|contractor|repair|fence|clean(er|ing)|maintenance/i.test(lower)) {
+    const serviceType = /hvac/i.test(lower)
+      ? "HVAC"
+      : /plumb/i.test(lower)
+        ? "plumbing"
+        : /clean/i.test(lower)
+          ? "cleaning"
+          : "service";
+    intents.push({
+      kind: "household.vendor.schedule",
+      attrs: { propertyNodeId: "nod_home", serviceType },
+    });
+    reasons.push(`recognized household ${serviceType} request`);
+  }
+
+  if (/(purchase|buy|order)/i.test(lower)) {
+    const amountMatch = /\$(\d[\d,]*)/.exec(prompt);
+    const amountUsd = amountMatch ? Number(amountMatch[1]!.replace(/,/g, "")) : 250;
+    intents.push({
+      kind: "household.vendor.purchase",
+      attrs: {
+        itemDescription: prompt.slice(0, 80),
+        serviceType: "office",
+        amountUsd,
+      },
+    });
+    reasons.push(`recognized purchase intent (~$${amountUsd})`);
+  }
+
+  if (/meeting|appointment|schedule|book/i.test(lower)) {
+    const startAt = nextBusinessAt(15);
+    const endAt = new Date(new Date(startAt).getTime() + 60 * 60 * 1000).toISOString();
+    intents.push({
+      kind: "calendar.appointment.create",
+      attrs: {
+        title: prompt.slice(0, 60),
+        startAt,
+        endAt,
+      },
+    });
+    reasons.push("recognized calendar creation");
+  }
+
+  if (intents.length === 0) {
+    return {
+      reasoning:
+        "No mapped intents. Real planning requires a live model; the mock provider handles a small set of demo phrases.",
+      intents: [],
+    };
+  }
+  return { reasoning: reasons.join("; "), intents };
+};
+
+const nextBusinessAt = (hourUtc: number): string => {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + 1);
+  d.setUTCHours(hourUtc, 0, 0, 0);
+  return d.toISOString();
 };
 
 const guessUrgency = (body: string): "low" | "normal" | "high" => {

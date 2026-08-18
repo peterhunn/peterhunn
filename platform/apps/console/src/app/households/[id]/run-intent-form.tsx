@@ -8,12 +8,21 @@ import {
   runVendorPurchaseIntent,
   runCalendarCreateIntent,
   runCalendarRescheduleIntent,
+  planAndRun,
 } from "./actions";
 
-type Mode = "schedule" | "purchase" | "calendar_create" | "calendar_reschedule";
+type Mode =
+  | "plan"
+  | "schedule"
+  | "purchase"
+  | "calendar_create"
+  | "calendar_reschedule";
 
 export function RunIntentForm({ householdId }: { householdId: HouseholdId }) {
-  const [mode, setMode] = useState<Mode>("schedule");
+  const [mode, setMode] = useState<Mode>("plan");
+  const [prompt, setPrompt] = useState(
+    "Please schedule quarterly HVAC service at the primary residence.",
+  );
   const [serviceType, setServiceType] = useState("HVAC");
   const [propertyNodeId, setPropertyNodeId] = useState("nod_home");
   const [itemDescription, setItemDescription] = useState("Ergonomic desk chair");
@@ -36,6 +45,9 @@ export function RunIntentForm({ householdId }: { householdId: HouseholdId }) {
         startTransition(async () => {
           let res;
           switch (mode) {
+            case "plan":
+              res = await planAndRun(householdId, prompt);
+              break;
             case "schedule":
               res = await runVendorScheduleIntent(householdId, {
                 serviceType,
@@ -72,12 +84,25 @@ export function RunIntentForm({ householdId }: { householdId: HouseholdId }) {
       <div className="form-field inline">
         <label htmlFor="mode">Intent</label>
         <select id="mode" value={mode} onChange={(e) => setMode(e.target.value as Mode)}>
+          <option value="plan">natural language → plan &amp; run</option>
           <option value="schedule">vendor.schedule</option>
           <option value="purchase">vendor.purchase</option>
           <option value="calendar_create">calendar.appointment.create</option>
           <option value="calendar_reschedule">calendar.appointment.reschedule</option>
         </select>
       </div>
+
+      {mode === "plan" ? (
+        <div className="form-field inline" style={{ flex: "1 1 100%", minWidth: 300 }}>
+          <label htmlFor="prompt">Say it in plain English</label>
+          <input
+            id="prompt"
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            style={{ minWidth: 320 }}
+          />
+        </div>
+      ) : null}
 
       {mode === "schedule" || mode === "purchase" ? (
         <div className="form-field inline">

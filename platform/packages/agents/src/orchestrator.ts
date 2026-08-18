@@ -8,6 +8,13 @@ import type {
   Intent,
   OrchestratorRunResult,
 } from "./types.js";
+import {
+  materializeIntent,
+  parsePlan,
+  pickPlannerTaskClass,
+  plannerSystemPrompt,
+  type Plan,
+} from "./planner.js";
 import type { ToolRegistry } from "./tool-registry.js";
 import type {
   ActionOutcome,
@@ -140,8 +147,92 @@ export interface RunOptions {
   readonly intent: Intent;
 }
 
+export interface PlanAndRunOptions {
+  readonly householdId: HouseholdId;
+  readonly actor: { type: ActorType; id: string; displayName: string };
+  readonly graph: GraphView;
+  readonly writer: AgentGraphWriter;
+  readonly prompt: string;
+  readonly origin: Intent["origin"];
+}
+
+export interface PlanAndRunResult {
+  readonly plan: Plan;
+  readonly plannerTaskClass: string;
+  readonly runs: readonly OrchestratorRunResult[];
+}
+
 export class Orchestrator {
   constructor(private readonly deps: OrchestratorDeps) {}
+
+  async planAndRun(opts: PlanAndRunOptions): Promise<PlanAndRunResult> {
+    const { householdId, actor, graph, writer, prompt, origin } = opts;
+    const logger = this.deps.logger ?? { info: () => {} };
+
+    const plannerRun = this.deps.ledger.startRun({
+      householdId,
+      intentKind: "orchestrator.plan",
+      intentAttrs: { prompt },
+      origin: origin.source,
+      originBy: origin.by,
+    });
+    const plannerTask = this.deps.ledger.createTask({
+      runId: plannerRun.id,
+      householdId,
+      agent: "orchestrator",
+      agentVersion: "0.1.0",
+      kind: "orchestrator.plan",
+      inputs: { prompt },
+    });
+
+    const plannerTaskClass = pickPlannerTaskClass(prompt);
+    let plan: Plan;
+    try {
+      const modelResponse = await this.deps.models.callModel(
+        householdId,
+        plannerRun.id,
+        plannerTask.id,
+        {
+          taskClass: plannerTaskClass,
+          messages: [
+            { role: "system", content: plannerSystemPrompt() },
+            { role: "user", content: prompt },
+          ],
+          maxOutputTokens: 800,
+        },
+      );
+      plan = parsePlan(modelResponse.content);
+      this.deps.ledger.updateTask(plannerTask.id, {
+        state: "completed",
+        decisionSummary: `Planned ${plan.intents.length} intent${
+          plan.intents.length === 1 ? "" : "s"
+        } via ${plannerTaskClass}`,
+        outputs: { plan, modelId: modelResponse.modelId, tier: modelResponse.tier },
+      });
+      this.deps.ledger.finishRun(plannerRun.id, "completed");
+    } catch (err) {
+      const message = (err as Error).message;
+      logger.info("planner failed", { message });
+      this.deps.ledger.updateTask(plannerTask.id, {
+        state: "failed",
+        errorMessage: message,
+      });
+      this.deps.ledger.finishRun(plannerRun.id, "failed");
+      return {
+        plan: { reasoning: message, intents: [] },
+        plannerTaskClass,
+        runs: [],
+      };
+    }
+
+    const runs: OrchestratorRunResult[] = [];
+    for (const item of plan.intents) {
+      const intent = materializeIntent(item, origin);
+      const result = await this.run({ householdId, actor, graph, writer, intent });
+      runs.push(result);
+    }
+    return { plan, plannerTaskClass, runs };
+  }
 
   async run(opts: RunOptions): Promise<OrchestratorRunResult> {
     const { intent, householdId, graph, writer, actor } = opts;

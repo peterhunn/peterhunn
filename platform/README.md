@@ -140,3 +140,11 @@ and audit paths end to end.
   Console: budget bar on the household page (green / amber / red),
   Models page in the top nav listing every registered model and
   task class.
+- LLM-driven Orchestrator planner — `planAndRun(prompt)` runs an
+  `orchestrator.simple` (short single-domain) or
+  `orchestrator.cross_domain` (long / multi-domain) model call, parses
+  a structured plan `{ reasoning, intents[] }`, and dispatches each
+  intent through the same `.run()` path programmatic callers use. The
+  planner run and the specialist runs are all correlated in the task
+  ledger. Console: a "natural language → plan & run" mode on the Run
+  intent form.

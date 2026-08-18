@@ -128,6 +128,17 @@ export const api = (token: string) => ({
     request<{ tasks: TaskSummary[] }>(token, "GET", `/households/${id}/tasks`),
   runIntent: (id: HouseholdId, intent: unknown) =>
     request<{ run: RunResult }>(token, "POST", `/households/${id}/orchestrator/run`, intent),
+  planAndRun: (id: HouseholdId, body: { prompt: string; origin?: unknown }) =>
+    request<{
+      planAndRun: {
+        plan: {
+          reasoning: string;
+          intents: Array<{ kind: string; attrs: Record<string, unknown> }>;
+        };
+        plannerTaskClass: string;
+        runs: RunResult[];
+      };
+    }>(token, "POST", `/households/${id}/orchestrator/plan-and-run`, body),
   listApprovals: (id: HouseholdId) =>
     request<{ approvals: ApprovalItem[] }>(token, "GET", `/households/${id}/approvals`),
   approvalInbox: () =>

@@ -71,3 +71,33 @@ export async function processInboxMessage(
 ): Promise<{ message: string }> {
   return runIntent(householdId, "inbox.message.process", msg);
 }
+
+export async function planAndRun(
+  householdId: HouseholdId,
+  prompt: string,
+): Promise<{ message: string }> {
+  const token = await getSessionToken();
+  if (!token) return { message: "Session expired." };
+  try {
+    const res = await api(token).planAndRun(householdId, {
+      prompt,
+      origin: { source: "customer", by: "console" },
+    });
+    const { plan, plannerTaskClass, runs } = res.planAndRun;
+    if (plan.intents.length === 0) {
+      return { message: `${plannerTaskClass}: ${plan.reasoning || "no intents produced"}` };
+    }
+    const summaries = runs.map((r, idx) => {
+      const state = r.tasks[0]?.state ?? r.state;
+      return `${plan.intents[idx]!.kind}=${state}`;
+    });
+    return {
+      message: `${plannerTaskClass} → ${plan.intents.length} intent${
+        plan.intents.length === 1 ? "" : "s"
+      }: ${summaries.join(", ")}${plan.reasoning ? ` — ${plan.reasoning}` : ""}`,
+    };
+  } catch (err) {
+    if (err instanceof ApiError) return { message: `Error: ${err.message}` };
+    return { message: `Error: ${(err as Error).message}` };
+  }
+}
