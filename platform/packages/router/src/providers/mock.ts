@@ -1,8 +1,11 @@
 import type { ModelCall, ModelResponse, ModelSpec } from "@atelier/domain";
+import type { ProviderAdapter } from "./types.js";
 
-// Mock provider used until real adapters are wired in. Canned per-task
-// responses so the console demo shows plausible model output. Real
-// adapters replace this file only.
+// Mock provider — the fallback used when a real provider's API key is
+// not configured, and the source of canned demo output. Real adapters
+// live alongside this file; the mockAdapter object exposes invokeMock
+// through the ProviderAdapter contract so the registry can treat it
+// uniformly.
 
 export const invokeMock = async (
   model: ModelSpec,
@@ -133,6 +136,11 @@ const nextBusinessAt = (hourUtc: number): string => {
   d.setUTCDate(d.getUTCDate() + 1);
   d.setUTCHours(hourUtc, 0, 0, 0);
   return d.toISOString();
+};
+
+export const mockAdapter: ProviderAdapter = {
+  name: "mock",
+  invoke: invokeMock,
 };
 
 const guessUrgency = (body: string): "low" | "normal" | "high" => {

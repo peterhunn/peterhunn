@@ -8,7 +8,7 @@ import type {
   TierId,
 } from "@atelier/domain";
 import type { Router } from "./router.js";
-import { invokeMock } from "./providers/mock.js";
+import { getAdapter } from "./providers/registry.js";
 
 // Persistence seam — everything the runtime needs to record about a
 // model call. Kept narrow so tests skip the DB entirely.
@@ -86,7 +86,8 @@ export const callModel = async (
   for (const model of chain) {
     try {
       const t0 = Date.now();
-      const raw = await invokeMock(model, call);
+      const adapter = getAdapter(model.provider);
+      const raw = await adapter.invoke(model, call);
       const latencyMs = Math.max(raw.latencyMs, Date.now() - t0);
       const outputHash = hash(raw.content);
       const rec = deps.recorder.record({

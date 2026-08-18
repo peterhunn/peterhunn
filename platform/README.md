@@ -140,6 +140,14 @@ and audit paths end to end.
   Console: budget bar on the household page (green / amber / red),
   Models page in the top nav listing every registered model and
   task class.
+- Live provider adapters — Anthropic (Messages), OpenAI (Chat
+  Completions), Google Gemini (generateContent), and a generic
+  OpenAI-compatible adapter (Ollama, Together, Groq, vLLM,
+  Fireworks, and any other endpoint that speaks
+  /v1/chat/completions). Missing API keys fall back to the mock
+  adapter and stamp a visible reason on the response so the
+  fallback is never silent. Configure via `.env` — see
+  `.env.example`.
 - LLM-driven Orchestrator planner — `planAndRun(prompt)` runs an
   `orchestrator.simple` (short single-domain) or
   `orchestrator.cross_domain` (long / multi-domain) model call, parses

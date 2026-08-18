@@ -1,4 +1,10 @@
 export * from "./registry.js";
 export * from "./router.js";
 export * from "./call.js";
-export { invokeMock } from "./providers/mock.js";
+export { invokeMock, mockAdapter } from "./providers/mock.js";
+export { anthropicAdapter } from "./providers/anthropic.js";
+export { openaiAdapter } from "./providers/openai.js";
+export { googleAdapter } from "./providers/google.js";
+export { openaiCompatibleAdapter } from "./providers/openai-compatible.js";
+export { getAdapter, KNOWN_PROVIDERS } from "./providers/registry.js";
+export type { ProviderAdapter } from "./providers/types.js";
