@@ -4,6 +4,7 @@ import { getSessionToken } from "@/lib/session";
 import { api, ApiError } from "@/lib/api";
 import type { HouseholdId } from "@atelier/domain";
 import { ConsoleNav } from "../../console-nav";
+import { RunIntentForm } from "./run-intent-form";
 
 export default async function HouseholdPage({
   params,
@@ -15,19 +16,21 @@ export default async function HouseholdPage({
   if (!token) redirect("/");
 
   const client = api(token);
-  const [{ actor }, hhRes, nodesRes, eventsRes, policiesRes, actionsRes] = await Promise.all([
-    client.me(),
-    client
-      .getHousehold(id as HouseholdId)
-      .catch((e) => {
-        if (e instanceof ApiError && (e.status === 404 || e.status === 403)) return null;
-        throw e;
-      }),
-    client.listNodes(id as HouseholdId).catch(() => ({ nodes: [] })),
-    client.listAudit(id as HouseholdId).catch(() => ({ events: [] })),
-    client.listPolicies(id as HouseholdId).catch(() => ({ policies: [] })),
-    client.listActions(id as HouseholdId).catch(() => ({ actions: [] })),
-  ]);
+  const [{ actor }, hhRes, nodesRes, eventsRes, policiesRes, actionsRes, tasksRes] =
+    await Promise.all([
+      client.me(),
+      client
+        .getHousehold(id as HouseholdId)
+        .catch((e) => {
+          if (e instanceof ApiError && (e.status === 404 || e.status === 403)) return null;
+          throw e;
+        }),
+      client.listNodes(id as HouseholdId).catch(() => ({ nodes: [] })),
+      client.listAudit(id as HouseholdId).catch(() => ({ events: [] })),
+      client.listPolicies(id as HouseholdId).catch(() => ({ policies: [] })),
+      client.listActions(id as HouseholdId).catch(() => ({ actions: [] })),
+      client.listTasks(id as HouseholdId).catch(() => ({ tasks: [] })),
+    ]);
 
   if (!hhRes) notFound();
   const hh = hhRes.household;
@@ -35,6 +38,7 @@ export default async function HouseholdPage({
   const events = eventsRes.events;
   const policies = policiesRes.policies;
   const actions = actionsRes.actions;
+  const tasks = tasksRes.tasks;
 
   return (
     <>
@@ -57,6 +61,64 @@ export default async function HouseholdPage({
             {hh.frozenReason ? ` — ${hh.frozenReason}` : ""}. Everything is in Observe.
           </div>
         ) : null}
+
+        <div className="section-head">
+          <h2>Run an intent</h2>
+          <span className="mono">{tasks.length} tasks total</span>
+        </div>
+        <div className="card">
+          <p className="hint" style={{ marginTop: 0 }}>
+            Dispatch a <span className="mono">household.vendor.schedule</span> intent through the
+            orchestrator. Requires an <span className="mono">org.vendor</span> node whose
+            name or notes contain the service string.
+          </p>
+          <RunIntentForm householdId={hh.id} />
+        </div>
+
+        <div className="section-head">
+          <h2>Recent tasks</h2>
+          <span className="mono">last {tasks.length}</span>
+        </div>
+        {tasks.length === 0 ? (
+          <div className="empty">No tasks yet.</div>
+        ) : (
+          <table className="data">
+            <thead>
+              <tr>
+                <th>When</th>
+                <th>Agent</th>
+                <th>Kind</th>
+                <th>State</th>
+                <th>Summary</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tasks.map((t) => (
+                <tr key={t.id}>
+                  <td className="mono">{new Date(t.createdAt).toLocaleString()}</td>
+                  <td className="mono">
+                    {t.agent}@{t.agentVersion}
+                  </td>
+                  <td className="mono">{t.kind}</td>
+                  <td>
+                    <span
+                      className={`tag ${
+                        t.state === "completed"
+                          ? "confirmed"
+                          : t.state === "failed" || t.state === "rejected"
+                            ? "retired"
+                            : "candidate"
+                      }`}
+                    >
+                      {t.state}
+                    </span>
+                  </td>
+                  <td>{t.decisionSummary ?? t.errorMessage ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
 
         <div className="section-head">
           <h2>Policies</h2>

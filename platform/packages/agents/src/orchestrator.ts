@@ -1,0 +1,309 @@
+import { createHash } from "node:crypto";
+import type {
+  Agent,
+  AgentContext,
+  AgentToolResult,
+  GraphView,
+  Intent,
+  OrchestratorRunResult,
+} from "./types.js";
+import type { ToolRegistry } from "./tool-registry.js";
+import type {
+  ActionOutcome,
+  ActionRequest,
+  ActorType,
+  HouseholdId,
+  PolicyDecision,
+  PolicyId,
+  SideEffectClass,
+  Domain,
+} from "@atelier/domain";
+
+// The orchestrator's storage seam. Real implementations bind these to
+// the DB repositories; tests pass in-memory stand-ins. Keeping the
+// contract narrow lets us evolve storage without touching the runtime.
+export interface TaskLedger {
+  startRun(input: {
+    householdId: HouseholdId;
+    intentKind: string;
+    intentAttrs: Record<string, unknown>;
+    origin: "customer" | "manager" | "proactive" | "system";
+    originBy: string;
+  }): { id: string };
+
+  finishRun(id: string, state: "completed" | "failed" | "partial"): void;
+
+  createTask(input: {
+    runId: string;
+    householdId: HouseholdId;
+    agent: string;
+    agentVersion: string;
+    kind: string;
+    inputs: Record<string, unknown>;
+  }): { id: string };
+
+  updateTask(
+    id: string,
+    input: {
+      state: string;
+      outputs?: Record<string, unknown>;
+      decisionSummary?: string;
+      errorMessage?: string;
+    },
+  ): void;
+
+  listTasksForRun(runId: string): Array<{
+    id: string;
+    agent: string;
+    kind: string;
+    state: string;
+    decisionSummary?: string | null;
+    outputs?: unknown;
+    errorMessage?: string | null;
+  }>;
+}
+
+export interface PolicyRuntime {
+  evaluate(householdId: HouseholdId, request: ActionRequest): PolicyDecision;
+}
+
+export interface ActionRecorder {
+  record(input: {
+    householdId: HouseholdId;
+    subjectPrincipalId?: string;
+    agent: string;
+    agentVersion: string;
+    tool: string;
+    toolVersion: string;
+    actionClass: string;
+    domain: Domain;
+    inputsHash: string;
+    outputsHash?: string;
+    amountUsd?: number;
+    policyIdAuthorizing?: PolicyId;
+    outcome: ActionOutcome;
+    summary: string;
+  }): { id: string };
+}
+
+export interface OrchestratorDeps {
+  readonly agents: readonly Agent[];
+  readonly tools: ToolRegistry;
+  readonly ledger: TaskLedger;
+  readonly policy: PolicyRuntime;
+  readonly actions: ActionRecorder;
+  readonly logger?: { info: (msg: string, ctx?: unknown) => void };
+}
+
+export interface RunOptions {
+  readonly householdId: HouseholdId;
+  readonly actor: { type: ActorType; id: string; displayName: string };
+  readonly graph: GraphView;
+  readonly intent: Intent;
+}
+
+export class Orchestrator {
+  constructor(private readonly deps: OrchestratorDeps) {}
+
+  async run(opts: RunOptions): Promise<OrchestratorRunResult> {
+    const { intent, householdId, graph, actor } = opts;
+    const logger = this.deps.logger ?? { info: () => {} };
+
+    const run = this.deps.ledger.startRun({
+      householdId,
+      intentKind: intent.kind,
+      intentAttrs: intent.attrs,
+      origin: intent.origin.source,
+      originBy: intent.origin.by,
+    });
+
+    const matched = this.deps.agents.filter((a) => a.handles(intent));
+
+    if (matched.length === 0) {
+      this.deps.ledger.finishRun(run.id, "failed");
+      return {
+        runId: run.id,
+        intentKind: intent.kind,
+        state: "failed",
+        tasks: [
+          {
+            id: `${run.id}:no_agent`,
+            agent: "orchestrator",
+            kind: intent.kind,
+            state: "failed",
+            errorMessage: `No agent handles intent ${intent.kind}`,
+          },
+        ],
+      };
+    }
+
+    let anyFailure = false;
+    let anySuccess = false;
+
+    for (const agent of matched) {
+      const task = this.deps.ledger.createTask({
+        runId: run.id,
+        householdId,
+        agent: agent.name,
+        agentVersion: agent.version,
+        kind: intent.kind,
+        inputs: intent.attrs,
+      });
+
+      this.deps.ledger.updateTask(task.id, { state: "executing" });
+
+      const ctx: AgentContext = {
+        householdId,
+        actor,
+        graph,
+        evaluatePolicy: (req) =>
+          this.deps.policy.evaluate(householdId, req as ActionRequest),
+        invokeTool: <I, O>(
+          toolName: string,
+          inputs: I,
+          request: {
+            subjectPrincipalId?: string;
+            amountUsd?: number;
+            summary: string;
+            attrs?: Record<string, unknown>;
+          },
+        ): Promise<AgentToolResult<O>> =>
+          this.callTool<I, O>({
+            householdId,
+            agent,
+            toolName,
+            inputs,
+            request,
+            subject: intent.subjectPrincipalId,
+          }),
+        logger,
+      };
+
+      try {
+        const output = await agent.handle(intent, ctx);
+        this.deps.ledger.updateTask(task.id, {
+          state: output.state,
+          ...(output.decisionSummary !== undefined && {
+            decisionSummary: output.decisionSummary,
+          }),
+          ...(output.outputs !== undefined && { outputs: output.outputs }),
+          ...(output.errorMessage !== undefined && { errorMessage: output.errorMessage }),
+        });
+        if (output.state === "completed") anySuccess = true;
+        if (output.state === "failed" || output.state === "rejected") anyFailure = true;
+      } catch (err) {
+        const message = (err as Error).message;
+        this.deps.ledger.updateTask(task.id, { state: "failed", errorMessage: message });
+        anyFailure = true;
+        logger.info("agent threw", { agent: agent.name, message });
+      }
+    }
+
+    const finalState: "completed" | "failed" | "partial" = anyFailure
+      ? anySuccess
+        ? "partial"
+        : "failed"
+      : "completed";
+    this.deps.ledger.finishRun(run.id, finalState);
+
+    const tasks = this.deps.ledger.listTasksForRun(run.id).map((t) => ({
+      id: t.id,
+      agent: t.agent,
+      kind: t.kind,
+      state: t.state,
+      ...(t.decisionSummary != null && { decisionSummary: t.decisionSummary }),
+      ...(t.outputs != null && { outputs: t.outputs as Record<string, unknown> }),
+      ...(t.errorMessage != null && { errorMessage: t.errorMessage }),
+    }));
+
+    return { runId: run.id, intentKind: intent.kind, state: finalState, tasks };
+  }
+
+  private async callTool<I, O>(input: {
+    householdId: HouseholdId;
+    agent: Agent;
+    toolName: string;
+    inputs: I;
+    request: {
+      subjectPrincipalId?: string;
+      amountUsd?: number;
+      summary: string;
+      attrs?: Record<string, unknown>;
+    };
+    subject: string;
+  }): Promise<AgentToolResult<O>> {
+    const tool = this.deps.tools.get(input.toolName) as unknown as {
+      name: string;
+      version: string;
+      sideEffectClass: SideEffectClass;
+      domain: string;
+      actionClass: string;
+      invoke: (ctx: unknown, invocation: unknown) => Promise<{
+        outputs: O;
+        outcome: ActionOutcome;
+        summary: string;
+        amountUsd?: number;
+      }>;
+    };
+
+    const actionRequest: ActionRequest = {
+      subjectPrincipalId: input.request.subjectPrincipalId ?? input.subject,
+      domain: tool.domain as Domain,
+      actionClass: tool.actionClass,
+      sideEffectClass: tool.sideEffectClass,
+      attrs: input.request.attrs ?? {},
+      ...(input.request.amountUsd !== undefined && { amountUsd: input.request.amountUsd }),
+      proposedBy: { actor: input.agent.name, version: input.agent.version },
+    };
+
+    const decision = this.deps.policy.evaluate(input.householdId, actionRequest);
+
+    if (decision.decision !== "auto_execute") {
+      return { decision, action: null, outputs: null };
+    }
+
+    const inputsHash = hash(input.inputs);
+
+    const invocation = await tool.invoke(
+      {
+        householdId: input.householdId,
+        authorityId: decision.authorityId,
+        proposedBy: { actor: input.agent.name, version: input.agent.version },
+        logger: this.deps.logger,
+      },
+      { inputs: input.inputs, amountUsd: input.request.amountUsd, summary: input.request.summary },
+    );
+
+    const record = this.deps.actions.record({
+      householdId: input.householdId,
+      ...(input.request.subjectPrincipalId !== undefined && {
+        subjectPrincipalId: input.request.subjectPrincipalId,
+      }),
+      agent: input.agent.name,
+      agentVersion: input.agent.version,
+      tool: tool.name,
+      toolVersion: tool.version,
+      actionClass: tool.actionClass,
+      domain: tool.domain as Domain,
+      inputsHash,
+      outputsHash: hash(invocation.outputs),
+      ...(invocation.amountUsd !== undefined && { amountUsd: invocation.amountUsd }),
+      ...(decision.authorityId !== undefined && { policyIdAuthorizing: decision.authorityId }),
+      outcome: invocation.outcome,
+      summary: invocation.summary,
+    });
+
+    return {
+      decision,
+      action: {
+        id: record.id,
+        outcome: invocation.outcome,
+        summary: invocation.summary,
+      },
+      outputs: invocation.outputs,
+    };
+  }
+}
+
+const hash = (v: unknown): string =>
+  createHash("sha256").update(JSON.stringify(v ?? null)).digest("hex").slice(0, 16);

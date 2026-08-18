@@ -10,12 +10,13 @@ platform/
 ├── packages/
 │   ├── domain/     # Life Graph types, provenance, ontology, identity, policy (no framework)
 │   ├── db/         # Drizzle schema, migrations, repositories
-│   └── policy/     # Autonomy-rung evaluator, scope matcher, rolling limits
+│   ├── policy/     # Autonomy-rung evaluator, scope matcher, rolling limits
+│   └── agents/     # Orchestrator, agent + tool contracts, one concrete agent
 ├── apps/
-│   ├── api/        # Fastify HTTP service (auth + audit + graph + policy + actions)
+│   ├── api/        # Fastify HTTP service (auth + audit + graph + policy + actions + orchestrator)
 │   └── console/    # Next.js manager console
 └── scripts/
-    └── seed.ts     # Mint a dev manager, household, starter policies, and a bearer token
+    └── seed.ts     # Mint a dev manager, household, graph nodes, policies, and a bearer token
 ```
 
 ## Prerequisites
@@ -93,12 +94,18 @@ and audit paths end to end.
 - Console pages: dashboard of households; household detail with
   policies, recent actions, graph browse, and audit trail, plus a
   visible freeze banner.
+- Agent runtime — Orchestrator + typed Agent/Tool contracts + task
+  ledger. One concrete `household` agent that resolves a vendor from
+  the graph, runs through the policy engine, invokes a
+  `vendor.schedule` tool (mocked for phase 0), and records the action.
+- Console: an in-page "Run intent" form on the household detail page
+  that fires a real orchestrator run and refreshes the tables.
 
 ## What is deliberately not yet built
 
-- Agents (calendar, inbox, travel, etc.).
+- Additional specialist agents (calendar, inbox, travel, etc.).
+- Real provider integrations behind the tools.
 - Real auth (passkeys, SSO).
 - Router + model registry (see `../life-management/models.md`).
-- Any provider integrations.
-- Approval routing UI (currently policy evaluate returns the decision
-  but the console does not yet queue Ask items for a customer channel).
+- Approval routing UI — evaluate returns the decision but the console
+  does not yet queue Ask items for a customer channel.

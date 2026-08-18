@@ -5,8 +5,9 @@ import {
   identityRepo,
   policyRepo,
   actionRepo,
+  graphRepo,
 } from "@atelier/db";
-import type { PolicySpec } from "@atelier/domain";
+import { nowIso, type PolicySpec } from "@atelier/domain";
 
 // Development seed: creates one manager, one household, primary grant,
 // bearer token, and the onboarding starting policy set from
@@ -19,6 +20,7 @@ const identity = identityRepo(db);
 const households = householdRepo(db);
 const policies = policyRepo(db);
 const actions = actionRepo(db);
+const graph = graphRepo(db);
 
 const email = process.env["SEED_MANAGER_EMAIL"] ?? "seed@atelier.local";
 const displayName = process.env["SEED_MANAGER_NAME"] ?? "Seed Manager";
@@ -108,6 +110,51 @@ for (const spec of starterPolicies) {
   });
 }
 console.log(`seeded ${starterPolicies.length} starter policies`);
+
+// A couple of graph nodes so the household agent has real things to
+// reason over. `notes` doubles as a keyword the phase-0 vendor matcher
+// looks at when picking a preferred provider.
+const now = nowIso();
+graph.createNode(household.id, {
+  type: "place.property",
+  data: {
+    label: "Primary residence",
+    addressLine1: "123 Elm St",
+    city: "Dallas",
+    country: "US",
+    role: "primary_residence",
+  },
+  provenance: {
+    source: "customer_direct",
+    assertedBy: manager.id,
+    assertedAt: now,
+    confidence: 1,
+    status: "confirmed",
+  },
+});
+graph.createNode(household.id, {
+  type: "org.vendor",
+  data: { name: "Acme HVAC", notes: "HVAC quarterly service" },
+  provenance: {
+    source: "customer_direct",
+    assertedBy: manager.id,
+    assertedAt: now,
+    confidence: 1,
+    status: "confirmed",
+  },
+});
+graph.createNode(household.id, {
+  type: "org.vendor",
+  data: { name: "Northwest Plumbing", notes: "plumbing on-call" },
+  provenance: {
+    source: "customer_direct",
+    assertedBy: manager.id,
+    assertedAt: now,
+    confidence: 1,
+    status: "confirmed",
+  },
+});
+console.log("seeded property + two vendor nodes");
 
 actions.record({
   householdId: household.id,
