@@ -6,8 +6,10 @@ import {
   type HouseholdId,
   type ModelCall,
   type ModelResponse,
+  type ModelToolCall,
   type PolicyDecision,
   type SideEffectClass,
+  type ToolDefinition,
 } from "@atelier/domain";
 
 // ─── Intents ───────────────────────────────────────────────────────
@@ -69,6 +71,36 @@ export interface Tool<I = unknown, O = unknown> {
 // The context handed to each agent invocation. Agents read the graph,
 // call the policy engine, invoke tools, and write results. They do
 // not decide their own authority and cannot bypass the policy check.
+export interface AgentModelToolCall {
+  readonly toolCallId: string;
+  readonly name: string;
+  readonly input: Record<string, unknown>;
+}
+
+export interface AgentModelToolLoopResult {
+  readonly finalContent: string;
+  readonly finalToolCalls: readonly ModelToolCall[];
+  readonly turns: number;
+  readonly totalInputTokens: number;
+  readonly totalOutputTokens: number;
+  readonly totalCachedInputTokens: number;
+  readonly totalCostUsdEstimated: number;
+}
+
+export interface AgentCallModelWithTools {
+  (
+    call: ModelCall,
+    opts: {
+      tools: readonly ToolDefinition[];
+      handleToolUse: (
+        call: AgentModelToolCall,
+      ) => Promise<Record<string, unknown> | string>;
+      toolChoice?: "auto" | "any" | { readonly name: string };
+      maxTurns?: number;
+    },
+  ): Promise<AgentModelToolLoopResult>;
+}
+
 export interface AgentContext {
   readonly householdId: HouseholdId;
   readonly actor: { type: ActorType; id: string; displayName: string };
@@ -86,6 +118,7 @@ export interface AgentContext {
     },
   ) => Promise<AgentToolResult<O>>;
   readonly callModel: (call: ModelCall) => Promise<ModelResponse>;
+  readonly callModelWithTools: AgentCallModelWithTools;
   readonly logger: { info: (msg: string, ctx?: unknown) => void };
 }
 

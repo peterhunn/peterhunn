@@ -11,7 +11,7 @@ platform/
 │   ├── domain/     # Life Graph types, provenance, ontology, identity, policy, models (no framework)
 │   ├── db/         # Drizzle schema, migrations, repositories
 │   ├── policy/     # Autonomy-rung evaluator, scope matcher, rolling limits
-│   ├── agents/    # Orchestrator, agent + tool contracts, household + calendar + inbox agents
+│   ├── agents/    # Orchestrator, agent + tool contracts, household + calendar + inbox + research agents
 │   └── router/     # Model registry, tier-aware router, callModel + mock provider
 ├── apps/
 │   ├── api/        # Fastify HTTP service (auth + audit + graph + policy + actions + orchestrator + models)
@@ -117,6 +117,14 @@ and audit paths end to end.
     land in the approval queue for a manager to review, edit, and
     send. Storage: dedicated `inbox_messages` table (not the graph —
     the graph stores extracted facts, not message bodies).
+  - `research` — handles `research.query`. First agent that drives
+    the multi-turn LLM tool-use loop via
+    `ctx.callModelWithTools`. Passes two LLM-side tools
+    (`search_web`, `fetch_url` — mocked for phase 0), lets the
+    model call them iteratively via the router's tool loop, and
+    returns a summary with tool trace in the task outputs. Tier
+    routes to `research.structured` (T2) when a sources list is
+    provided, else `research.open` (T3).
 - Console: "Run intent" form on the household page.
 - Approval queue — non-execute policy decisions (draft, ask) persist
   as `approvals` rows carrying the tool name, inputs, authority policy

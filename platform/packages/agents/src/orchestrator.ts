@@ -126,6 +126,28 @@ export interface ModelRuntime {
     taskId: string,
     call: ModelCall,
   ): Promise<ModelResponse>;
+  callModelWithTools(
+    householdId: HouseholdId,
+    runId: string,
+    taskId: string,
+    call: ModelCall,
+    opts: {
+      handleToolUse: (input: {
+        toolCallId: string;
+        name: string;
+        input: Record<string, unknown>;
+      }) => Promise<Record<string, unknown> | string>;
+      maxTurns?: number;
+    },
+  ): Promise<{
+    finalContent: string;
+    finalToolCalls: readonly ModelToolCall[];
+    turns: number;
+    totalInputTokens: number;
+    totalOutputTokens: number;
+    totalCachedInputTokens: number;
+    totalCostUsdEstimated: number;
+  }>;
 }
 
 export interface OrchestratorDeps {
@@ -315,6 +337,23 @@ export class Orchestrator {
           }),
         callModel: (call) =>
           this.deps.models.callModel(householdId, run.id, task.id, call),
+        callModelWithTools: (call, opts) => {
+          const withTools: ModelCall = {
+            ...call,
+            tools: [...opts.tools],
+            ...(opts.toolChoice !== undefined && { toolChoice: opts.toolChoice }),
+          };
+          return this.deps.models.callModelWithTools(
+            householdId,
+            run.id,
+            task.id,
+            withTools,
+            {
+              handleToolUse: opts.handleToolUse,
+              ...(opts.maxTurns !== undefined && { maxTurns: opts.maxTurns }),
+            },
+          );
+        },
         logger,
       };
 

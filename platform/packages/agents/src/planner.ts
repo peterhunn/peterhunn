@@ -64,6 +64,15 @@ export const PLANNER_REGISTRY: readonly PlannerIntentSpec[] = [
       body: "…",
     },
   },
+  {
+    kind: "research.query",
+    description:
+      "Research a question that requires gathering information — e.g. 'find three good ergonomic chairs under $800', 'compare stroller options', 'summarize the tenant rights for X'. Uses search + fetch tools internally.",
+    attrsExample: {
+      question: "Compare the top three ergonomic office chairs under $800.",
+      category: "product",
+    },
+  },
 ];
 
 // A plan is what the planner produces from a prompt. `notes` is a

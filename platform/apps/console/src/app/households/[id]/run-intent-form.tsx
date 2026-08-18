@@ -8,6 +8,7 @@ import {
   runVendorPurchaseIntent,
   runCalendarCreateIntent,
   runCalendarRescheduleIntent,
+  runResearchIntent,
   planAndRun,
 } from "./actions";
 
@@ -16,7 +17,8 @@ type Mode =
   | "schedule"
   | "purchase"
   | "calendar_create"
-  | "calendar_reschedule";
+  | "calendar_reschedule"
+  | "research";
 
 export function RunIntentForm({ householdId }: { householdId: HouseholdId }) {
   const [mode, setMode] = useState<Mode>("plan");
@@ -27,6 +29,9 @@ export function RunIntentForm({ householdId }: { householdId: HouseholdId }) {
   const [propertyNodeId, setPropertyNodeId] = useState("nod_home");
   const [itemDescription, setItemDescription] = useState("Ergonomic desk chair");
   const [amount, setAmount] = useState("750");
+  const [question, setQuestion] = useState(
+    "Compare three ergonomic office chairs under $800.",
+  );
   const [title, setTitle] = useState("Board meeting");
   const [startAt, setStartAt] = useState("2026-09-01T15:00");
   const [endAt, setEndAt] = useState("2026-09-01T16:00");
@@ -75,6 +80,9 @@ export function RunIntentForm({ householdId }: { householdId: HouseholdId }) {
                 toEndAt: toIso(endAt),
               });
               break;
+            case "research":
+              res = await runResearchIntent(householdId, { question });
+              break;
           }
           setMessage(res.message);
           router.refresh();
@@ -89,8 +97,21 @@ export function RunIntentForm({ householdId }: { householdId: HouseholdId }) {
           <option value="purchase">vendor.purchase</option>
           <option value="calendar_create">calendar.appointment.create</option>
           <option value="calendar_reschedule">calendar.appointment.reschedule</option>
+          <option value="research">research.query</option>
         </select>
       </div>
+
+      {mode === "research" ? (
+        <div className="form-field inline" style={{ flex: "1 1 100%", minWidth: 300 }}>
+          <label htmlFor="question">Question</label>
+          <input
+            id="question"
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+            style={{ minWidth: 320 }}
+          />
+        </div>
+      ) : null}
 
       {mode === "plan" ? (
         <div className="form-field inline" style={{ flex: "1 1 100%", minWidth: 300 }}>

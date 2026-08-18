@@ -146,6 +146,9 @@ const mkPlannerModels = (canned: string): ModelRuntime => ({
     finishReason: "stop",
     reasons: [],
   }),
+  callModelWithTools: async () => {
+    throw new Error("callModelWithTools not expected in these tests");
+  },
 });
 
 describe("Orchestrator.planAndRun", () => {

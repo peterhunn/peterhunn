@@ -4,6 +4,7 @@ import {
   householdAgent,
   calendarAgent,
   inboxAgent,
+  researchAgent,
   vendorScheduleTool,
   vendorPurchaseTool,
   calendarCreateTool,
@@ -22,7 +23,7 @@ import {
   type Db,
 } from "@atelier/db";
 import { evaluate as evaluatePolicy } from "@atelier/policy";
-import { ModelRegistry, Router, callModel } from "@atelier/router";
+import { ModelRegistry, Router, callModel, callModelWithTools } from "@atelier/router";
 import {
   isKnownNodeType,
   nowIso,
@@ -99,7 +100,7 @@ export const buildOrchestrator = (db: Db): Orchestrator => {
   };
 
   return new Orchestrator({
-    agents: [householdAgent, calendarAgent, inboxAgent],
+    agents: [householdAgent, calendarAgent, inboxAgent, researchAgent],
     tools: buildToolRegistry(),
     ledger: {
       startRun: (i) => tasks.startRun(i),
@@ -150,18 +151,7 @@ export const buildOrchestrator = (db: Db): Orchestrator => {
         call: ModelCall,
       ): Promise<ModelResponse> => {
         return callModel(
-          {
-            router: ROUTER,
-            recorder: { record: (i) => modelCalls.record(i) },
-            budget: {
-              status: (h) => {
-                const { cap } = loadHousehold(h);
-                const rollup = modelCalls.rollup(h, 30);
-                return budgetStatus(rollup.totalUsd, cap);
-              },
-              riskTier: (h) => loadHousehold(h).riskTier,
-            },
-          },
+          modelDeps(),
           call,
           {
             householdId,
@@ -170,8 +160,45 @@ export const buildOrchestrator = (db: Db): Orchestrator => {
           },
         );
       },
+      callModelWithTools: async (householdId, runId, taskId, call, opts) => {
+        const res = await callModelWithTools(
+          modelDeps(),
+          call,
+          {
+            householdId,
+            triggeringRunId: runId,
+            triggeringTaskId: taskId,
+            handleToolUse: opts.handleToolUse,
+            ...(opts.maxTurns !== undefined && { maxTurns: opts.maxTurns }),
+          },
+        );
+        return {
+          finalContent: res.final.content,
+          finalToolCalls: res.final.toolCalls,
+          turns: res.turns.length,
+          totalInputTokens: res.totalInputTokens,
+          totalOutputTokens: res.totalOutputTokens,
+          totalCachedInputTokens: res.totalCachedInputTokens,
+          totalCostUsdEstimated: res.totalCostUsdEstimated,
+        };
+      },
     },
   });
+
+  function modelDeps() {
+    return {
+      router: ROUTER,
+      recorder: { record: (i: Parameters<typeof modelCalls.record>[0]) => modelCalls.record(i) },
+      budget: {
+        status: (h: HouseholdId) => {
+          const { cap } = loadHousehold(h);
+          const rollup = modelCalls.rollup(h, 30);
+          return budgetStatus(rollup.totalUsd, cap);
+        },
+        riskTier: (h: HouseholdId) => loadHousehold(h).riskTier,
+      },
+    };
+  }
 };
 
 export const buildGraphView = (db: Db, householdId: HouseholdId) => {

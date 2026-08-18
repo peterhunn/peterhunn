@@ -77,6 +77,9 @@ const mkModels = (): ModelRuntime => ({
   callModel: async () => {
     throw new Error("model calls not expected in these tests");
   },
+  callModelWithTools: async () => {
+    throw new Error("callModelWithTools not expected in these tests");
+  },
 });
 
 const mkWriter = (): AgentGraphWriter & { written: Array<{ type: string; data: Record<string, unknown> }>; superseded: string[] } => {

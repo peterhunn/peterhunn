@@ -72,6 +72,13 @@ export async function processInboxMessage(
   return runIntent(householdId, "inbox.message.process", msg);
 }
 
+export async function runResearchIntent(
+  householdId: HouseholdId,
+  input: { question: string; category?: string },
+): Promise<{ message: string }> {
+  return runIntent(householdId, "research.query", input);
+}
+
 export async function planAndRun(
   householdId: HouseholdId,
   prompt: string,

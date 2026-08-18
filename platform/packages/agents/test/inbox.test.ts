@@ -112,6 +112,9 @@ const mkModels = (byTask: Record<string, string>): ModelRuntime & { calls: strin
       };
       return resp;
     },
+    callModelWithTools: async () => {
+      throw new Error("callModelWithTools not expected in these tests");
+    },
   };
   return Object.assign(runtime, { calls });
 };
