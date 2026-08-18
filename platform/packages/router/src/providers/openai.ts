@@ -1,11 +1,55 @@
-import type { ModelCall, ModelResponse, ModelSpec } from "@atelier/domain";
+import type { ModelCall, ModelResponse, ModelSpec, ModelToolCall } from "@atelier/domain";
 import { invokeMock } from "./mock.js";
 import { ProviderError, estimateCost, type ProviderAdapter } from "./types.js";
 
-// OpenAI Chat Completions adapter — direct HTTP, no SDK.
-// Falls back to mock when OPENAI_API_KEY is not set.
+// OpenAI Chat Completions adapter — direct HTTP, no SDK. Supports
+// tool calling. OpenAI does prompt-prefix caching automatically on
+// their side for eligible prompts; the `cache` marker on messages is
+// a no-op here but is preserved so provider-swap is lossless.
 
 const DEFAULT_URL = "https://api.openai.com/v1/chat/completions";
+
+type OpenAIMessage =
+  | { role: "system" | "user" | "assistant"; content: string }
+  | {
+      role: "assistant";
+      content: string | null;
+      tool_calls?: Array<{
+        id: string;
+        type: "function";
+        function: { name: string; arguments: string };
+      }>;
+    }
+  | { role: "tool"; content: string; tool_call_id: string };
+
+const toOpenAIPayload = (call: ModelCall) => {
+  const messages: OpenAIMessage[] = call.messages.map((m) => {
+    if (m.role === "tool") {
+      return { role: "tool", content: m.content, tool_call_id: m.toolCallId ?? "" };
+    }
+    return { role: m.role, content: m.content } as OpenAIMessage;
+  });
+  const tools =
+    call.tools && call.tools.length > 0
+      ? call.tools.map((t) => ({
+          type: "function" as const,
+          function: {
+            name: t.name,
+            description: t.description,
+            parameters: t.inputSchema,
+          },
+        }))
+      : undefined;
+  const tool_choice =
+    call.toolChoice === "auto"
+      ? "auto"
+      : call.toolChoice === "any"
+        ? "required"
+        : call.toolChoice && "name" in call.toolChoice
+          ? { type: "function" as const, function: { name: call.toolChoice.name } }
+          : undefined;
+  return { messages, tools, tool_choice };
+};
 
 export const openaiAdapter: ProviderAdapter = {
   name: "openai",
@@ -20,14 +64,14 @@ export const openaiAdapter: ProviderAdapter = {
     }
     const baseUrl = process.env["OPENAI_BASE_URL"] ?? DEFAULT_URL;
 
+    const { messages, tools, tool_choice } = toOpenAIPayload(call);
     const body: Record<string, unknown> = {
       model: model.id,
-      messages: call.messages.map((m) => ({
-        role: m.role === "tool" ? "tool" : m.role,
-        content: m.content,
-      })),
+      messages,
       ...(call.maxOutputTokens !== undefined && { max_tokens: call.maxOutputTokens }),
       ...(call.jsonMode && { response_format: { type: "json_object" } }),
+      ...(tools && { tools }),
+      ...(tool_choice !== undefined && { tool_choice }),
     };
 
     const t0 = Date.now();
@@ -50,32 +94,66 @@ export const openaiAdapter: ProviderAdapter = {
     }
     const json = (await res.json()) as {
       choices?: Array<{
-        message?: { content?: string };
+        message?: {
+          content?: string | null;
+          tool_calls?: Array<{
+            id: string;
+            type: "function";
+            function: { name: string; arguments: string };
+          }>;
+        };
         finish_reason?: string;
       }>;
-      usage?: { prompt_tokens?: number; completion_tokens?: number };
+      usage?: {
+        prompt_tokens?: number;
+        completion_tokens?: number;
+        prompt_tokens_details?: { cached_tokens?: number };
+      };
     };
     const latencyMs = Date.now() - t0;
-    const content = json.choices?.[0]?.message?.content ?? "";
+    const choice = json.choices?.[0];
+    const content = choice?.message?.content ?? "";
+    const toolCalls: ModelToolCall[] =
+      choice?.message?.tool_calls?.map((tc) => {
+        let input: Record<string, unknown> = {};
+        try {
+          input = JSON.parse(tc.function.arguments) as Record<string, unknown>;
+        } catch {
+          input = { _raw: tc.function.arguments };
+        }
+        return { id: tc.id, name: tc.function.name, input };
+      }) ?? [];
     const inputTokens = json.usage?.prompt_tokens ?? 0;
     const outputTokens = json.usage?.completion_tokens ?? 0;
+    const cachedInputTokens = json.usage?.prompt_tokens_details?.cached_tokens ?? 0;
+
+    const reasons = ["openai_live"];
+    if (cachedInputTokens > 0) reasons.push(`cache_read:${cachedInputTokens}`);
+
     return {
       modelId: model.id,
       tier: model.tier,
-      content,
+      content: content ?? "",
+      toolCalls,
       usage: {
         inputTokens,
         outputTokens,
+        cachedInputTokens,
+        cacheWriteInputTokens: 0,
         costUsdEstimated: estimateCost(model, inputTokens, outputTokens),
       },
       latencyMs,
-      finishReason: mapStop(json.choices?.[0]?.finish_reason),
-      reasons: ["openai_live"],
+      finishReason: mapStop(choice?.finish_reason, toolCalls.length > 0),
+      reasons,
     };
   },
 };
 
-const mapStop = (r: string | undefined): ModelResponse["finishReason"] => {
+const mapStop = (
+  r: string | undefined,
+  hasToolCalls: boolean,
+): ModelResponse["finishReason"] => {
+  if (hasToolCalls) return "tool_calls";
   switch (r) {
     case "stop":
       return "stop";

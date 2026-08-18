@@ -148,6 +148,20 @@ and audit paths end to end.
   adapter and stamp a visible reason on the response so the
   fallback is never silent. Configure via `.env` — see
   `.env.example`.
+- Tool use across Anthropic, OpenAI, and OpenAI-compatible
+  adapters. `ModelCall.tools` + `toolChoice` are provider-agnostic;
+  each adapter translates to native shape (Anthropic tool blocks,
+  OpenAI function calling). `callModelWithTools` runs a bounded
+  multi-turn loop, dispatching each `tool_call` back to a supplied
+  handler until the model returns final text. Every turn is a
+  separate ledger row.
+- Anthropic prompt caching — `cache: true` on any message stamps
+  `cache_control: { type: "ephemeral" }` on the corresponding block
+  (and the tail of the tools list). `cache_creation_input_tokens`
+  and `cache_read_input_tokens` land in the model_calls ledger as
+  first-class columns. The planner's system prompt is marked for
+  caching by default, so a real Anthropic key produces immediate
+  cost reduction on the second and subsequent planner calls.
 - LLM-driven Orchestrator planner — `planAndRun(prompt)` runs an
   `orchestrator.simple` (short single-domain) or
   `orchestrator.cross_domain` (long / multi-domain) model call, parses

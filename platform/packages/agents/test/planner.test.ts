@@ -134,7 +134,14 @@ const mkPlannerModels = (canned: string): ModelRuntime => ({
     tier: "T2",
     content:
       call.taskClass.startsWith("orchestrator.") ? canned : "irrelevant",
-    usage: { inputTokens: 10, outputTokens: 10, costUsdEstimated: 0.0001 },
+    toolCalls: [],
+    usage: {
+      inputTokens: 10,
+      outputTokens: 10,
+      cachedInputTokens: 0,
+      cacheWriteInputTokens: 0,
+      costUsdEstimated: 0.0001,
+    },
     latencyMs: 1,
     finishReason: "stop",
     reasons: [],

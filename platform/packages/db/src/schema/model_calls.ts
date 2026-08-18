@@ -21,6 +21,8 @@ export const modelCalls = sqliteTable(
 
     inputTokens: integer("input_tokens").notNull(),
     outputTokens: integer("output_tokens").notNull(),
+    cachedInputTokens: integer("cached_input_tokens").notNull().default(0),
+    cacheWriteInputTokens: integer("cache_write_input_tokens").notNull().default(0),
     costUsdEstimated: real("cost_usd_estimated").notNull(),
     latencyMs: integer("latency_ms").notNull(),
 

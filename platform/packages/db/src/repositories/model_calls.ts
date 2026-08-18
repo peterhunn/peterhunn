@@ -15,6 +15,8 @@ export interface RecordModelCallInput {
   readonly provider: string;
   readonly inputTokens: number;
   readonly outputTokens: number;
+  readonly cachedInputTokens?: number;
+  readonly cacheWriteInputTokens?: number;
   readonly costUsdEstimated: number;
   readonly latencyMs: number;
   readonly finishReason: string;
@@ -49,6 +51,8 @@ export const modelCallRepo = (db: Db) => ({
         provider: input.provider,
         inputTokens: input.inputTokens,
         outputTokens: input.outputTokens,
+        cachedInputTokens: input.cachedInputTokens ?? 0,
+        cacheWriteInputTokens: input.cacheWriteInputTokens ?? 0,
         costUsdEstimated: input.costUsdEstimated,
         latencyMs: input.latencyMs,
         finishReason: input.finishReason,

@@ -22,6 +22,8 @@ export interface ModelCallRecorder {
     provider: string;
     inputTokens: number;
     outputTokens: number;
+    cachedInputTokens?: number;
+    cacheWriteInputTokens?: number;
     costUsdEstimated: number;
     latencyMs: number;
     finishReason: string;
@@ -99,6 +101,8 @@ export const callModel = async (
         provider: model.provider,
         inputTokens: raw.usage.inputTokens,
         outputTokens: raw.usage.outputTokens,
+        cachedInputTokens: raw.usage.cachedInputTokens,
+        cacheWriteInputTokens: raw.usage.cacheWriteInputTokens,
         costUsdEstimated: raw.usage.costUsdEstimated,
         latencyMs,
         finishReason: raw.finishReason,
@@ -118,6 +122,7 @@ export const callModel = async (
         modelId: model.id,
         tier: model.tier,
         content: raw.content,
+        toolCalls: raw.toolCalls,
         usage: raw.usage,
         latencyMs,
         finishReason: raw.finishReason,

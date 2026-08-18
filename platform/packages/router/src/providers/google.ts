@@ -77,9 +77,12 @@ export const googleAdapter: ProviderAdapter = {
       modelId: model.id,
       tier: model.tier,
       content,
+      toolCalls: [],
       usage: {
         inputTokens,
         outputTokens,
+        cachedInputTokens: 0,
+        cacheWriteInputTokens: 0,
         costUsdEstimated: estimateCost(model, inputTokens, outputTokens),
       },
       latencyMs,

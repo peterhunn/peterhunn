@@ -1,17 +1,11 @@
-import type { ModelCall, ModelResponse, ModelSpec } from "@atelier/domain";
+import type { ModelCall, ModelResponse, ModelSpec, ModelToolCall } from "@atelier/domain";
 import { invokeMock } from "./mock.js";
 import { ProviderError, estimateCost, type ProviderAdapter } from "./types.js";
 
-// Generic OpenAI-compatible adapter — one adapter, many providers.
-// Covers Ollama, vLLM, Together, Groq, Fireworks, DeepInfra, Anyscale,
-// LM Studio, and any other endpoint that speaks the /v1/chat/completions
-// contract. Model rows carry a provider name in a supported set; env
-// vars name the base URL and (optional) API key per provider.
-//
-// Convention (see registry.ts):
-//   provider: "openai_compatible:<slug>"
-//   env:      ATELIER_LLM_<SLUG>_URL, ATELIER_LLM_<SLUG>_KEY
-//   e.g.      ATELIER_LLM_TOGETHER_URL, ATELIER_LLM_TOGETHER_KEY
+// Generic OpenAI-compatible adapter. Same wire shape as openai.ts for
+// tools; endpoints that don't support tools ignore the field. Prompt
+// caching is provider-specific; the `cache` marker is preserved
+// through the message but not translated here.
 
 const slugFromProvider = (name: string): string | null => {
   const m = /^openai_compatible:([a-z0-9_]+)$/.exec(name);
@@ -40,14 +34,39 @@ export const openaiCompatibleAdapter: ProviderAdapter = {
     }
     const apiKey = process.env[keyEnv];
 
+    const messages = call.messages.map((m) => {
+      if (m.role === "tool") {
+        return { role: "tool", content: m.content, tool_call_id: m.toolCallId ?? "" };
+      }
+      return { role: m.role, content: m.content };
+    });
+    const tools =
+      call.tools && call.tools.length > 0
+        ? call.tools.map((t) => ({
+            type: "function" as const,
+            function: {
+              name: t.name,
+              description: t.description,
+              parameters: t.inputSchema,
+            },
+          }))
+        : undefined;
+    const tool_choice =
+      call.toolChoice === "auto"
+        ? "auto"
+        : call.toolChoice === "any"
+          ? "required"
+          : call.toolChoice && "name" in call.toolChoice
+            ? { type: "function" as const, function: { name: call.toolChoice.name } }
+            : undefined;
+
     const body: Record<string, unknown> = {
       model: model.id,
-      messages: call.messages.map((m) => ({
-        role: m.role === "tool" ? "tool" : m.role,
-        content: m.content,
-      })),
+      messages,
       ...(call.maxOutputTokens !== undefined && { max_tokens: call.maxOutputTokens }),
       ...(call.jsonMode && { response_format: { type: "json_object" } }),
+      ...(tools && { tools }),
+      ...(tool_choice !== undefined && { tool_choice }),
     };
 
     const t0 = Date.now();
@@ -73,27 +92,52 @@ export const openaiCompatibleAdapter: ProviderAdapter = {
     }
     const json = (await res.json()) as {
       choices?: Array<{
-        message?: { content?: string };
+        message?: {
+          content?: string | null;
+          tool_calls?: Array<{
+            id: string;
+            type?: "function";
+            function: { name: string; arguments: string };
+          }>;
+        };
         finish_reason?: string;
       }>;
       usage?: { prompt_tokens?: number; completion_tokens?: number };
     };
     const latencyMs = Date.now() - t0;
-    const content = json.choices?.[0]?.message?.content ?? "";
+    const choice = json.choices?.[0];
+    const content = choice?.message?.content ?? "";
+    const toolCalls: ModelToolCall[] =
+      choice?.message?.tool_calls?.map((tc) => {
+        let input: Record<string, unknown> = {};
+        try {
+          input = JSON.parse(tc.function.arguments) as Record<string, unknown>;
+        } catch {
+          input = { _raw: tc.function.arguments };
+        }
+        return { id: tc.id, name: tc.function.name, input };
+      }) ?? [];
     const inputTokens = json.usage?.prompt_tokens ?? 0;
     const outputTokens = json.usage?.completion_tokens ?? 0;
     return {
       modelId: model.id,
       tier: model.tier,
       content,
+      toolCalls,
       usage: {
         inputTokens,
         outputTokens,
+        cachedInputTokens: 0,
+        cacheWriteInputTokens: 0,
         costUsdEstimated: estimateCost(model, inputTokens, outputTokens),
       },
       latencyMs,
       finishReason:
-        json.choices?.[0]?.finish_reason === "length" ? "length" : "stop",
+        toolCalls.length > 0
+          ? "tool_calls"
+          : choice?.finish_reason === "length"
+            ? "length"
+            : "stop",
       reasons: [`${model.provider}_live`],
     };
   },

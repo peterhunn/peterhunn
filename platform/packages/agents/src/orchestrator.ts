@@ -195,7 +195,12 @@ export class Orchestrator {
         {
           taskClass: plannerTaskClass,
           messages: [
-            { role: "system", content: plannerSystemPrompt() },
+            // Mark the planner's system prompt for caching — it is the
+            // stable prefix across every planner call for every
+            // household. Anthropic honors this via cache_control;
+            // OpenAI's automatic prefix caching benefits regardless;
+            // other providers ignore the marker.
+            { role: "system", content: plannerSystemPrompt(), cache: true },
             { role: "user", content: prompt },
           ],
           maxOutputTokens: 800,

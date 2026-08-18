@@ -59,7 +59,19 @@ export interface TaskClassSpec {
   readonly requiresCapabilities?: readonly ModelCapability[];
 }
 
+// Tool definition — provider-agnostic. Adapters translate to the
+// provider's own tool/function-calling schema.
+export const ToolDefinition = z.object({
+  name: z.string(),
+  description: z.string(),
+  inputSchema: z.record(z.unknown()),
+});
+export type ToolDefinition = z.infer<typeof ToolDefinition>;
+
 // A single model invocation the router will fulfil.
+// `cache: true` on a message asks the provider to cache the prefix
+// up to and including that message; adapters that support prompt
+// caching (Anthropic today) honor the marker, others ignore it.
 export const ModelCall = z.object({
   taskClass: z.string(),
   minTier: TierId.optional(),
@@ -67,22 +79,37 @@ export const ModelCall = z.object({
     z.object({
       role: z.enum(["system", "user", "assistant", "tool"]),
       content: z.string(),
+      cache: z.boolean().optional(),
+      toolCallId: z.string().optional(),
     }),
   ),
+  tools: z.array(ToolDefinition).optional(),
+  toolChoice: z
+    .union([z.literal("auto"), z.literal("any"), z.object({ name: z.string() })])
+    .optional(),
   maxOutputTokens: z.number().int().positive().optional(),
   jsonMode: z.boolean().optional(),
   metadata: z.record(z.unknown()).optional(),
 });
 export type ModelCall = z.infer<typeof ModelCall>;
 
+export interface ModelToolCall {
+  readonly id: string;
+  readonly name: string;
+  readonly input: Record<string, unknown>;
+}
+
 export interface ModelResponse {
   readonly modelCallId: string;
   readonly modelId: string;
   readonly tier: TierId;
   readonly content: string;
+  readonly toolCalls: readonly ModelToolCall[];
   readonly usage: {
     readonly inputTokens: number;
     readonly outputTokens: number;
+    readonly cachedInputTokens: number;
+    readonly cacheWriteInputTokens: number;
     readonly costUsdEstimated: number;
   };
   readonly latencyMs: number;
