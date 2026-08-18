@@ -14,6 +14,7 @@ import {
   type TaskLedger,
   type PolicyRuntime,
   type ActionRecorder,
+  type ApprovalSink,
   type GraphView,
 } from "../src/index.js";
 
@@ -84,6 +85,18 @@ const mkRecorder = (): ActionRecorder & { recorded: unknown[] } => {
   };
 };
 
+const mkApprovals = (): ApprovalSink & { queued: unknown[] } => {
+  const queued: unknown[] = [];
+  let n = 0;
+  return {
+    queued,
+    enqueue: (i) => {
+      queued.push(i);
+      return { id: `apr_${++n}` };
+    },
+  };
+};
+
 const mkGraph = (nodes: Array<{ id: string; type: string; data: Record<string, unknown> }> = []): GraphView => ({
   listNodes: (opts) => (opts?.type ? nodes.filter((n) => n.type === opts.type) : nodes),
 });
@@ -116,6 +129,7 @@ describe("orchestrator + household agent + vendor tool", () => {
       ledger,
       policy: mkPolicy(),
       actions: recorder,
+      approvals: mkApprovals(),
     });
 
     const res = await orch.run({ householdId: HH, actor, graph, intent: scheduleIntent });
@@ -139,6 +153,7 @@ describe("orchestrator + household agent + vendor tool", () => {
       ledger,
       policy: mkPolicy(),
       actions: recorder,
+      approvals: mkApprovals(),
     });
 
     const res = await orch.run({ householdId: HH, actor, graph, intent: scheduleIntent });
@@ -165,6 +180,7 @@ describe("orchestrator + household agent + vendor tool", () => {
         reasons: ["household_frozen"],
       }),
       actions: recorder,
+      approvals: mkApprovals(),
     });
 
     const res = await orch.run({ householdId: HH, actor, graph, intent: scheduleIntent });
@@ -173,9 +189,10 @@ describe("orchestrator + household agent + vendor tool", () => {
     expect(recorder.recorded).toHaveLength(0);
   });
 
-  it("escalates when policy requires ask", async () => {
+  it("escalates and enqueues an approval when policy requires ask", async () => {
     const ledger = mkLedger();
     const recorder = mkRecorder();
+    const approvals = mkApprovals();
     const graph = mkGraph([
       { id: "nod_acme", type: "org.vendor", data: { name: "Acme", notes: "hvac" } },
     ]);
@@ -189,12 +206,14 @@ describe("orchestrator + household agent + vendor tool", () => {
         approver: { type: "manager" },
       }),
       actions: recorder,
+      approvals,
     });
 
     const res = await orch.run({ householdId: HH, actor, graph, intent: scheduleIntent });
 
     expect(res.tasks[0]!.state).toBe("escalated");
     expect(recorder.recorded).toHaveLength(0);
+    expect(approvals.queued).toHaveLength(1);
   });
 
   it("fails when no agent handles the intent", async () => {
@@ -205,6 +224,7 @@ describe("orchestrator + household agent + vendor tool", () => {
       ledger,
       policy: mkPolicy(),
       actions: mkRecorder(),
+      approvals: mkApprovals(),
     });
 
     const res = await orch.run({

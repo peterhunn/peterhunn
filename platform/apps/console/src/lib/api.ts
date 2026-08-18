@@ -1,5 +1,6 @@
 import type {
   Actor,
+  ApprovalItem,
   HouseholdId,
   PolicyDecision,
   PolicySpec,
@@ -125,6 +126,24 @@ export const api = (token: string) => ({
     request<{ tasks: TaskSummary[] }>(token, "GET", `/households/${id}/tasks`),
   runIntent: (id: HouseholdId, intent: unknown) =>
     request<{ run: RunResult }>(token, "POST", `/households/${id}/orchestrator/run`, intent),
+  listApprovals: (id: HouseholdId) =>
+    request<{ approvals: ApprovalItem[] }>(token, "GET", `/households/${id}/approvals`),
+  approvalInbox: () =>
+    request<{ approvals: ApprovalItem[] }>(token, "GET", "/approvals/inbox"),
+  approveApproval: (id: HouseholdId, approvalId: string, body: { note?: string }) =>
+    request<{ approval: ApprovalItem }>(
+      token,
+      "POST",
+      `/households/${id}/approvals/${approvalId}/approve`,
+      body,
+    ),
+  rejectApproval: (id: HouseholdId, approvalId: string, body: { note: string }) =>
+    request<{ approval: ApprovalItem }>(
+      token,
+      "POST",
+      `/households/${id}/approvals/${approvalId}/reject`,
+      body,
+    ),
 });
 
 export interface TaskSummary {

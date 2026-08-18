@@ -4,18 +4,18 @@ import { getSessionToken } from "@/lib/session";
 import { api, ApiError } from "@/lib/api";
 import type { HouseholdId } from "@atelier/domain";
 
-export async function runVendorScheduleIntent(
+async function runIntent(
   householdId: HouseholdId,
-  input: { serviceType: string; propertyNodeId: string },
+  kind: string,
+  attrs: Record<string, unknown>,
 ): Promise<{ message: string }> {
   const token = await getSessionToken();
   if (!token) return { message: "Session expired. Sign in again." };
-
   try {
     const res = await api(token).runIntent(householdId, {
-      kind: "household.vendor.schedule",
+      kind,
       subjectPrincipalId: "any_principal",
-      attrs: input,
+      attrs,
       origin: { source: "manager", by: "console" },
     });
     const task = res.run.tasks[0];
@@ -29,4 +29,18 @@ export async function runVendorScheduleIntent(
     if (err instanceof ApiError) return { message: `Error: ${err.message}` };
     return { message: `Error: ${(err as Error).message}` };
   }
+}
+
+export async function runVendorScheduleIntent(
+  householdId: HouseholdId,
+  input: { serviceType: string; propertyNodeId: string },
+): Promise<{ message: string }> {
+  return runIntent(householdId, "household.vendor.schedule", input);
+}
+
+export async function runVendorPurchaseIntent(
+  householdId: HouseholdId,
+  input: { serviceType: string; itemDescription: string; amountUsd: number },
+): Promise<{ message: string }> {
+  return runIntent(householdId, "household.vendor.purchase", input);
 }

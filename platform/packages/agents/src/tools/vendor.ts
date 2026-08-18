@@ -52,3 +52,46 @@ export const vendorScheduleTool: Tool<VendorScheduleInputs, VendorScheduleOutput
 };
 
 const short = (id: string): string => (id.length > 12 ? `${id.slice(0, 8)}…` : id);
+
+// vendor.purchase — write_irreversible + financial. This is the tool
+// used to demonstrate the approval queue: seed policy allows execute
+// up to $250 and requires customer approval above.
+export const VendorPurchaseInputs = z.object({
+  vendorNodeId: z.string(),
+  itemDescription: z.string(),
+  amountUsd: z.number().nonnegative(),
+  notes: z.string().optional(),
+});
+export type VendorPurchaseInputs = z.infer<typeof VendorPurchaseInputs>;
+
+export interface VendorPurchaseOutputs {
+  readonly receiptRef: string;
+  readonly purchasedAt: string;
+}
+
+export const vendorPurchaseTool: Tool<VendorPurchaseInputs, VendorPurchaseOutputs> = {
+  name: "vendor.purchase",
+  version: "0.1.0",
+  sideEffectClass: "financial",
+  domain: "household",
+  actionClass: "vendor.purchase",
+
+  async invoke(ctx, invocation) {
+    const inputs = VendorPurchaseInputs.parse(invocation.inputs);
+    const receiptRef = `mock-rcp-${Math.random().toString(36).slice(2, 10)}`;
+    const purchasedAt = new Date().toISOString();
+
+    ctx.logger?.info("vendor.purchase invoked", {
+      vendorNodeId: inputs.vendorNodeId,
+      amountUsd: inputs.amountUsd,
+      authorityId: ctx.authorityId,
+    });
+
+    return {
+      outputs: { receiptRef, purchasedAt },
+      outcome: "succeeded",
+      summary: `Purchased ${inputs.itemDescription} from vendor ${short(inputs.vendorNodeId)} for $${inputs.amountUsd.toFixed(2)}`,
+      amountUsd: inputs.amountUsd,
+    };
+  },
+};

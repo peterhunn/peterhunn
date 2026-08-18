@@ -97,6 +97,7 @@ export interface AgentToolResult<O> {
   readonly decision: PolicyDecision;
   readonly action: { id: string; outcome: ActionOutcome; summary: string } | null;
   readonly outputs: O | null;
+  readonly approvalId: string | null;
 }
 
 export type AgentTaskState =

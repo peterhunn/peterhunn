@@ -95,17 +95,24 @@ and audit paths end to end.
   policies, recent actions, graph browse, and audit trail, plus a
   visible freeze banner.
 - Agent runtime — Orchestrator + typed Agent/Tool contracts + task
-  ledger. One concrete `household` agent that resolves a vendor from
-  the graph, runs through the policy engine, invokes a
-  `vendor.schedule` tool (mocked for phase 0), and records the action.
-- Console: an in-page "Run intent" form on the household detail page
-  that fires a real orchestrator run and refreshes the tables.
+  ledger. One concrete `household` agent handling
+  `household.vendor.schedule` and `household.vendor.purchase`; mocked
+  `vendor.schedule` and `vendor.purchase` tools.
+- Console: "Run intent" form on the household page.
+- Approval queue — non-execute policy decisions (draft, ask) persist
+  as `approvals` rows carrying the tool name, inputs, authority policy
+  id, proposer, and reasons. Approving replays the tool with the
+  saved (or edited) inputs, records the action ledger row with
+  approver + channel, and closes the paired task. Rejecting closes
+  the task with the note.
+- Console: cross-household approval Inbox on the dashboard; per-
+  household Awaiting decision cards on the household page; Approve /
+  Reject controls with optional edit note.
 
 ## What is deliberately not yet built
 
 - Additional specialist agents (calendar, inbox, travel, etc.).
 - Real provider integrations behind the tools.
-- Real auth (passkeys, SSO).
+- Real auth (passkeys, SSO). Approving as a manager on a
+  customer-approval item is currently a phase-0 proxy path.
 - Router + model registry (see `../life-management/models.md`).
-- Approval routing UI — evaluate returns the decision but the console
-  does not yet queue Ask items for a customer channel.

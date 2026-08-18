@@ -86,12 +86,36 @@ export interface ActionRecorder {
   }): { id: string };
 }
 
+export interface ApprovalSink {
+  enqueue(input: {
+    householdId: HouseholdId;
+    runId: string;
+    taskId: string;
+    kind: "manager_review" | "customer_approval";
+    approverType: "principal" | "manager";
+    approverId?: string;
+    domain: string;
+    actionClass: string;
+    toolName: string;
+    toolVersion: string;
+    toolInputs: Record<string, unknown>;
+    proposedAttrs: Record<string, unknown>;
+    subjectPrincipalId?: string;
+    amountUsd?: number;
+    summary: string;
+    authorityPolicyId?: PolicyId;
+    proposedBy: { agent: string; agentVersion: string };
+    reasons: readonly string[];
+  }): { id: string };
+}
+
 export interface OrchestratorDeps {
   readonly agents: readonly Agent[];
   readonly tools: ToolRegistry;
   readonly ledger: TaskLedger;
   readonly policy: PolicyRuntime;
   readonly actions: ActionRecorder;
+  readonly approvals: ApprovalSink;
   readonly logger?: { info: (msg: string, ctx?: unknown) => void };
 }
 
@@ -170,6 +194,8 @@ export class Orchestrator {
         ): Promise<AgentToolResult<O>> =>
           this.callTool<I, O>({
             householdId,
+            runId: run.id,
+            taskId: task.id,
             agent,
             toolName,
             inputs,
@@ -221,6 +247,8 @@ export class Orchestrator {
 
   private async callTool<I, O>(input: {
     householdId: HouseholdId;
+    runId: string;
+    taskId: string;
     agent: Agent;
     toolName: string;
     inputs: I;
@@ -258,8 +286,35 @@ export class Orchestrator {
 
     const decision = this.deps.policy.evaluate(input.householdId, actionRequest);
 
+    if (decision.decision === "manager_review" || decision.decision === "customer_approval") {
+      const approver = decision.approver ?? { type: "manager" as const };
+      const enqueued = this.deps.approvals.enqueue({
+        householdId: input.householdId,
+        runId: input.runId,
+        taskId: input.taskId,
+        kind: decision.decision,
+        approverType: approver.type,
+        ...(approver.type === "principal" && { approverId: approver.id }),
+        domain: tool.domain,
+        actionClass: tool.actionClass,
+        toolName: tool.name,
+        toolVersion: tool.version,
+        toolInputs: input.inputs as Record<string, unknown>,
+        proposedAttrs: input.request.attrs ?? {},
+        ...(input.request.subjectPrincipalId !== undefined && {
+          subjectPrincipalId: input.request.subjectPrincipalId,
+        }),
+        ...(input.request.amountUsd !== undefined && { amountUsd: input.request.amountUsd }),
+        summary: input.request.summary,
+        ...(decision.authorityId !== undefined && { authorityPolicyId: decision.authorityId }),
+        proposedBy: { agent: input.agent.name, agentVersion: input.agent.version },
+        reasons: decision.reasons,
+      });
+      return { decision, action: null, outputs: null, approvalId: enqueued.id };
+    }
+
     if (decision.decision !== "auto_execute") {
-      return { decision, action: null, outputs: null };
+      return { decision, action: null, outputs: null, approvalId: null };
     }
 
     const inputsHash = hash(input.inputs);
@@ -301,6 +356,7 @@ export class Orchestrator {
         summary: invocation.summary,
       },
       outputs: invocation.outputs,
+      approvalId: null,
     };
   }
 }

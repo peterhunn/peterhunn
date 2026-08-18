@@ -5,6 +5,7 @@ import { api, ApiError } from "@/lib/api";
 import type { HouseholdId } from "@atelier/domain";
 import { ConsoleNav } from "../../console-nav";
 import { RunIntentForm } from "./run-intent-form";
+import { ApprovalCard } from "../../approvals/approval-card";
 
 export default async function HouseholdPage({
   params,
@@ -16,21 +17,30 @@ export default async function HouseholdPage({
   if (!token) redirect("/");
 
   const client = api(token);
-  const [{ actor }, hhRes, nodesRes, eventsRes, policiesRes, actionsRes, tasksRes] =
-    await Promise.all([
-      client.me(),
-      client
-        .getHousehold(id as HouseholdId)
-        .catch((e) => {
-          if (e instanceof ApiError && (e.status === 404 || e.status === 403)) return null;
-          throw e;
-        }),
-      client.listNodes(id as HouseholdId).catch(() => ({ nodes: [] })),
-      client.listAudit(id as HouseholdId).catch(() => ({ events: [] })),
-      client.listPolicies(id as HouseholdId).catch(() => ({ policies: [] })),
-      client.listActions(id as HouseholdId).catch(() => ({ actions: [] })),
-      client.listTasks(id as HouseholdId).catch(() => ({ tasks: [] })),
-    ]);
+  const [
+    { actor },
+    hhRes,
+    nodesRes,
+    eventsRes,
+    policiesRes,
+    actionsRes,
+    tasksRes,
+    approvalsRes,
+  ] = await Promise.all([
+    client.me(),
+    client
+      .getHousehold(id as HouseholdId)
+      .catch((e) => {
+        if (e instanceof ApiError && (e.status === 404 || e.status === 403)) return null;
+        throw e;
+      }),
+    client.listNodes(id as HouseholdId).catch(() => ({ nodes: [] })),
+    client.listAudit(id as HouseholdId).catch(() => ({ events: [] })),
+    client.listPolicies(id as HouseholdId).catch(() => ({ policies: [] })),
+    client.listActions(id as HouseholdId).catch(() => ({ actions: [] })),
+    client.listTasks(id as HouseholdId).catch(() => ({ tasks: [] })),
+    client.listApprovals(id as HouseholdId).catch(() => ({ approvals: [] })),
+  ]);
 
   if (!hhRes) notFound();
   const hh = hhRes.household;
@@ -39,6 +49,8 @@ export default async function HouseholdPage({
   const policies = policiesRes.policies;
   const actions = actionsRes.actions;
   const tasks = tasksRes.tasks;
+  const approvals = approvalsRes.approvals;
+  const pendingApprovals = approvals.filter((a) => a.state === "pending");
 
   return (
     <>
@@ -60,6 +72,20 @@ export default async function HouseholdPage({
             Household is <strong>frozen</strong>
             {hh.frozenReason ? ` — ${hh.frozenReason}` : ""}. Everything is in Observe.
           </div>
+        ) : null}
+
+        {pendingApprovals.length > 0 ? (
+          <>
+            <div className="section-head">
+              <h2>Awaiting decision</h2>
+              <span className="mono">{pendingApprovals.length} pending</span>
+            </div>
+            <div className="approvals-stack">
+              {pendingApprovals.map((a) => (
+                <ApprovalCard key={a.id} approval={a} />
+              ))}
+            </div>
+          </>
         ) : null}
 
         <div className="section-head">
