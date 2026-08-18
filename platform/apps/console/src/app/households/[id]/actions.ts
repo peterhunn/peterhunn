@@ -44,3 +44,17 @@ export async function runVendorPurchaseIntent(
 ): Promise<{ message: string }> {
   return runIntent(householdId, "household.vendor.purchase", input);
 }
+
+export async function runCalendarCreateIntent(
+  householdId: HouseholdId,
+  input: { title: string; startAt: string; endAt: string },
+): Promise<{ message: string }> {
+  return runIntent(householdId, "calendar.appointment.create", input);
+}
+
+export async function runCalendarRescheduleIntent(
+  householdId: HouseholdId,
+  input: { appointmentNodeId: string; toStartAt: string; toEndAt: string },
+): Promise<{ message: string }> {
+  return runIntent(householdId, "calendar.appointment.reschedule", input);
+}

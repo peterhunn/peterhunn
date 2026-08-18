@@ -2,8 +2,12 @@ import {
   Orchestrator,
   ToolRegistry,
   householdAgent,
+  calendarAgent,
   vendorScheduleTool,
   vendorPurchaseTool,
+  calendarCreateTool,
+  calendarRescheduleTool,
+  type AgentGraphWriter,
 } from "@atelier/agents";
 import {
   actionRepo,
@@ -15,16 +19,21 @@ import {
   type Db,
 } from "@atelier/db";
 import { evaluate as evaluatePolicy } from "@atelier/policy";
-import type { ActionRequest, HouseholdId } from "@atelier/domain";
-
-// A shared factory so route handlers, the orchestrator loop, and the
-// approval-resolve flow all use exactly the same tool registry and
-// policy wiring. Stateless — a new Orchestrator is cheap.
+import {
+  isKnownNodeType,
+  nowIso,
+  type ActionRequest,
+  type HouseholdId,
+  type NodeId,
+  type NodeType,
+} from "@atelier/domain";
 
 export const buildToolRegistry = (): ToolRegistry => {
   const r = new ToolRegistry();
   r.register(vendorScheduleTool);
   r.register(vendorPurchaseTool);
+  r.register(calendarCreateTool);
+  r.register(calendarRescheduleTool);
   return r;
 };
 
@@ -36,7 +45,7 @@ export const buildOrchestrator = (db: Db): Orchestrator => {
   const approvals = approvalRepo(db);
 
   return new Orchestrator({
-    agents: [householdAgent],
+    agents: [householdAgent, calendarAgent],
     tools: buildToolRegistry(),
     ledger: {
       startRun: (i) => tasks.startRun(i),
@@ -99,5 +108,40 @@ export const buildGraphView = (db: Db, householdId: HouseholdId) => {
           type: n.type,
           data: n.data as Record<string, unknown>,
         })),
+  };
+};
+
+export const buildGraphWriter = (
+  db: Db,
+  householdId: HouseholdId,
+  assertedBy: string,
+): AgentGraphWriter => {
+  const graph = graphRepo(db);
+  return {
+    writeNode: (input) => {
+      if (!isKnownNodeType(input.type)) {
+        throw new Error(`Unknown node type: ${input.type}`);
+      }
+      const node = graph.createNode(householdId, {
+        type: input.type as NodeType,
+        data: input.data,
+        provenance: {
+          source: "agent_inferred_action_outcome",
+          assertedBy,
+          assertedAt: nowIso(),
+          confidence: input.confidence ?? 0.9,
+          status: input.status ?? "candidate",
+          ...(input.sourceRef !== undefined && { sourceRef: input.sourceRef }),
+        },
+      });
+      return { id: node.id };
+    },
+    supersedeNode: (nodeId, replacementId) => {
+      graph.supersedeNode(
+        householdId,
+        nodeId as NodeId,
+        replacementId as NodeId | undefined,
+      );
+    },
   };
 };

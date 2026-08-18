@@ -71,6 +71,7 @@ export interface AgentContext {
   readonly householdId: HouseholdId;
   readonly actor: { type: ActorType; id: string; displayName: string };
   readonly graph: GraphView;
+  readonly writer: AgentGraphWriter;
   readonly evaluatePolicy: (req: unknown) => PolicyDecision;
   readonly invokeTool: <I, O>(
     toolName: string,
@@ -91,6 +92,24 @@ export interface GraphView {
     type: string;
     data: Record<string, unknown>;
   }>;
+}
+
+// Agents write factual state back through this seam. The runtime fills
+// in provenance (source, assertedBy, assertedAt); the agent chooses
+// only type + data + confidence + status. Nodes written this way are
+// `candidate` unless the agent explicitly promotes them to `confirmed`
+// on the back of a successful action outcome (see the promotion rules
+// in ../life-management/knowledge-graph.md §"Learning").
+export interface AgentGraphWriter {
+  writeNode(input: {
+    type: string;
+    data: Record<string, unknown>;
+    status?: "candidate" | "confirmed";
+    confidence?: number;
+    sourceRef?: string;
+  }): { id: string };
+
+  supersedeNode(nodeId: string, replacementId?: string): void;
 }
 
 export interface AgentToolResult<O> {

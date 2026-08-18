@@ -16,6 +16,7 @@ import {
   type ActionRecorder,
   type ApprovalSink,
   type GraphView,
+  type AgentGraphWriter,
 } from "../src/index.js";
 
 const HH = "hh_test" as HouseholdId;
@@ -101,6 +102,23 @@ const mkGraph = (nodes: Array<{ id: string; type: string; data: Record<string, u
   listNodes: (opts) => (opts?.type ? nodes.filter((n) => n.type === opts.type) : nodes),
 });
 
+const mkWriter = (): AgentGraphWriter & { written: unknown[]; superseded: string[] } => {
+  const written: unknown[] = [];
+  const superseded: string[] = [];
+  let n = 0;
+  return {
+    written,
+    superseded,
+    writeNode: (input) => {
+      written.push(input);
+      return { id: `nod_${++n}` };
+    },
+    supersedeNode: (id) => {
+      superseded.push(id);
+    },
+  };
+};
+
 const mkTools = (): ToolRegistry => {
   const r = new ToolRegistry();
   r.register(vendorScheduleTool);
@@ -132,7 +150,7 @@ describe("orchestrator + household agent + vendor tool", () => {
       approvals: mkApprovals(),
     });
 
-    const res = await orch.run({ householdId: HH, actor, graph, intent: scheduleIntent });
+    const res = await orch.run({ householdId: HH, actor, graph, writer: mkWriter(), intent: scheduleIntent });
 
     expect(res.state).toBe("completed");
     expect(res.tasks).toHaveLength(1);
@@ -156,7 +174,7 @@ describe("orchestrator + household agent + vendor tool", () => {
       approvals: mkApprovals(),
     });
 
-    const res = await orch.run({ householdId: HH, actor, graph, intent: scheduleIntent });
+    const res = await orch.run({ householdId: HH, actor, graph, writer: mkWriter(), intent: scheduleIntent });
 
     expect(res.state).toBe("completed");
     expect(res.tasks[0]!.state).toBe("escalated");
@@ -183,7 +201,7 @@ describe("orchestrator + household agent + vendor tool", () => {
       approvals: mkApprovals(),
     });
 
-    const res = await orch.run({ householdId: HH, actor, graph, intent: scheduleIntent });
+    const res = await orch.run({ householdId: HH, actor, graph, writer: mkWriter(), intent: scheduleIntent });
 
     expect(res.tasks[0]!.state).toBe("shelved");
     expect(recorder.recorded).toHaveLength(0);
@@ -209,7 +227,7 @@ describe("orchestrator + household agent + vendor tool", () => {
       approvals,
     });
 
-    const res = await orch.run({ householdId: HH, actor, graph, intent: scheduleIntent });
+    const res = await orch.run({ householdId: HH, actor, graph, writer: mkWriter(), intent: scheduleIntent });
 
     expect(res.tasks[0]!.state).toBe("escalated");
     expect(recorder.recorded).toHaveLength(0);
@@ -231,6 +249,7 @@ describe("orchestrator + household agent + vendor tool", () => {
       householdId: HH,
       actor,
       graph: mkGraph(),
+      writer: mkWriter(),
       intent: { ...scheduleIntent, kind: "travel.flight.book" },
     });
 

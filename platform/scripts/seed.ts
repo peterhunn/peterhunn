@@ -74,6 +74,12 @@ const starterPolicies: PolicySpec[] = [
     },
   }),
   policy({
+    domain: "calendar",
+    actionClass: "calendar.appointment.create",
+    autonomy: "execute",
+    label: "Appointment creation (calendar defaults)",
+  }),
+  policy({
     domain: "family",
     actionClass: "restaurant.reserve",
     autonomy: "execute",

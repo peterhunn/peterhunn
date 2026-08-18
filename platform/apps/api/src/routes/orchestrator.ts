@@ -2,7 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { Intent } from "@atelier/agents";
 import { taskRepo, type Db } from "@atelier/db";
 import type { HouseholdId } from "@atelier/domain";
-import { buildGraphView, buildOrchestrator } from "../runtime.js";
+import { buildGraphView, buildGraphWriter, buildOrchestrator } from "../runtime.js";
 
 export const orchestratorRoutes = (db: Db): FastifyPluginAsync => async (app) => {
   const tasks = taskRepo(db);
@@ -25,6 +25,7 @@ export const orchestratorRoutes = (db: Db): FastifyPluginAsync => async (app) =>
           displayName: req.actor.displayName,
         },
         graph: buildGraphView(db, householdId),
+        writer: buildGraphWriter(db, householdId, `${req.actor.type}:${req.actor.id}`),
         intent: parsed.data,
       });
       return { run: result };

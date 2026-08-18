@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type {
   Agent,
   AgentContext,
+  AgentGraphWriter,
   AgentToolResult,
   GraphView,
   Intent,
@@ -123,6 +124,7 @@ export interface RunOptions {
   readonly householdId: HouseholdId;
   readonly actor: { type: ActorType; id: string; displayName: string };
   readonly graph: GraphView;
+  readonly writer: AgentGraphWriter;
   readonly intent: Intent;
 }
 
@@ -130,7 +132,7 @@ export class Orchestrator {
   constructor(private readonly deps: OrchestratorDeps) {}
 
   async run(opts: RunOptions): Promise<OrchestratorRunResult> {
-    const { intent, householdId, graph, actor } = opts;
+    const { intent, householdId, graph, writer, actor } = opts;
     const logger = this.deps.logger ?? { info: () => {} };
 
     const run = this.deps.ledger.startRun({
@@ -180,6 +182,7 @@ export class Orchestrator {
         householdId,
         actor,
         graph,
+        writer,
         evaluatePolicy: (req) =>
           this.deps.policy.evaluate(householdId, req as ActionRequest),
         invokeTool: <I, O>(

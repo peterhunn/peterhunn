@@ -95,9 +95,17 @@ and audit paths end to end.
   policies, recent actions, graph browse, and audit trail, plus a
   visible freeze banner.
 - Agent runtime — Orchestrator + typed Agent/Tool contracts + task
-  ledger. One concrete `household` agent handling
-  `household.vendor.schedule` and `household.vendor.purchase`; mocked
-  `vendor.schedule` and `vendor.purchase` tools.
+  ledger. Two specialist agents:
+  - `household` — handles `household.vendor.schedule` and
+    `household.vendor.purchase` via mocked `vendor.schedule` and
+    `vendor.purchase` tools.
+  - `calendar` — handles `calendar.appointment.create` and
+    `calendar.appointment.reschedule` via mocked `calendar.create` and
+    `calendar.reschedule` tools. Runs conflict detection over
+    `obligation.appointment` nodes and writes results back to the graph
+    on success (superseding the old node on reschedule). Cross-day
+    reschedules trip the seeded escalation and land in the approval
+    queue as an Ask.
 - Console: "Run intent" form on the household page.
 - Approval queue — non-execute policy decisions (draft, ask) persist
   as `approvals` rows carrying the tool name, inputs, authority policy
