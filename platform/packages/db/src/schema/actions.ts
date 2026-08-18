@@ -1,9 +1,9 @@
-import { sqliteTable, text, index } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, real, index } from "drizzle-orm/sqlite-core";
 import { households } from "./households.js";
 
 // The action ledger. Append-only in intent — no update path is exposed
-// from the repository layer. Every material action a manager or agent
-// takes should land here with a full authority trail.
+// from the repository layer except a narrow completion path that sets
+// outcome + outputs_hash on a previously-planned action.
 // See ../life-management/permissions.md §"Audit".
 export const actions = sqliteTable(
   "actions",
@@ -13,13 +13,19 @@ export const actions = sqliteTable(
       .notNull()
       .references(() => households.id, { onDelete: "cascade" }),
 
+    subjectPrincipalId: text("subject_principal_id"),
+
     agent: text("agent").notNull(),
     agentVersion: text("agent_version").notNull(),
     tool: text("tool").notNull(),
     toolVersion: text("tool_version").notNull(),
+    actionClass: text("action_class").notNull(),
+    domain: text("domain").notNull(),
 
     inputsHash: text("inputs_hash").notNull(),
     outputsHash: text("outputs_hash"),
+
+    amountUsd: real("amount_usd"),
 
     policyIdAuthorizing: text("policy_id_authorizing"),
     approverId: text("approver_id"),
@@ -48,6 +54,14 @@ export const actions = sqliteTable(
     householdOutcomeIdx: index("actions_household_outcome_idx").on(
       t.householdId,
       t.outcome,
+    ),
+    householdActionClassIdx: index("actions_household_action_class_idx").on(
+      t.householdId,
+      t.actionClass,
+    ),
+    householdPolicyIdx: index("actions_household_policy_idx").on(
+      t.householdId,
+      t.policyIdAuthorizing,
     ),
   }),
 );

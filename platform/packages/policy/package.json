@@ -1,27 +1,23 @@
 {
-  "name": "@atelier/api",
+  "name": "@atelier/policy",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "dev": "tsx watch src/index.ts",
-    "start": "node dist/index.js",
     "test": "vitest run",
     "clean": "rm -rf dist .turbo *.tsbuildinfo"
   },
   "dependencies": {
-    "@atelier/db": "workspace:*",
-    "@atelier/domain": "workspace:*",
-    "@atelier/policy": "workspace:*",
-    "fastify": "^5.0.0",
-    "fastify-plugin": "^5.0.0",
-    "zod": "^3.23.8"
+    "@atelier/domain": "workspace:*"
   },
   "devDependencies": {
-    "tsx": "^4.19.0",
     "typescript": "^5.5.4",
     "vitest": "^2.0.5"
   }

@@ -1,7 +1,9 @@
-import type { Actor, HouseholdId } from "@atelier/domain";
-
-// Server-side API client. Every call carries the manager's bearer token
-// from the httpOnly session cookie — the browser never sees it.
+import type {
+  Actor,
+  HouseholdId,
+  PolicyDecision,
+  PolicySpec,
+} from "@atelier/domain";
 
 const API_URL = process.env.ATELIER_API_URL ?? "http://localhost:3001";
 
@@ -33,10 +35,11 @@ const request = async <T>(
       const j = (await res.json()) as { error?: string };
       if (j.error) msg = j.error;
     } catch {
-      // ignore body parse failure
+      // ignore
     }
     throw new ApiError(res.status, msg);
   }
+  if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 };
 
@@ -46,6 +49,8 @@ export interface Household {
   readonly tier: "life" | "executive" | "private";
   readonly riskTier: "standard" | "elevated" | "hnw";
   readonly createdAt: string;
+  readonly frozenAt?: string;
+  readonly frozenReason?: string;
 }
 
 export interface NodeSummary {
@@ -73,6 +78,25 @@ export interface AuditEventSummary {
   readonly at: string;
 }
 
+export interface PolicySummary {
+  readonly id: string;
+  readonly spec: PolicySpec;
+  readonly createdAt: string;
+  readonly revokedAt?: string;
+}
+
+export interface ActionSummary {
+  readonly id: string;
+  readonly actionClass: string;
+  readonly domain: string;
+  readonly agent: string;
+  readonly outcome: string;
+  readonly summary: string;
+  readonly amountUsd: number | null;
+  readonly policyIdAuthorizing: string | null;
+  readonly createdAt: string;
+}
+
 export const api = (token: string) => ({
   me: () => request<{ actor: Actor }>(token, "GET", "/me"),
   listHouseholds: () => request<{ households: Household[] }>(token, "GET", "/households"),
@@ -82,4 +106,19 @@ export const api = (token: string) => ({
     request<{ nodes: NodeSummary[] }>(token, "GET", `/households/${id}/nodes`),
   listAudit: (id: HouseholdId) =>
     request<{ events: AuditEventSummary[] }>(token, "GET", `/households/${id}/audit`),
+  listPolicies: (id: HouseholdId) =>
+    request<{ policies: PolicySummary[] }>(token, "GET", `/households/${id}/policies`),
+  listActions: (id: HouseholdId) =>
+    request<{ actions: ActionSummary[] }>(token, "GET", `/households/${id}/actions`),
+  evaluate: (id: HouseholdId, request_: unknown) =>
+    request<{ decision: PolicyDecision }>(
+      token,
+      "POST",
+      `/households/${id}/policies/evaluate`,
+      request_,
+    ),
+  freeze: (id: HouseholdId, reason: string) =>
+    request<void>(token, "POST", `/households/${id}/freeze`, { reason }),
+  unfreeze: (id: HouseholdId) =>
+    request<void>(token, "POST", `/households/${id}/unfreeze`),
 });

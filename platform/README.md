@@ -8,13 +8,14 @@ Product and architecture spec lives in `../life-management/`.
 ```
 platform/
 ├── packages/
-│   ├── domain/     # Life Graph types, provenance, ontology, identity (no framework)
-│   └── db/         # Drizzle schema, migrations, repositories
+│   ├── domain/     # Life Graph types, provenance, ontology, identity, policy (no framework)
+│   ├── db/         # Drizzle schema, migrations, repositories
+│   └── policy/     # Autonomy-rung evaluator, scope matcher, rolling limits
 ├── apps/
-│   ├── api/        # Fastify HTTP service (auth + audit + graph)
+│   ├── api/        # Fastify HTTP service (auth + audit + graph + policy + actions)
 │   └── console/    # Next.js manager console
 └── scripts/
-    └── seed.ts     # Mint a dev manager, household, and bearer token
+    └── seed.ts     # Mint a dev manager, household, starter policies, and a bearer token
 ```
 
 ## Prerequisites
@@ -82,13 +83,22 @@ and audit paths end to end.
 - Auth guard on every non-public route, with per-household grant
   enforcement.
 - Audit trail on every household-scoped request.
-- Fastify API and a Next.js manager console: dashboard of households,
-  household detail with graph browse + audit trail.
+- Policy engine — six-rung autonomy ladder, scope matcher, rolling
+  window limits (day/week/month, USD and count), explicit-deny-wins,
+  escalation conditions, effective windows, and household freeze.
+- Action ledger writes with the authorizing policy id, so audit is
+  end-to-end.
+- Fastify API endpoints for policies, evaluation, actions, and
+  freeze/unfreeze.
+- Console pages: dashboard of households; household detail with
+  policies, recent actions, graph browse, and audit trail, plus a
+  visible freeze banner.
 
 ## What is deliberately not yet built
 
-- Policy engine (see `../life-management/permissions.md`).
 - Agents (calendar, inbox, travel, etc.).
 - Real auth (passkeys, SSO).
 - Router + model registry (see `../life-management/models.md`).
 - Any provider integrations.
+- Approval routing UI (currently policy evaluate returns the decision
+  but the console does not yet queue Ask items for a customer channel).

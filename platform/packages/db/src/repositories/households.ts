@@ -16,16 +16,23 @@ export interface CreateHouseholdInput {
   readonly riskTier?: HouseholdRiskTier;
 }
 
-const toHousehold = (row: typeof households.$inferSelect): Household => ({
+export interface HouseholdState extends Household {
+  readonly frozenAt: string | undefined;
+  readonly frozenReason: string | undefined;
+}
+
+const toHousehold = (row: typeof households.$inferSelect): HouseholdState => ({
   id: row.id as HouseholdId,
   name: row.name,
   tier: row.tier,
   riskTier: row.riskTier,
   createdAt: row.createdAt,
+  frozenAt: row.frozenAt ?? undefined,
+  frozenReason: row.frozenReason ?? undefined,
 });
 
 export const householdRepo = (db: Db) => ({
-  create(input: CreateHouseholdInput): Household {
+  create(input: CreateHouseholdInput): HouseholdState {
     const row = {
       id: newHouseholdId(),
       name: input.name,
@@ -34,10 +41,10 @@ export const householdRepo = (db: Db) => ({
       createdAt: nowIso(),
     } satisfies typeof households.$inferInsert;
     db.insert(households).values(row).run();
-    return toHousehold(row);
+    return toHousehold({ ...row, archivedAt: null, frozenAt: null, frozenReason: null });
   },
 
-  get(id: HouseholdId): Household | null {
+  get(id: HouseholdId): HouseholdState | null {
     const row = db
       .select()
       .from(households)
@@ -46,13 +53,27 @@ export const householdRepo = (db: Db) => ({
     return row ? toHousehold(row) : null;
   },
 
-  list(): Household[] {
+  list(): HouseholdState[] {
     const rows = db
       .select()
       .from(households)
       .where(isNull(households.archivedAt))
       .all();
     return rows.map(toHousehold);
+  },
+
+  freeze(id: HouseholdId, reason: string): void {
+    db.update(households)
+      .set({ frozenAt: nowIso(), frozenReason: reason })
+      .where(eq(households.id, id))
+      .run();
+  },
+
+  unfreeze(id: HouseholdId): void {
+    db.update(households)
+      .set({ frozenAt: null, frozenReason: null })
+      .where(eq(households.id, id))
+      .run();
   },
 
   archive(id: HouseholdId): void {
