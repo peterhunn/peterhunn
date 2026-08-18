@@ -58,3 +58,16 @@ export async function runCalendarRescheduleIntent(
 ): Promise<{ message: string }> {
   return runIntent(householdId, "calendar.appointment.reschedule", input);
 }
+
+export async function processInboxMessage(
+  householdId: HouseholdId,
+  msg: {
+    messageId: string;
+    fromName: string;
+    fromAddress: string;
+    subject: string;
+    body: string;
+  },
+): Promise<{ message: string }> {
+  return runIntent(householdId, "inbox.message.process", msg);
+}

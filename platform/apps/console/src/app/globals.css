@@ -431,6 +431,58 @@ form.login {
   cursor: not-allowed;
 }
 
+/* Inbox card */
+
+.inbox-card {
+  padding: 20px 22px;
+}
+
+.inbox-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.inbox-from {
+  font-size: 12px;
+  color: var(--ink-muted);
+  margin: 0 0 4px;
+}
+
+.inbox-subject {
+  font-family: var(--serif);
+  font-size: 20px;
+  line-height: 1.25;
+  margin: 0;
+}
+
+.inbox-tags {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.inbox-body {
+  color: var(--ink-2);
+  font-size: 14px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  padding: 10px 12px;
+  background: var(--paper);
+  border: 1px solid var(--rule-soft);
+  border-radius: 4px;
+  margin: 8px 0 12px;
+}
+
+.inbox-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 /* Budget bar */
 
 .budget-bar {

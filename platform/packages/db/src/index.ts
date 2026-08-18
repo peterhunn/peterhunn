@@ -9,3 +9,4 @@ export * from "./repositories/actions.js";
 export * from "./repositories/tasks.js";
 export * from "./repositories/approvals.js";
 export * from "./repositories/model_calls.js";
+export * from "./repositories/inbox.js";

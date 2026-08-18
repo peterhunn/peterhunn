@@ -3,5 +3,7 @@ export * from "./tool-registry.js";
 export * from "./orchestrator.js";
 export * from "./agents/household.js";
 export * from "./agents/calendar.js";
+export * from "./agents/inbox.js";
 export * from "./tools/vendor.js";
 export * from "./tools/calendar.js";
+export * from "./tools/message.js";

@@ -6,6 +6,7 @@ import {
   policyRepo,
   actionRepo,
   graphRepo,
+  inboxRepo,
 } from "@atelier/db";
 import { nowIso, type PolicySpec } from "@atelier/domain";
 
@@ -21,6 +22,7 @@ const households = householdRepo(db);
 const policies = policyRepo(db);
 const actions = actionRepo(db);
 const graph = graphRepo(db);
+const inbox = inboxRepo(db);
 
 const email = process.env["SEED_MANAGER_EMAIL"] ?? "seed@atelier.local";
 const displayName = process.env["SEED_MANAGER_NAME"] ?? "Seed Manager";
@@ -100,7 +102,12 @@ const starterPolicies: PolicySpec[] = [
     actionClass: "message.send",
     autonomy: "draft",
     label: "Any outbound customer-voice message",
-    scope: { recipient_class: ["counsel", "medical"] },
+    approval: {
+      conditions: [
+        { kind: "attr_in", key: "recipient_class", values: ["counsel", "medical", "employer"] },
+      ],
+      fallbackApprover: "manager",
+    },
   }),
 ];
 
@@ -161,6 +168,24 @@ graph.createNode(household.id, {
   },
 });
 console.log("seeded property + two vendor nodes");
+
+// A sample inbound message so the Inbox agent has something to
+// process on first boot.
+inbox.create({
+  householdId: household.id,
+  fromName: "Sam Rodriguez",
+  fromAddress: "sam@example.com",
+  subject: "Quote for the fence repair",
+  body: "Hi — I stopped by yesterday and can start the fence repair on Tuesday morning. Estimate is $1,850 including materials. Please confirm by Friday so I can order the cedar. Thanks, Sam.",
+});
+inbox.create({
+  householdId: household.id,
+  fromName: "Ms. Palmer (Ridge School)",
+  fromAddress: "office@ridgeschool.example",
+  subject: "Signed permission form needed",
+  body: "Good afternoon — please return the signed permission form for the field trip on Thursday. Also please confirm that Ellie will be attending. Thanks!",
+});
+console.log("seeded 2 inbox messages");
 
 actions.record({
   householdId: household.id,

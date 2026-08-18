@@ -11,7 +11,7 @@ platform/
 │   ├── domain/     # Life Graph types, provenance, ontology, identity, policy, models (no framework)
 │   ├── db/         # Drizzle schema, migrations, repositories
 │   ├── policy/     # Autonomy-rung evaluator, scope matcher, rolling limits
-│   ├── agents/    # Orchestrator, agent + tool contracts, household + calendar agents
+│   ├── agents/    # Orchestrator, agent + tool contracts, household + calendar + inbox agents
 │   └── router/     # Model registry, tier-aware router, callModel + mock provider
 ├── apps/
 │   ├── api/        # Fastify HTTP service (auth + audit + graph + policy + actions + orchestrator + models)
@@ -107,6 +107,16 @@ and audit paths end to end.
     on success (superseding the old node on reschedule). Cross-day
     reschedules trip the seeded escalation and land in the approval
     queue as an Ask.
+  - `inbox` — handles `inbox.message.process`. Triages via T1
+    (`inbox.triage`), extracts obligations via T1 (`inbox.extract`)
+    and writes each to the graph as `obligation.deadline` candidates
+    with sourceRef pointing to the message, drafts a reply via T2
+    (`inbox.draft.reply.low`) or T3 (`inbox.draft.reply.sensitive`)
+    depending on the triaged recipient class, then proposes
+    `message.send`. The send tool's policy sits at draft, so drafts
+    land in the approval queue for a manager to review, edit, and
+    send. Storage: dedicated `inbox_messages` table (not the graph —
+    the graph stores extracted facts, not message bodies).
 - Console: "Run intent" form on the household page.
 - Approval queue — non-execute policy decisions (draft, ask) persist
   as `approvals` rows carrying the tool name, inputs, authority policy

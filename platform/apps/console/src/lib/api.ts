@@ -157,7 +157,24 @@ export const api = (token: string) => ({
       status: "under" | "approaching" | "over";
       byTier: Record<string, { calls: number; usd: number }>;
     }>(token, "GET", `/households/${id}/inference-budget`),
+  listInbox: (id: HouseholdId) =>
+    request<{ messages: InboxMessageSummary[] }>(token, "GET", `/households/${id}/inbox`),
 });
+
+export interface InboxMessageSummary {
+  readonly id: string;
+  readonly fromName: string;
+  readonly fromAddress: string;
+  readonly subject: string;
+  readonly body: string;
+  readonly receivedAt: string;
+  readonly status: "received" | "triaged" | "replied" | "archived" | "spam";
+  readonly urgency: string | null;
+  readonly recipientClass: string | null;
+  readonly requiresReply: "yes" | "no" | "unknown";
+  readonly draftReply: string | null;
+  readonly triagedAt: string | null;
+}
 
 export interface TaskSummary {
   readonly id: string;

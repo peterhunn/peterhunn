@@ -6,6 +6,7 @@ import type { HouseholdId } from "@atelier/domain";
 import { ConsoleNav } from "../../console-nav";
 import { RunIntentForm } from "./run-intent-form";
 import { ApprovalCard } from "../../approvals/approval-card";
+import { InboxMessageCard } from "./inbox-message";
 
 export default async function HouseholdPage({
   params,
@@ -27,6 +28,7 @@ export default async function HouseholdPage({
     tasksRes,
     approvalsRes,
     budget,
+    inboxRes,
   ] = await Promise.all([
     client.me(),
     client
@@ -42,6 +44,7 @@ export default async function HouseholdPage({
     client.listTasks(id as HouseholdId).catch(() => ({ tasks: [] })),
     client.listApprovals(id as HouseholdId).catch(() => ({ approvals: [] })),
     client.inferenceBudget(id as HouseholdId).catch(() => null),
+    client.listInbox(id as HouseholdId).catch(() => ({ messages: [] })),
   ]);
 
   if (!hhRes) notFound();
@@ -53,6 +56,7 @@ export default async function HouseholdPage({
   const tasks = tasksRes.tasks;
   const approvals = approvalsRes.approvals;
   const pendingApprovals = approvals.filter((a) => a.state === "pending");
+  const inbox = inboxRes.messages;
 
   return (
     <>
@@ -111,6 +115,20 @@ export default async function HouseholdPage({
             </div>
           </>
         ) : null}
+
+        <div className="section-head">
+          <h2>Inbox</h2>
+          <span className="mono">{inbox.length} messages</span>
+        </div>
+        {inbox.length === 0 ? (
+          <div className="empty">No inbox messages. Seed one via POST /households/:id/inbox.</div>
+        ) : (
+          <div className="approvals-stack">
+            {inbox.map((m) => (
+              <InboxMessageCard key={m.id} message={m} householdId={hh.id} />
+            ))}
+          </div>
+        )}
 
         <div className="section-head">
           <h2>Run an intent</h2>

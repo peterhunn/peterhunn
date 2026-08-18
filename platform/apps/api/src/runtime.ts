@@ -3,10 +3,12 @@ import {
   ToolRegistry,
   householdAgent,
   calendarAgent,
+  inboxAgent,
   vendorScheduleTool,
   vendorPurchaseTool,
   calendarCreateTool,
   calendarRescheduleTool,
+  messageSendTool,
   type AgentGraphWriter,
 } from "@atelier/agents";
 import {
@@ -59,6 +61,7 @@ export const buildToolRegistry = (): ToolRegistry => {
   r.register(vendorPurchaseTool);
   r.register(calendarCreateTool);
   r.register(calendarRescheduleTool);
+  r.register(messageSendTool);
   return r;
 };
 
@@ -96,7 +99,7 @@ export const buildOrchestrator = (db: Db): Orchestrator => {
   };
 
   return new Orchestrator({
-    agents: [householdAgent, calendarAgent],
+    agents: [householdAgent, calendarAgent, inboxAgent],
     tools: buildToolRegistry(),
     ledger: {
       startRun: (i) => tasks.startRun(i),
