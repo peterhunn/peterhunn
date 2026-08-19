@@ -11,6 +11,8 @@ import { TaskCard } from "./task-card";
 import { ConnectProviders } from "./connect-providers";
 import { SyncInboxButton } from "./sync-inbox-button";
 import { AutopilotToggle } from "./autopilot-toggle";
+import { MessagingEndpoints } from "./messaging-endpoints";
+import { MessagingEvents } from "./messaging-events";
 
 export default async function HouseholdPage({
   params,
@@ -34,6 +36,8 @@ export default async function HouseholdPage({
     budget,
     inboxRes,
     credentialsRes,
+    messagingEndpointsRes,
+    messagingEventsRes,
     oauthCfg,
   ] = await Promise.all([
     client.me(),
@@ -52,6 +56,12 @@ export default async function HouseholdPage({
     client.inferenceBudget(id as HouseholdId).catch(() => null),
     client.listInbox(id as HouseholdId).catch(() => ({ messages: [] })),
     client.listCredentials(id as HouseholdId).catch(() => ({ credentials: [] })),
+    client
+      .listMessagingEndpoints(id as HouseholdId)
+      .catch(() => ({ endpoints: [] })),
+    client
+      .listMessagingEvents(id as HouseholdId)
+      .catch(() => ({ events: [] })),
     client.oauthConfig().catch(() => ({
       configured: false,
       clientId: false,
@@ -73,6 +83,8 @@ export default async function HouseholdPage({
   const pendingApprovals = approvals.filter((a) => a.state === "pending");
   const inbox = inboxRes.messages;
   const credentials = credentialsRes.credentials;
+  const messagingEndpoints = messagingEndpointsRes.endpoints;
+  const messagingEvents = messagingEventsRes.events;
 
   return (
     <>
@@ -135,6 +147,13 @@ export default async function HouseholdPage({
           credentials={credentials}
           oauthConfigured={oauthCfg.configured}
         />
+
+        <MessagingEndpoints
+          householdId={hh.id as HouseholdId}
+          initialEndpoints={messagingEndpoints}
+        />
+
+        <MessagingEvents events={messagingEvents} />
 
         {pendingApprovals.length > 0 ? (
           <>

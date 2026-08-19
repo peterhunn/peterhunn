@@ -212,6 +212,21 @@ and audit paths end to end.
     `users/me/messages/send`. Shares the OAuth refresh loop
     with Calendar. Falls back to a mock sent-id when no
     credential or on API error.
+  - Customer messaging surface — an inbound SMS / WhatsApp
+    reaches the platform via `POST /messaging/inbound/twilio`
+    (and `POST /messaging/inbound/mock` for local dev). The
+    webhook resolves the destination number to a household via
+    the new `contact_endpoints` table
+    (`{channel, address}` uniquely identifies the route), records
+    the messaging event, and dispatches the message body to the
+    orchestrator planner as a customer-origin prompt — so
+    "book the plumber for Thursday" texted from the customer's
+    phone runs `planAndRun` end-to-end and lands the proposal in
+    the approval queue for a manager. Twilio signatures are
+    verified when `ATELIER_TWILIO_AUTH_TOKEN` is set. Provider
+    message ids dedupe retried webhooks. Console: "Customer
+    channels" section on the household page to register phone
+    numbers and see recent inbound/outbound traffic.
   - Proactive autopilot — after each sync tick, freshly-inserted
     inbox messages are auto-dispatched to the inbox agent
     (triage → extract obligations → draft reply → propose

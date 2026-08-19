@@ -13,3 +13,4 @@ export * from "./repositories/inbox.js";
 export * from "./repositories/credentials.js";
 export * from "./repositories/sync_state.js";
 export * from "./repositories/calendar_events.js";
+export * from "./repositories/messaging.js";

@@ -186,6 +186,52 @@ export const api = (token: string) => ({
       `/households/${id}/inbox/sync`,
       maxResults !== undefined ? { maxResults } : {},
     ),
+  listMessagingEndpoints: (id: HouseholdId) =>
+    request<{
+      endpoints: Array<{
+        id: string;
+        channel: "sms" | "whatsapp" | "imessage" | "email";
+        address: string;
+        label: string | null;
+        principalId: string | null;
+        createdAt: string;
+        revokedAt: string | null;
+      }>;
+    }>(token, "GET", `/households/${id}/messaging/endpoints`),
+  addMessagingEndpoint: (
+    id: HouseholdId,
+    input: {
+      channel: "sms" | "whatsapp" | "imessage" | "email";
+      address: string;
+      label?: string;
+    },
+  ) =>
+    request<{ endpoint: { id: string } }>(
+      token,
+      "POST",
+      `/households/${id}/messaging/endpoints`,
+      input,
+    ),
+  revokeMessagingEndpoint: (id: HouseholdId, endpointId: string) =>
+    request<void>(
+      token,
+      "DELETE",
+      `/households/${id}/messaging/endpoints/${endpointId}`,
+    ),
+  listMessagingEvents: (id: HouseholdId) =>
+    request<{
+      events: Array<{
+        id: string;
+        direction: "inbound" | "outbound";
+        channel: string;
+        provider: string;
+        fromAddress: string;
+        toAddress: string;
+        body: string;
+        receivedAt: string;
+        plannerRunId: string | null;
+      }>;
+    }>(token, "GET", `/households/${id}/messaging/events`),
   setAutopilot: (id: HouseholdId, enabled: boolean) =>
     request<{ household: { id: string; autopilotEnabled: boolean } }>(
       token,

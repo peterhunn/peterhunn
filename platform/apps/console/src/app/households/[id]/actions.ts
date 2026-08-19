@@ -142,6 +142,40 @@ export async function startGoogleOAuth(
   }
 }
 
+export async function addMessagingEndpoint(
+  householdId: HouseholdId,
+  input: {
+    channel: "sms" | "whatsapp" | "imessage" | "email";
+    address: string;
+    label?: string;
+  },
+): Promise<{ message: string }> {
+  const token = await getSessionToken();
+  if (!token) return { message: "Session expired." };
+  try {
+    await api(token).addMessagingEndpoint(householdId, input);
+    return { message: `Endpoint added for ${input.channel}:${input.address}.` };
+  } catch (err) {
+    if (err instanceof ApiError) return { message: `Error: ${err.message}` };
+    return { message: `Error: ${(err as Error).message}` };
+  }
+}
+
+export async function revokeMessagingEndpoint(
+  householdId: HouseholdId,
+  endpointId: string,
+): Promise<{ message: string }> {
+  const token = await getSessionToken();
+  if (!token) return { message: "Session expired." };
+  try {
+    await api(token).revokeMessagingEndpoint(householdId, endpointId);
+    return { message: "Endpoint revoked." };
+  } catch (err) {
+    if (err instanceof ApiError) return { message: `Error: ${err.message}` };
+    return { message: `Error: ${(err as Error).message}` };
+  }
+}
+
 export async function setAutopilot(
   householdId: HouseholdId,
   enabled: boolean,
