@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { ToolDefinition } from "@atelier/domain";
 import type { Agent, AgentContext, AgentTaskOutput, Intent } from "../types.js";
+import { searchWeb, fetchUrl } from "../tools/web.js";
 
 // Research agent — the first agent that uses the multi-turn LLM
 // tool-use loop. Two model-side tools (search_web, fetch_url) let the
@@ -45,33 +46,6 @@ const fetchUrlDef: ToolDefinition = {
     required: ["url"],
   },
 };
-
-// Mock handlers — deterministic canned data so the loop runs without
-// external network calls. Real implementations swap these in the
-// runtime factory.
-const mockSearch = (query: string): Array<{ title: string; url: string; snippet: string }> => [
-  {
-    title: `Overview of ${query}`,
-    url: `https://example.com/${encodeURIComponent(query)}/overview`,
-    snippet: `Overview and background on ${query}.`,
-  },
-  {
-    title: `Best options for ${query}`,
-    url: `https://example.com/${encodeURIComponent(query)}/best`,
-    snippet: `Comparison of leading choices for ${query}.`,
-  },
-  {
-    title: `Local providers for ${query}`,
-    url: `https://example.com/${encodeURIComponent(query)}/local`,
-    snippet: `Directory of local providers offering ${query}.`,
-  },
-];
-
-const mockFetch = (url: string): { url: string; title: string; text: string } => ({
-  url,
-  title: `Fetched: ${url}`,
-  text: `Mocked page content for ${url}. Real fetch would return the readable text.`,
-});
 
 export const researchAgent: Agent = {
   name: NAME,
@@ -120,18 +94,22 @@ export const researchAgent: Agent = {
         handleToolUse: async ({ name, input }) => {
           if (name === "search_web") {
             const query = String(input["query"] ?? "");
-            const results = mockSearch(query);
+            const { provider, results } = await searchWeb(query);
             toolTrace.push({
               name,
               input,
-              summary: `${results.length} results for "${query}"`,
+              summary: `${results.length} results for "${query}" via ${provider}`,
             });
             return { results };
           }
           if (name === "fetch_url") {
             const url = String(input["url"] ?? "");
-            const page = mockFetch(url);
-            toolTrace.push({ name, input, summary: `fetched ${url}` });
+            const page = await fetchUrl(url);
+            toolTrace.push({
+              name,
+              input,
+              summary: `fetched ${url} via ${page.provider}`,
+            });
             return page;
           }
           return { error: `unknown_tool:${name}` };

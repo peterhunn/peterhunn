@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   Orchestrator,
   ToolRegistry,
@@ -125,6 +125,26 @@ const mkResearchModels = (): ModelRuntime & {
     },
   };
 };
+
+// Keep the research agent's real web tools hermetic in tests:
+// no provider keys, and every fetch fails so both Jina and raw paths
+// collapse to the deterministic mock fallback.
+beforeEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+  vi.stubEnv("TAVILY_API_KEY", "");
+  vi.stubEnv("SERPER_API_KEY", "");
+  vi.stubEnv("BRAVE_SEARCH_API_KEY", "");
+  vi.stubEnv("ATELIER_DISABLE_JINA", "1");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response("network disabled", { status: 500 })),
+  );
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+});
 
 const researchIntent: Intent = {
   kind: "research.query",
