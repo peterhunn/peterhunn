@@ -860,3 +860,73 @@ form.login {
   align-items: center;
 }
 
+.people-section {
+  margin-bottom: 0.75rem;
+}
+.people-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 0.5rem 0 0.25rem;
+}
+.people-section-head h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+.person-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 0.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.person-row {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.35rem 0.5rem;
+}
+.person-line {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.person-name {
+  font-weight: 500;
+}
+.person-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.person-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.5rem;
+  padding: 0.5rem;
+  border-top: 1px dashed var(--border);
+  margin-top: 0.35rem;
+}
+.person-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.85rem;
+}
+.person-field span {
+  color: var(--muted);
+}
+.person-field input,
+.person-field select {
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: inherit;
+  background: var(--surface, transparent);
+  color: inherit;
+}
+

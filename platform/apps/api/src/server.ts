@@ -19,6 +19,7 @@ import { syncStateRoutes } from "./routes/sync-state.js";
 import { calendarRoutes } from "./routes/calendar.js";
 import { messagingRoutes } from "./routes/messaging.js";
 import { playbookRoutes } from "./routes/playbooks.js";
+import { peopleRoutes } from "./routes/people.js";
 
 export const buildServer = (db: Db) => {
   const app = Fastify({ logger: { level: process.env["LOG_LEVEL"] ?? "info" } });
@@ -61,6 +62,7 @@ export const buildServer = (db: Db) => {
   app.register(calendarRoutes(db));
   app.register(messagingRoutes(db));
   app.register(playbookRoutes(db));
+  app.register(peopleRoutes(db));
 
   return app;
 };

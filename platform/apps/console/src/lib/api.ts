@@ -218,6 +218,35 @@ export const api = (token: string) => ({
       "DELETE",
       `/households/${id}/messaging/endpoints/${endpointId}`,
     ),
+  listPeople: (id: HouseholdId) =>
+    request<{
+      people: {
+        principal: Array<{ id: string; data: Record<string, unknown> }>;
+        member: Array<{ id: string; data: Record<string, unknown> }>;
+        staff: Array<{ id: string; data: Record<string, unknown> }>;
+        contact: Array<{ id: string; data: Record<string, unknown> }>;
+      };
+    }>(token, "GET", `/households/${id}/people`),
+  createPerson: (
+    id: HouseholdId,
+    input: {
+      kind: "principal" | "member" | "staff" | "contact";
+      data: Record<string, unknown>;
+    },
+  ) =>
+    request<{
+      person: { id: string; kind: string; data: Record<string, unknown> };
+    }>(token, "POST", `/households/${id}/people`, input),
+  updatePerson: (
+    id: HouseholdId,
+    nodeId: string,
+    data: Record<string, unknown>,
+  ) =>
+    request<{
+      person: { id: string; kind: string; data: Record<string, unknown> };
+    }>(token, "PATCH", `/households/${id}/people/${nodeId}`, { data }),
+  deletePerson: (id: HouseholdId, nodeId: string) =>
+    request<void>(token, "DELETE", `/households/${id}/people/${nodeId}`),
   listPlaybooks: (id: HouseholdId) =>
     request<{
       playbooks: Array<{

@@ -256,6 +256,16 @@ and audit paths end to end.
     mock send with a visible reason. Console: Reply button on
     each inbound message opens an inline compose that hits the
     send route.
+  - First-class people management — `GET /households/:id/people`
+    returns `{ principal, member, staff, contact }` bucketed
+    from the graph; `POST` accepts
+    `{ kind, data }` validated against the ontology's Zod
+    schema for that kind; `PATCH` merges + supersedes (history
+    preserved, old node retires); `DELETE` supersedes without a
+    replacement. Console: People panel on the household page —
+    per-kind sections with inline add/edit/remove. Nothing
+    bypasses the graph — every person is a `person.*` node with
+    provenance stamped `manager_observed`.
   - Playbooks — packaged autonomy templates. Each one bundles
     a schedule (weekly, monthly, or interval), a domain, and an
     intent shape; enabling one for a household starts a
