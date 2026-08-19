@@ -9,6 +9,7 @@ import {
   runCalendarCreateIntent,
   runCalendarRescheduleIntent,
   runResearchIntent,
+  runAdminReviewIntent,
   planAndRun,
 } from "./actions";
 
@@ -18,7 +19,8 @@ type Mode =
   | "purchase"
   | "calendar_create"
   | "calendar_reschedule"
-  | "research";
+  | "research"
+  | "admin_review";
 
 export function RunIntentForm({ householdId }: { householdId: HouseholdId }) {
   const [mode, setMode] = useState<Mode>("plan");
@@ -32,6 +34,7 @@ export function RunIntentForm({ householdId }: { householdId: HouseholdId }) {
   const [question, setQuestion] = useState(
     "Compare three ergonomic office chairs under $800.",
   );
+  const [windowDays, setWindowDays] = useState("60");
   const [title, setTitle] = useState("Board meeting");
   const [startAt, setStartAt] = useState("2026-09-01T15:00");
   const [endAt, setEndAt] = useState("2026-09-01T16:00");
@@ -83,6 +86,11 @@ export function RunIntentForm({ householdId }: { householdId: HouseholdId }) {
             case "research":
               res = await runResearchIntent(householdId, { question });
               break;
+            case "admin_review":
+              res = await runAdminReviewIntent(householdId, {
+                windowDays: Number(windowDays),
+              });
+              break;
           }
           setMessage(res.message);
           router.refresh();
@@ -98,8 +106,23 @@ export function RunIntentForm({ householdId }: { householdId: HouseholdId }) {
           <option value="calendar_create">calendar.appointment.create</option>
           <option value="calendar_reschedule">calendar.appointment.reschedule</option>
           <option value="research">research.query</option>
+          <option value="admin_review">admin.renewals.review</option>
         </select>
       </div>
+
+      {mode === "admin_review" ? (
+        <div className="form-field inline">
+          <label htmlFor="windowDays">Window (days)</label>
+          <input
+            id="windowDays"
+            type="number"
+            min={1}
+            max={365}
+            value={windowDays}
+            onChange={(e) => setWindowDays(e.target.value)}
+          />
+        </div>
+      ) : null}
 
       {mode === "research" ? (
         <div className="form-field inline" style={{ flex: "1 1 100%", minWidth: 300 }}>

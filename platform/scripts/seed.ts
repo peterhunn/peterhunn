@@ -167,7 +167,44 @@ graph.createNode(household.id, {
     status: "confirmed",
   },
 });
-console.log("seeded property + two vendor nodes");
+
+// Documents with upcoming expiries so admin.renewals.review has
+// something to find on first boot. One in ~30 days, one in ~180 days.
+const inDays = (n: number): string =>
+  new Date(Date.now() + n * 24 * 60 * 60 * 1000).toISOString();
+graph.createNode(household.id, {
+  type: "document.identity",
+  data: {
+    title: "Passport — Principal",
+    category: "identity",
+    expiresAt: inDays(45),
+    notes: "US passport, standard renewal.",
+  },
+  provenance: {
+    source: "customer_direct",
+    assertedBy: manager.id,
+    assertedAt: now,
+    confidence: 1,
+    status: "confirmed",
+  },
+});
+graph.createNode(household.id, {
+  type: "document.policy",
+  data: {
+    title: "Homeowners insurance",
+    category: "policy",
+    expiresAt: inDays(30),
+    notes: "Annual renewal; auto-renew on file.",
+  },
+  provenance: {
+    source: "customer_direct",
+    assertedBy: manager.id,
+    assertedAt: now,
+    confidence: 1,
+    status: "confirmed",
+  },
+});
+console.log("seeded property + two vendor nodes + two documents");
 
 // A sample inbound message so the Inbox agent has something to
 // process on first boot.

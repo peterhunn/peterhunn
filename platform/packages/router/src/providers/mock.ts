@@ -62,6 +62,9 @@ const cannedResponse = (model: ModelSpec, call: ModelCall): string => {
     case "calendar.parse":
       return JSON.stringify({ category: "professional" });
 
+    case "admin.renewal.detect":
+      return adminRenewalDetect(userMsg);
+
     case "orchestrator.simple":
     case "orchestrator.cross_domain":
       return JSON.stringify(plannerPlan(userMsg));
@@ -136,6 +139,54 @@ const plannerPlan = (
     };
   }
   return { reasoning: reasons.join("; "), intents };
+};
+
+// Canned admin.renewal.detect response. Reads the user message JSON,
+// classifies each item on a naive daysUntilExpiry threshold, and
+// returns urgency + a short recommended action per type.
+const adminRenewalDetect = (userMsg: string): string => {
+  type Item = {
+    id?: string;
+    type?: string;
+    title?: string;
+    daysUntilExpiry?: number;
+  };
+  let parsed: { items?: Item[] } = {};
+  try {
+    parsed = JSON.parse(userMsg) as { items?: Item[] };
+  } catch {
+    // fall through
+  }
+  const items = (parsed.items ?? []).map((i) => {
+    const d = typeof i.daysUntilExpiry === "number" ? i.daysUntilExpiry : 60;
+    const urgency = d < 15 ? "high" : d < 45 ? "normal" : "low";
+    const recommendedAction = recommendActionFor(i.type ?? "", i.title ?? "");
+    return { id: i.id, urgency, recommendedAction };
+  });
+  const highs = items.filter((i) => i.urgency === "high").length;
+  const summary =
+    items.length === 0
+      ? "No documents nearing expiry."
+      : `${items.length} document${items.length === 1 ? "" : "s"} nearing expiry${
+          highs > 0 ? `; ${highs} urgent` : ""
+        }.`;
+  return JSON.stringify({ summary, items });
+};
+
+const recommendActionFor = (type: string, title: string): string => {
+  const t = title.toLowerCase();
+  if (type === "document.identity") {
+    if (t.includes("passport")) return "Book passport renewal appointment.";
+    if (t.includes("driver") || t.includes("license")) return "Renew driver's license online.";
+    return "Renew identity document.";
+  }
+  if (type === "document.policy") {
+    if (t.includes("home")) return "Confirm homeowners auto-renew and rate.";
+    if (t.includes("auto") || t.includes("car")) return "Confirm auto policy renewal and rate.";
+    return "Confirm policy renewal and rate.";
+  }
+  if (type === "document.legal") return "Route to counsel for renewal review.";
+  return "Handle upcoming renewal.";
 };
 
 const nextBusinessAt = (hourUtc: number): string => {

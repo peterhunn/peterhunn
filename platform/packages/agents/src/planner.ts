@@ -73,6 +73,12 @@ export const PLANNER_REGISTRY: readonly PlannerIntentSpec[] = [
       category: "product",
     },
   },
+  {
+    kind: "admin.renewals.review",
+    description:
+      "Scan the household graph for documents (identity, policy, records) nearing expiry and queue follow-up obligations. Use when the customer asks 'what's about to expire?', 'do a paperwork sweep', or on a proactive cadence.",
+    attrsExample: { windowDays: 60 },
+  },
 ];
 
 // A plan is what the planner produces from a prompt. `notes` is a

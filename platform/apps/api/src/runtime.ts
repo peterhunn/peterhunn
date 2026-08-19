@@ -5,6 +5,7 @@ import {
   calendarAgent,
   inboxAgent,
   researchAgent,
+  adminAgent,
   vendorScheduleTool,
   vendorPurchaseTool,
   calendarCreateTool,
@@ -100,7 +101,7 @@ export const buildOrchestrator = (db: Db): Orchestrator => {
   };
 
   return new Orchestrator({
-    agents: [householdAgent, calendarAgent, inboxAgent, researchAgent],
+    agents: [householdAgent, calendarAgent, inboxAgent, researchAgent, adminAgent],
     tools: buildToolRegistry(),
     ledger: {
       startRun: (i) => tasks.startRun(i),

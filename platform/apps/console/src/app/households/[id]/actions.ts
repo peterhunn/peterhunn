@@ -79,6 +79,13 @@ export async function runResearchIntent(
   return runIntent(householdId, "research.query", input);
 }
 
+export async function runAdminReviewIntent(
+  householdId: HouseholdId,
+  input: { windowDays?: number },
+): Promise<{ message: string }> {
+  return runIntent(householdId, "admin.renewals.review", input);
+}
+
 export async function planAndRun(
   householdId: HouseholdId,
   prompt: string,

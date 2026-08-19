@@ -11,7 +11,7 @@ platform/
 │   ├── domain/     # Life Graph types, provenance, ontology, identity, policy, models (no framework)
 │   ├── db/         # Drizzle schema, migrations, repositories
 │   ├── policy/     # Autonomy-rung evaluator, scope matcher, rolling limits
-│   ├── agents/    # Orchestrator, agent + tool contracts, household + calendar + inbox + research agents
+│   ├── agents/    # Orchestrator, agent + tool contracts, household + calendar + inbox + research + admin agents
 │   └── router/     # Model registry, tier-aware router, callModel + mock provider
 ├── apps/
 │   ├── api/        # Fastify HTTP service (auth + audit + graph + policy + actions + orchestrator + models)
@@ -125,6 +125,13 @@ and audit paths end to end.
     returns a summary with tool trace in the task outputs. Tier
     routes to `research.structured` (T2) when a sources list is
     provided, else `research.open` (T3).
+  - `admin` — handles `admin.renewals.review`. Scans the graph
+    deterministically for `document.*` nodes with `expiresAt`
+    inside a window (default 60 days), runs a single T1
+    `admin.renewal.detect` batch classification over the whole
+    list (cheap and coherent), and writes one
+    `obligation.deadline` candidate per item back to the graph
+    with `sourceRef` pointing to the source document.
 - Console: "Run intent" form on the household page.
 - Approval queue — non-execute policy decisions (draft, ask) persist
   as `approvals` rows carrying the tool name, inputs, authority policy
