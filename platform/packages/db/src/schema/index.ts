@@ -11,3 +11,4 @@ export * from "./model_calls.js";
 export * from "./inbox.js";
 export * from "./credentials.js";
 export * from "./sync_state.js";
+export * from "./calendar_events.js";

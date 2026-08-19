@@ -1,18 +1,27 @@
 import {
+  calendarEventRepo,
   credentialRepo,
   householdRepo,
   inboxRepo,
   syncStateRepo,
   type Db,
 } from "@atelier/db";
-import { syncGmailInbox, type GmailSyncCursor } from "@atelier/agents";
+import {
+  syncGmailInbox,
+  syncGoogleCalendar,
+  type CalendarSyncCursor,
+  type GmailSyncCursor,
+} from "@atelier/agents";
 import type { HouseholdId } from "@atelier/domain";
 
 // Background sync scheduler. Every intervalSeconds it walks every
-// household with a stored gmail credential and runs the incremental
-// sync — new mail lands in the inbox without a manager clicking
-// anything. Overlapping ticks are prevented by an in-flight flag.
-// Errors on one household never stop the loop for the others.
+// household and, per provider it has an unrevoked credential for,
+// runs the incremental sync — Gmail via History API into
+// inbox_messages, Google Calendar via events.list syncToken into
+// calendar_events. New activity lands without a manager clicking
+// anything. Overlapping ticks are prevented by an in-flight flag,
+// and an error on one household (or one provider) never stops the
+// loop for the others.
 
 export interface SchedulerOptions {
   readonly intervalSeconds: number;
@@ -37,6 +46,7 @@ export const buildScheduler = (db: Db, opts: SchedulerOptions): Scheduler => {
   const households = householdRepo(db);
   const credentials = credentialRepo(db);
   const inbox = inboxRepo(db);
+  const calendarEvents = calendarEventRepo(db);
   const sync = syncStateRepo(db);
 
   let handle: ReturnType<typeof setInterval> | null = null;
@@ -54,6 +64,18 @@ export const buildScheduler = (db: Db, opts: SchedulerOptions): Scheduler => {
     clear: (h, provider) => sync.clear(h, provider),
   });
 
+  const calendarCursor = (): CalendarSyncCursor => ({
+    read: (h, provider) => {
+      const row = sync.get(h, provider);
+      if (!row) return null;
+      const c = row.cursor as { syncToken?: string } | null;
+      return c && typeof c.syncToken === "string" ? { syncToken: c.syncToken } : null;
+    },
+    save: (h, provider, cursor, lastResult) =>
+      sync.save(h, provider, cursor, lastResult),
+    clear: (h, provider) => sync.clear(h, provider),
+  });
+
   const runOnce = async (): Promise<{
     householdsChecked: number;
     householdsSynced: number;
@@ -65,53 +87,101 @@ export const buildScheduler = (db: Db, opts: SchedulerOptions): Scheduler => {
     }
     inFlight = true;
     try {
-      const cursor = gmailCursor();
+      const gmail = gmailCursor();
+      const calendar = calendarCursor();
       const allHouseholds = households.list();
       let synced = 0;
       const perHousehold: Array<{ householdId: string; result: unknown }> = [];
 
       for (const hh of allHouseholds) {
-        const hasGmail =
-          credentials
-            .list(hh.id)
-            .some((c) => c.provider === "gmail" && !c.revokedAt);
-        if (!hasGmail) continue;
-        try {
-          const result = await syncGmailInbox(
-            {
-              householdId: hh.id as HouseholdId,
-              readCredential: (provider) => credentials.getSecret(hh.id, provider),
-              persistAccessToken: (id, at, exp) =>
-                credentials.updateAccessToken(id, at, exp),
-              logger: opts.logger,
-            },
-            { upsertMessage: (i) => inbox.upsertExternal(i) },
-            { cursorStore: cursor },
-          );
-          synced++;
-          perHousehold.push({ householdId: hh.id, result });
-          if (result.error) {
-            opts.logger.error("scheduler gmail sync error", {
+        const providers = credentials
+          .list(hh.id)
+          .filter((c) => !c.revokedAt)
+          .map((c) => c.provider);
+        const hasGmail = providers.includes("gmail");
+        const hasCalendar = providers.includes("google_calendar");
+        if (!hasGmail && !hasCalendar) continue;
+
+        const ctx = {
+          householdId: hh.id as HouseholdId,
+          readCredential: (provider: string) => credentials.getSecret(hh.id, provider),
+          persistAccessToken: (id: string, at: string, exp: string) =>
+            credentials.updateAccessToken(id, at, exp),
+          logger: opts.logger,
+        };
+
+        const result: {
+          gmail?: unknown;
+          calendar?: unknown;
+          errors: string[];
+        } = { errors: [] };
+
+        if (hasGmail) {
+          try {
+            const r = await syncGmailInbox(
+              ctx,
+              { upsertMessage: (i) => inbox.upsertExternal(i) },
+              { cursorStore: gmail },
+            );
+            result.gmail = r;
+            if (r.error) {
+              result.errors.push(`gmail: ${r.error}`);
+              opts.logger.error("scheduler gmail sync error", {
+                householdId: hh.id,
+                error: r.error,
+              });
+            } else if (r.inserted > 0) {
+              opts.logger.info("scheduler gmail sync inserted", {
+                householdId: hh.id,
+                inserted: r.inserted,
+                mode: r.mode,
+              });
+            }
+          } catch (err) {
+            result.errors.push(`gmail: ${(err as Error).message}`);
+            opts.logger.error("scheduler gmail sync threw", {
               householdId: hh.id,
-              error: result.error,
-            });
-          } else if (result.inserted > 0) {
-            opts.logger.info("scheduler gmail sync inserted", {
-              householdId: hh.id,
-              inserted: result.inserted,
-              mode: result.mode,
+              error: (err as Error).message,
             });
           }
-        } catch (err) {
-          opts.logger.error("scheduler gmail sync threw", {
-            householdId: hh.id,
-            error: (err as Error).message,
-          });
-          perHousehold.push({
-            householdId: hh.id,
-            result: { error: (err as Error).message },
-          });
         }
+
+        if (hasCalendar) {
+          try {
+            const r = await syncGoogleCalendar(
+              ctx,
+              {
+                upsertEvent: (e) => calendarEvents.upsertExternal(e),
+              },
+              { cursorStore: calendar },
+            );
+            result.calendar = r;
+            if (r.error) {
+              result.errors.push(`calendar: ${r.error}`);
+              opts.logger.error("scheduler calendar sync error", {
+                householdId: hh.id,
+                error: r.error,
+              });
+            } else if (r.inserted + r.updated > 0) {
+              opts.logger.info("scheduler calendar sync applied", {
+                householdId: hh.id,
+                inserted: r.inserted,
+                updated: r.updated,
+                cancelled: r.cancelled,
+                mode: r.mode,
+              });
+            }
+          } catch (err) {
+            result.errors.push(`calendar: ${(err as Error).message}`);
+            opts.logger.error("scheduler calendar sync threw", {
+              householdId: hh.id,
+              error: (err as Error).message,
+            });
+          }
+        }
+
+        synced++;
+        perHousehold.push({ householdId: hh.id, result });
       }
 
       return {

@@ -13,3 +13,4 @@ export * from "./tools/vendor.js";
 export * from "./tools/calendar.js";
 export * from "./tools/message.js";
 export * from "./tools/gmail-sync.js";
+export * from "./tools/calendar-sync.js";

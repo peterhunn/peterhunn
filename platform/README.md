@@ -213,14 +213,31 @@ and audit paths end to end.
     with Calendar. Falls back to a mock sent-id when no
     credential or on API error.
   - Background sync scheduler — the API boots a scheduler that
-    walks every household with a stored `gmail` credential on an
-    interval (`ATELIER_SYNC_INTERVAL_SECONDS`, default 300s) and
-    runs the incremental Gmail pull. Overlapping ticks are
-    prevented; a failure on one household never stops the loop
-    for the others. Disable with `ATELIER_SYNC_ENABLED=0` (tests
-    and one-shot workers). Cursor state is observable at
+    walks every household on an interval
+    (`ATELIER_SYNC_INTERVAL_SECONDS`, default 300s) and runs the
+    incremental sync for every connected provider: Gmail via
+    History API into `inbox_messages`, Google Calendar via
+    `events.list` syncToken into the new `calendar_events`
+    mirror. Overlapping ticks are prevented; a failure on one
+    household or one provider never stops the loop for the
+    others. Disable with `ATELIER_SYNC_ENABLED=0` (tests and
+    one-shot workers). Cursor state is observable at
     `GET /households/:id/sync-state` — one row per provider with
-    the last cursor and result summary.
+    the last cursor and result summary. On-demand endpoints:
+    `POST /households/:id/inbox/sync` and
+    `POST /households/:id/calendar/sync`, plus
+    `GET /households/:id/calendar/events` for the mirrored
+    schedule.
+  - Google Calendar incremental sync — first call for a
+    household does a bounded full pull (past 30d + next 365d,
+    configurable per request) and stores the returned
+    `nextSyncToken`. Subsequent calls stream only changed events
+    via the syncToken; cancellations arrive as
+    `status: cancelled`. A 410 Gone response (token invalidated
+    after ~30d) auto-clears the cursor and falls back to a full
+    pull. Response includes `mode: full | incremental |
+    up_to_date | token_reset` so the console can surface which
+    path ran.
   - Gmail inbound sync — `POST /households/:id/inbox/sync`
     pulls unread INBOX messages via `users/me/messages` +
     `messages/{id}?format=full`, walks MIME parts for text
