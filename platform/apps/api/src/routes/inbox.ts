@@ -1,7 +1,8 @@
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
-import { inboxRepo, type Db } from "@atelier/db";
+import { credentialRepo, inboxRepo, type Db } from "@atelier/db";
 import type { HouseholdId } from "@atelier/domain";
+import { syncGmailInbox } from "@atelier/agents";
 
 const CreateInboxMessageBody = z.object({
   fromName: z.string().min(1),
@@ -12,8 +13,15 @@ const CreateInboxMessageBody = z.object({
   receivedAt: z.string().datetime().optional(),
 });
 
+const SyncBody = z
+  .object({
+    maxResults: z.number().int().positive().max(100).optional(),
+  })
+  .default({});
+
 export const inboxRoutes = (db: Db): FastifyPluginAsync => async (app) => {
   const inbox = inboxRepo(db);
+  const credentials = credentialRepo(db);
 
   app.get<{ Params: { householdId: string } }>(
     "/households/:householdId/inbox",
@@ -46,6 +54,50 @@ export const inboxRoutes = (db: Db): FastifyPluginAsync => async (app) => {
         ...parsed.data,
       });
       return reply.code(201).send({ message: msg });
+    },
+  );
+
+  // Pull unread messages from Gmail into the household's inbox.
+  // Requires a `gmail` credential — 400 with a clear reason if
+  // absent, so the console can surface it.
+  app.post<{ Params: { householdId: string } }>(
+    "/households/:householdId/inbox/sync",
+    {
+      config: {
+        audit: { action: "inbox.sync", resourceType: "inbox_message", sensitive: true },
+      },
+    },
+    async (req, reply) => {
+      const body = SyncBody.safeParse(req.body ?? {});
+      if (!body.success) return reply.code(400).send({ error: "invalid_body" });
+      const householdId = req.householdContext as HouseholdId;
+
+      const result = await syncGmailInbox(
+        {
+          householdId,
+          readCredential: (provider) => credentials.getSecret(householdId, provider),
+          persistAccessToken: (id, at, exp) => credentials.updateAccessToken(id, at, exp),
+          logger: {
+            info: (msg, ctx) => req.log.info({ ...(ctx as object) }, msg),
+          },
+        },
+        {
+          upsertMessage: (i) => inbox.upsertExternal(i),
+        },
+        body.data,
+      );
+
+      if (!result.consulted) {
+        return reply.code(400).send({
+          error: "gmail_not_connected",
+          message:
+            "No `gmail` credential is stored for this household. Connect Google to enable sync.",
+        });
+      }
+      if (result.error) {
+        return reply.code(502).send({ error: "gmail_sync_failed", detail: result.error });
+      }
+      return { sync: result };
     },
   );
 };

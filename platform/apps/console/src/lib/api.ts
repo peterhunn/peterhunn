@@ -170,6 +170,21 @@ export const api = (token: string) => ({
     }>(token, "GET", `/households/${id}/inference-budget`),
   listInbox: (id: HouseholdId) =>
     request<{ messages: InboxMessageSummary[] }>(token, "GET", `/households/${id}/inbox`),
+  syncGmailInbox: (id: HouseholdId, maxResults?: number) =>
+    request<{
+      sync: {
+        consulted: boolean;
+        listed: number;
+        fetched: number;
+        inserted: number;
+        skippedDuplicates: number;
+      };
+    }>(
+      token,
+      "POST",
+      `/households/${id}/inbox/sync`,
+      maxResults !== undefined ? { maxResults } : {},
+    ),
   listCredentials: (id: HouseholdId) =>
     request<{ credentials: CredentialSummary[] }>(
       token,

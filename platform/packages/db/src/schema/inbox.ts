@@ -22,6 +22,10 @@ export const inboxMessages = sqliteTable(
     body: text("body").notNull(),
     receivedAt: text("received_at").notNull(),
 
+    externalProvider: text("external_provider"),
+    externalMessageId: text("external_message_id"),
+    externalThreadId: text("external_thread_id"),
+
     status: text("status", {
       enum: ["received", "triaged", "replied", "archived", "spam"],
     })
@@ -46,6 +50,10 @@ export const inboxMessages = sqliteTable(
     householdReceivedAtIdx: index("inbox_household_received_at_idx").on(
       t.householdId,
       t.receivedAt,
+    ),
+    externalIdIdx: index("inbox_external_id_idx").on(
+      t.externalProvider,
+      t.externalMessageId,
     ),
   }),
 );

@@ -1,0 +1,146 @@
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
+import {
+  openDb,
+  credentialRepo,
+  householdRepo,
+  identityRepo,
+} from "@atelier/db";
+import type { HouseholdId } from "@atelier/domain";
+import { buildServer } from "../src/server.js";
+import type { FastifyInstance } from "fastify";
+
+let app: FastifyInstance;
+let db: ReturnType<typeof openDb>;
+let token: string;
+let hh: HouseholdId;
+
+const b64url = (s: string): string =>
+  Buffer.from(s, "utf-8")
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+
+beforeAll(async () => {
+  db = openDb({ url: ":memory:" });
+  const { migrate } = await import("drizzle-orm/better-sqlite3/migrator");
+  migrate(db, { migrationsFolder: "../../packages/db/migrations" });
+
+  const identity = identityRepo(db);
+  const m = identity.createManager({ displayName: "M", email: "m@a.b" });
+  token = identity.mintToken({ actorType: "manager", actorId: m.id, label: "t" }).token;
+  const household = householdRepo(db).create({ name: "H", tier: "life" });
+  hh = household.id;
+  identity.grantHousehold({ managerId: m.id, householdId: hh, role: "primary" });
+
+  app = buildServer(db);
+  await app.ready();
+});
+
+afterAll(async () => await app.close());
+
+beforeEach(() => {
+  vi.unstubAllGlobals();
+});
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("Gmail inbox sync API", () => {
+  it("400s when the household has no gmail credential", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: `/households/${hh}/inbox/sync`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: {},
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("gmail_not_connected");
+  });
+
+  it("syncs unread Gmail into the inbox_messages table and dedupes on re-run", async () => {
+    // Store a gmail credential for the household.
+    credentialRepo(db).store({
+      householdId: hh,
+      provider: "gmail",
+      kind: "oauth2",
+      label: "Gmail (test)",
+      credential: {
+        access_token: "at-live",
+        from_address: "alex@atelier.example",
+      },
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes("/users/me/messages?q=")) {
+          return new Response(
+            JSON.stringify({ messages: [{ id: "gm_sync_1" }] }),
+            { status: 200 },
+          );
+        }
+        if (url.includes("/users/me/messages/gm_sync_1")) {
+          return new Response(
+            JSON.stringify({
+              id: "gm_sync_1",
+              threadId: "t1",
+              internalDate: String(Date.UTC(2026, 8, 1, 15, 0, 0)),
+              payload: {
+                headers: [
+                  { name: "From", value: '"Sam" <sam@example.com>' },
+                  { name: "Subject", value: "Estimate" },
+                ],
+                mimeType: "text/plain",
+                body: { data: b64url("$1,850. Confirm by Friday.") },
+              },
+            }),
+            { status: 200 },
+          );
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      }),
+    );
+
+    const first = await app.inject({
+      method: "POST",
+      url: `/households/${hh}/inbox/sync`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: {},
+    });
+    expect(first.statusCode).toBe(200);
+    const firstResult = first.json().sync;
+    expect(firstResult.listed).toBe(1);
+    expect(firstResult.inserted).toBe(1);
+    expect(firstResult.skippedDuplicates).toBe(0);
+
+    // Inbox now carries the new message.
+    const inbox = await app.inject({
+      method: "GET",
+      url: `/households/${hh}/inbox`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const list: Array<{
+      externalMessageId: string | null;
+      subject: string;
+      body: string;
+      fromAddress: string;
+    }> = inbox.json().messages;
+    const synced = list.find((m) => m.externalMessageId === "gm_sync_1");
+    expect(synced).toBeDefined();
+    expect(synced!.subject).toBe("Estimate");
+    expect(synced!.fromAddress).toBe("sam@example.com");
+    expect(synced!.body).toContain("$1,850");
+
+    // Re-run: dedupe → 0 inserted, 1 skipped.
+    const second = await app.inject({
+      method: "POST",
+      url: `/households/${hh}/inbox/sync`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: {},
+    });
+    const secondResult = second.json().sync;
+    expect(secondResult.inserted).toBe(0);
+    expect(secondResult.skippedDuplicates).toBe(1);
+  });
+});

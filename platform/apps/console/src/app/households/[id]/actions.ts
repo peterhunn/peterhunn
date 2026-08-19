@@ -105,6 +105,28 @@ export async function runTravelTripPlanIntent(
   return runIntent(householdId, "travel.trip.plan", input);
 }
 
+export async function syncGmail(
+  householdId: HouseholdId,
+): Promise<{ message: string }> {
+  const token = await getSessionToken();
+  if (!token) return { message: "Session expired." };
+  try {
+    const res = await api(token).syncGmailInbox(householdId);
+    const s = res.sync;
+    return {
+      message: `Synced Gmail — listed ${s.listed}, fetched ${s.fetched}, ${
+        s.inserted
+      } new, ${s.skippedDuplicates} already seen.`,
+    };
+  } catch (err) {
+    if (err instanceof ApiError) {
+      if (err.status === 400) return { message: "Gmail is not connected — Connect Google first." };
+      return { message: `Error: ${err.message}` };
+    }
+    return { message: `Error: ${(err as Error).message}` };
+  }
+}
+
 export async function startGoogleOAuth(
   householdId: HouseholdId,
   returnTo: string,

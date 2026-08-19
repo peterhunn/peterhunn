@@ -431,6 +431,21 @@ form.login {
   cursor: not-allowed;
 }
 
+/* Sync button */
+
+.sync-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.sync-note {
+  font-size: 11px;
+  color: var(--ink-muted);
+  max-width: 320px;
+}
+
 /* Connect providers */
 
 .connect-card {

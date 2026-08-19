@@ -4,6 +4,18 @@ import { nowIso, type HouseholdId } from "@atelier/domain";
 import type { Db } from "../client.js";
 import { inboxMessages, type InboxMessageRow } from "../schema/inbox.js";
 
+export interface UpsertExternalInboxInput {
+  readonly householdId: HouseholdId;
+  readonly externalProvider: "gmail";
+  readonly externalMessageId: string;
+  readonly externalThreadId?: string;
+  readonly fromName: string;
+  readonly fromAddress: string;
+  readonly subject: string;
+  readonly body: string;
+  readonly receivedAt: string;
+}
+
 const newMessageId = (): string => `msg_${randomBytes(12).toString("hex")}`;
 
 export interface CreateInboxMessageInput {
@@ -86,5 +98,50 @@ export const inboxRepo = (db: Db) => ({
       .set({ status: "replied" })
       .where(and(eq(inboxMessages.id, id)))
       .run();
+  },
+
+  // Upsert-by-external-id: inserts the message the first time we see
+  // it, returns { inserted: false } if the (provider, externalMessageId)
+  // pair already exists. Enables idempotent syncs from Gmail / any
+  // other provider without duplicating rows on repeated pulls.
+  upsertExternal(input: UpsertExternalInboxInput): {
+    inserted: boolean;
+    row: InboxMessageRow;
+  } {
+    const existing = db
+      .select()
+      .from(inboxMessages)
+      .where(
+        and(
+          eq(inboxMessages.householdId, input.householdId),
+          eq(inboxMessages.externalProvider, input.externalProvider),
+          eq(inboxMessages.externalMessageId, input.externalMessageId),
+        ),
+      )
+      .get();
+    if (existing) return { inserted: false, row: existing };
+
+    const id = newMessageId();
+    const now = nowIso();
+    db.insert(inboxMessages)
+      .values({
+        id,
+        householdId: input.householdId,
+        fromName: input.fromName,
+        fromAddress: input.fromAddress,
+        recipientPrincipalId: null,
+        subject: input.subject,
+        body: input.body,
+        receivedAt: input.receivedAt,
+        status: "received",
+        externalProvider: input.externalProvider,
+        externalMessageId: input.externalMessageId,
+        externalThreadId: input.externalThreadId ?? null,
+        createdAt: now,
+      })
+      .run();
+    const row = db.select().from(inboxMessages).where(eq(inboxMessages.id, id)).get();
+    if (!row) throw new Error("inbox upsert did not return");
+    return { inserted: true, row };
   },
 });

@@ -212,6 +212,15 @@ and audit paths end to end.
     `users/me/messages/send`. Shares the OAuth refresh loop
     with Calendar. Falls back to a mock sent-id when no
     credential or on API error.
+  - Gmail inbound sync — `POST /households/:id/inbox/sync`
+    pulls unread INBOX messages via `users/me/messages` +
+    `messages/{id}?format=full`, walks MIME parts for text
+    (falls back to HTML-stripped), parses From/Subject/Date,
+    and dedupes on `(external_provider, external_message_id)`
+    into the `inbox_messages` table. Returns
+    `{listed, fetched, inserted, skippedDuplicates}` so re-runs
+    are safely idempotent. Console: a Sync Gmail button in the
+    inbox section header (dimmed until Gmail is connected).
 - Credentials store — a first-class `credentials` table + repo +
   API for delegated tokens (OAuth, API keys) the platform holds
   on the customer's behalf. List endpoint returns metadata only;

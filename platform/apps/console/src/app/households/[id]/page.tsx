@@ -9,6 +9,7 @@ import { ApprovalCard } from "../../approvals/approval-card";
 import { InboxMessageCard } from "./inbox-message";
 import { TaskCard } from "./task-card";
 import { ConnectProviders } from "./connect-providers";
+import { SyncInboxButton } from "./sync-inbox-button";
 
 export default async function HouseholdPage({
   params,
@@ -144,7 +145,15 @@ export default async function HouseholdPage({
 
         <div className="section-head">
           <h2>Inbox</h2>
-          <span className="mono">{inbox.length} messages</span>
+          <span className="mono" style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            {inbox.length} messages
+            <SyncInboxButton
+              householdId={hh.id}
+              gmailConnected={credentials.some(
+                (c) => c.provider === "gmail" && !c.revokedAt,
+              )}
+            />
+          </span>
         </div>
         {inbox.length === 0 ? (
           <div className="empty">No inbox messages. Seed one via POST /households/:id/inbox.</div>
