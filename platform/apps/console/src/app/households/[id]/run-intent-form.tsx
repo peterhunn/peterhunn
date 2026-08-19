@@ -10,6 +10,7 @@ import {
   runCalendarRescheduleIntent,
   runResearchIntent,
   runAdminReviewIntent,
+  runFamilyCoverageIntent,
   planAndRun,
 } from "./actions";
 
@@ -20,7 +21,8 @@ type Mode =
   | "calendar_create"
   | "calendar_reschedule"
   | "research"
-  | "admin_review";
+  | "admin_review"
+  | "family_coverage";
 
 export function RunIntentForm({ householdId }: { householdId: HouseholdId }) {
   const [mode, setMode] = useState<Mode>("plan");
@@ -91,6 +93,12 @@ export function RunIntentForm({ householdId }: { householdId: HouseholdId }) {
                 windowDays: Number(windowDays),
               });
               break;
+            case "family_coverage":
+              res = await runFamilyCoverageIntent(householdId, {
+                startAt: toIso(startAt),
+                endAt: toIso(endAt),
+              });
+              break;
           }
           setMessage(res.message);
           router.refresh();
@@ -107,6 +115,7 @@ export function RunIntentForm({ householdId }: { householdId: HouseholdId }) {
           <option value="calendar_reschedule">calendar.appointment.reschedule</option>
           <option value="research">research.query</option>
           <option value="admin_review">admin.renewals.review</option>
+          <option value="family_coverage">family.coverage.propose</option>
         </select>
       </div>
 
@@ -210,7 +219,9 @@ export function RunIntentForm({ householdId }: { householdId: HouseholdId }) {
         </div>
       ) : null}
 
-      {mode === "calendar_create" || mode === "calendar_reschedule" ? (
+      {mode === "calendar_create" ||
+      mode === "calendar_reschedule" ||
+      mode === "family_coverage" ? (
         <>
           <div className="form-field inline">
             <label htmlFor="startAt">Start (local)</label>

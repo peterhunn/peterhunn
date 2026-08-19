@@ -65,6 +65,9 @@ const cannedResponse = (model: ModelSpec, call: ModelCall): string => {
     case "admin.renewal.detect":
       return adminRenewalDetect(userMsg);
 
+    case "family.coverage_plan":
+      return familyCoveragePlan(userMsg);
+
     case "orchestrator.simple":
     case "orchestrator.cross_domain":
       return JSON.stringify(plannerPlan(userMsg));
@@ -171,6 +174,74 @@ const adminRenewalDetect = (userMsg: string): string => {
           highs > 0 ? `; ${highs} urgent` : ""
         }.`;
   return JSON.stringify({ summary, items });
+};
+
+// Canned family.coverage_plan response. Reads the JSON payload and
+// naively assigns routines round-robin across the available staff and
+// contacts; if the household has no non-principal coverage, the plan
+// surfaces an open question rather than fabricating an assignment.
+const familyCoveragePlan = (userMsg: string): string => {
+  type Person = { id: string; name: string; role?: string };
+  type Payload = {
+    members?: Person[];
+    staff?: Person[];
+    contacts?: Person[];
+    window?: { startAt?: string; endAt?: string };
+  };
+  let payload: Payload = {};
+  try {
+    payload = JSON.parse(userMsg) as Payload;
+  } catch {
+    // fall through
+  }
+  const members = payload.members ?? [];
+  const options = [...(payload.staff ?? []), ...(payload.contacts ?? [])];
+  const routines = ["morning drop-off", "after-school pickup", "dinner + homework", "bedtime"];
+
+  if (members.length === 0) {
+    return JSON.stringify({
+      summary: "No members to plan for.",
+      assignments: [],
+      openQuestions: ["Which members are included in this coverage window?"],
+    });
+  }
+
+  if (options.length === 0) {
+    return JSON.stringify({
+      summary: `${members.length} member${members.length === 1 ? "" : "s"} to cover, no staff or contacts on file.`,
+      assignments: [],
+      openQuestions: [
+        "Who should cover routines while the principal is away? No staff or trusted contacts are on file.",
+      ],
+    });
+  }
+
+  const assignments: Array<{
+    memberRef: string;
+    personRef: string;
+    personName: string;
+    routine: string;
+    note?: string;
+  }> = [];
+  let cursor = 0;
+  for (const m of members) {
+    for (const r of routines) {
+      const person = options[cursor % options.length]!;
+      assignments.push({
+        memberRef: m.id,
+        personRef: person.id,
+        personName: person.name,
+        routine: `${m.name} — ${r}`,
+      });
+      cursor++;
+    }
+  }
+
+  return JSON.stringify({
+    summary: `Coverage draft: ${assignments.length} routines assigned across ${options.length} caregiver${options.length === 1 ? "" : "s"}.`,
+    assignments,
+    openQuestions: ["Confirm that assigned caregivers are available for the whole window."],
+  });
 };
 
 const recommendActionFor = (type: string, title: string): string => {

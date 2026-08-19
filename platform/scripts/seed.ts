@@ -204,7 +204,53 @@ graph.createNode(household.id, {
     status: "confirmed",
   },
 });
-console.log("seeded property + two vendor nodes + two documents");
+// Family scaffolding so family.coverage.propose has something to work
+// with: one child, one nanny, one grandparent contact.
+graph.createNode(household.id, {
+  type: "person.member",
+  data: {
+    fullName: "Ellie Carrington",
+    preferredName: "Ellie",
+    relationToPrincipal: "child",
+  },
+  provenance: {
+    source: "customer_direct",
+    assertedBy: manager.id,
+    assertedAt: now,
+    confidence: 1,
+    status: "confirmed",
+  },
+});
+graph.createNode(household.id, {
+  type: "person.staff",
+  data: {
+    fullName: "Maria Diaz",
+    role: "nanny",
+  },
+  provenance: {
+    source: "customer_direct",
+    assertedBy: manager.id,
+    assertedAt: now,
+    confidence: 1,
+    status: "confirmed",
+  },
+});
+graph.createNode(household.id, {
+  type: "person.contact",
+  data: {
+    fullName: "Grandma Rose",
+    role: "grandparent",
+    affiliation: "family",
+  },
+  provenance: {
+    source: "customer_direct",
+    assertedBy: manager.id,
+    assertedAt: now,
+    confidence: 1,
+    status: "confirmed",
+  },
+});
+console.log("seeded property + two vendors + two documents + family scaffolding");
 
 // A sample inbound message so the Inbox agent has something to
 // process on first boot.

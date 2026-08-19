@@ -86,6 +86,13 @@ export async function runAdminReviewIntent(
   return runIntent(householdId, "admin.renewals.review", input);
 }
 
+export async function runFamilyCoverageIntent(
+  householdId: HouseholdId,
+  input: { startAt: string; endAt: string; notes?: string },
+): Promise<{ message: string }> {
+  return runIntent(householdId, "family.coverage.propose", input);
+}
+
 export async function planAndRun(
   householdId: HouseholdId,
   prompt: string,

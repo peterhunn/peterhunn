@@ -79,6 +79,27 @@ export const PLANNER_REGISTRY: readonly PlannerIntentSpec[] = [
       "Scan the household graph for documents (identity, policy, records) nearing expiry and queue follow-up obligations. Use when the customer asks 'what's about to expire?', 'do a paperwork sweep', or on a proactive cadence.",
     attrsExample: { windowDays: 60 },
   },
+  {
+    kind: "family.coverage.propose",
+    description:
+      "Draft a family coverage plan for a period a principal is unavailable — who picks up, feeds, and handles bedtime for which family members, using known staff and trusted contacts.",
+    attrsExample: {
+      startAt: "2026-10-10T00:00:00.000Z",
+      endAt: "2026-10-14T23:59:59.000Z",
+      absentPrincipalRef: "nod_principal",
+      notes: "Board offsite in New York.",
+    },
+  },
+  {
+    kind: "family.school.form_due",
+    description:
+      "Queue a follow-up obligation for a school form that needs to be returned for a specific household member.",
+    attrsExample: {
+      memberRef: "nod_child",
+      formTitle: "Field trip permission slip",
+      dueAt: "2026-10-01T00:00:00.000Z",
+    },
+  },
 ];
 
 // A plan is what the planner produces from a prompt. `notes` is a

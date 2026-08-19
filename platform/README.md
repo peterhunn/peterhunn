@@ -11,7 +11,7 @@ platform/
 │   ├── domain/     # Life Graph types, provenance, ontology, identity, policy, models (no framework)
 │   ├── db/         # Drizzle schema, migrations, repositories
 │   ├── policy/     # Autonomy-rung evaluator, scope matcher, rolling limits
-│   ├── agents/    # Orchestrator, agent + tool contracts, household + calendar + inbox + research + admin agents
+│   ├── agents/    # Orchestrator, agent + tool contracts, household + calendar + inbox + research + admin + family agents
 │   └── router/     # Model registry, tier-aware router, callModel + mock provider
 ├── apps/
 │   ├── api/        # Fastify HTTP service (auth + audit + graph + policy + actions + orchestrator + models)
@@ -132,6 +132,13 @@ and audit paths end to end.
     list (cheap and coherent), and writes one
     `obligation.deadline` candidate per item back to the graph
     with `sourceRef` pointing to the source document.
+  - `family` — handles `family.coverage.propose` (draft a
+    coverage plan across household members, staff, and trusted
+    contacts for a period a principal is unavailable — one T2
+    `family.coverage_plan` call, plan lands in task outputs) and
+    `family.school.form_due` (deterministic — queues an
+    `obligation.deadline` candidate for a school form due for a
+    specific member).
 - Console: "Run intent" form on the household page.
 - Approval queue — non-execute policy decisions (draft, ask) persist
   as `approvals` rows carrying the tool name, inputs, authority policy
