@@ -1,8 +1,13 @@
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
-import { credentialRepo, inboxRepo, type Db } from "@atelier/db";
+import {
+  credentialRepo,
+  inboxRepo,
+  syncStateRepo,
+  type Db,
+} from "@atelier/db";
 import type { HouseholdId } from "@atelier/domain";
-import { syncGmailInbox } from "@atelier/agents";
+import { syncGmailInbox, type GmailSyncCursor } from "@atelier/agents";
 
 const CreateInboxMessageBody = z.object({
   fromName: z.string().min(1),
@@ -22,6 +27,19 @@ const SyncBody = z
 export const inboxRoutes = (db: Db): FastifyPluginAsync => async (app) => {
   const inbox = inboxRepo(db);
   const credentials = credentialRepo(db);
+  const sync = syncStateRepo(db);
+
+  const gmailCursor: GmailSyncCursor = {
+    read: (h, provider) => {
+      const row = sync.get(h, provider);
+      if (!row) return null;
+      const c = row.cursor as { historyId?: string } | null;
+      return c && typeof c.historyId === "string" ? { historyId: c.historyId } : null;
+    },
+    save: (h, provider, cursor, lastResult) =>
+      sync.save(h, provider, cursor, lastResult),
+    clear: (h, provider) => sync.clear(h, provider),
+  };
 
   app.get<{ Params: { householdId: string } }>(
     "/households/:householdId/inbox",
@@ -84,7 +102,7 @@ export const inboxRoutes = (db: Db): FastifyPluginAsync => async (app) => {
         {
           upsertMessage: (i) => inbox.upsertExternal(i),
         },
-        body.data,
+        { ...body.data, cursorStore: gmailCursor },
       );
 
       if (!result.consulted) {

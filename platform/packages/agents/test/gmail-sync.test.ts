@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { syncGmailInbox } from "../src/tools/gmail-sync.js";
+import { syncGmailInbox, type GmailSyncCursor } from "../src/tools/gmail-sync.js";
 import type { HouseholdId } from "@atelier/domain";
 import type { StoredCredential } from "../src/types.js";
 
@@ -189,6 +189,185 @@ describe("syncGmailInbox", () => {
     expect(res.consulted).toBe(true);
     expect(res.error).toContain("gmail_list_500");
     expect(res.inserted).toBe(0);
+  });
+
+  it("saves a historyId cursor on the first full pull", async () => {
+    stubFetch((url) => {
+      if (url.includes("/users/me/messages?q=")) {
+        return new Response(JSON.stringify({ messages: [{ id: "gm_A" }] }), { status: 200 });
+      }
+      if (url.includes("/users/me/messages/gm_A")) {
+        return new Response(
+          JSON.stringify({
+            id: "gm_A",
+            historyId: "1000",
+            payload: {
+              headers: [
+                { name: "From", value: "a@b.com" },
+                { name: "Subject", value: "hi" },
+              ],
+              mimeType: "text/plain",
+              body: { data: b64url("body") },
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    const saved: Array<{ cursor: { historyId?: string } }> = [];
+    const cursor: GmailSyncCursor = {
+      read: () => null,
+      save: (_h, _p, c) => saved.push({ cursor: c }),
+      clear: () => {},
+    };
+    const res = await syncGmailInbox(mkCtx({ access_token: "at" }), mkSink(), {
+      cursorStore: cursor,
+    });
+    expect(res.mode).toBe("full");
+    expect(res.historyId).toBe("1000");
+    expect(saved).toHaveLength(1);
+    expect(saved[0]!.cursor.historyId).toBe("1000");
+  });
+
+  it("uses the History API when a cursor exists and only fetches added INBOX messages", async () => {
+    let historyCalls = 0;
+    let listCalls = 0;
+    stubFetch((url) => {
+      if (url.includes("/users/me/history")) {
+        historyCalls++;
+        expect(url).toContain("startHistoryId=1000");
+        expect(url).toContain("historyTypes=messageAdded");
+        return new Response(
+          JSON.stringify({
+            historyId: "1050",
+            history: [
+              {
+                id: "1010",
+                messagesAdded: [
+                  { message: { id: "gm_new", threadId: "t_new", labelIds: ["INBOX", "UNREAD"] } },
+                ],
+              },
+              {
+                // sent-only mail — no INBOX label; must be ignored.
+                id: "1020",
+                messagesAdded: [
+                  { message: { id: "gm_sent", threadId: "t_sent", labelIds: ["SENT"] } },
+                ],
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes("/users/me/messages?q=")) {
+        listCalls++;
+        return new Response("shouldn't hit list on incremental", { status: 500 });
+      }
+      if (url.includes("/users/me/messages/gm_new")) {
+        return new Response(
+          JSON.stringify({
+            id: "gm_new",
+            historyId: "1040",
+            payload: {
+              headers: [
+                { name: "From", value: "sam@example.com" },
+                { name: "Subject", value: "Fresh" },
+              ],
+              mimeType: "text/plain",
+              body: { data: b64url("just landed") },
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    const saved: Array<{ cursor: { historyId?: string } }> = [];
+    const cursor: GmailSyncCursor = {
+      read: () => ({ historyId: "1000" }),
+      save: (_h, _p, c) => saved.push({ cursor: c }),
+      clear: () => {},
+    };
+    const sink = mkSink();
+    const res = await syncGmailInbox(mkCtx({ access_token: "at" }), sink, {
+      cursorStore: cursor,
+    });
+    expect(historyCalls).toBe(1);
+    expect(listCalls).toBe(0);
+    expect(res.mode).toBe("incremental");
+    expect(res.listed).toBe(1);
+    expect(res.inserted).toBe(1);
+    expect(sink.calls[0]!.externalMessageId).toBe("gm_new");
+    // Advances to the max of history.historyId and the message's historyId.
+    expect(saved[0]!.cursor.historyId).toBe("1050");
+  });
+
+  it("returns up_to_date when the history API returns no messagesAdded", async () => {
+    stubFetch((url) => {
+      if (url.includes("/users/me/history")) {
+        return new Response(
+          JSON.stringify({ historyId: "2000", history: [] }),
+          { status: 200 },
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    const saved: Array<{ cursor: { historyId?: string } }> = [];
+    const cursor: GmailSyncCursor = {
+      read: () => ({ historyId: "1500" }),
+      save: (_h, _p, c) => saved.push({ cursor: c }),
+      clear: () => {},
+    };
+    const res = await syncGmailInbox(mkCtx({ access_token: "at" }), mkSink(), {
+      cursorStore: cursor,
+    });
+    expect(res.mode).toBe("up_to_date");
+    expect(res.inserted).toBe(0);
+    expect(saved[0]!.cursor.historyId).toBe("2000");
+  });
+
+  it("resets the cursor and falls back to a full pull on history 404", async () => {
+    let cleared = false;
+    stubFetch((url) => {
+      if (url.includes("/users/me/history")) {
+        return new Response("cursor too old", { status: 404 });
+      }
+      if (url.includes("/users/me/messages?q=")) {
+        return new Response(JSON.stringify({ messages: [{ id: "gm_R" }] }), { status: 200 });
+      }
+      if (url.includes("/users/me/messages/gm_R")) {
+        return new Response(
+          JSON.stringify({
+            id: "gm_R",
+            historyId: "9000",
+            payload: {
+              headers: [
+                { name: "From", value: "a@b.com" },
+                { name: "Subject", value: "R" },
+              ],
+              mimeType: "text/plain",
+              body: { data: b64url("R body") },
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    const cursor: GmailSyncCursor = {
+      read: () => ({ historyId: "1" }),
+      save: () => {},
+      clear: () => {
+        cleared = true;
+      },
+    };
+    const res = await syncGmailInbox(mkCtx({ access_token: "at" }), mkSink(), {
+      cursorStore: cursor,
+    });
+    expect(cleared).toBe(true);
+    expect(res.mode).toBe("cursor_reset");
+    expect(res.inserted).toBe(1);
   });
 
   it("skips a single message when its detail fetch errors, keeps going with the rest", async () => {

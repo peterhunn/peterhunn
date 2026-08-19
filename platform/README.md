@@ -217,9 +217,13 @@ and audit paths end to end.
     `messages/{id}?format=full`, walks MIME parts for text
     (falls back to HTML-stripped), parses From/Subject/Date,
     and dedupes on `(external_provider, external_message_id)`
-    into the `inbox_messages` table. Returns
-    `{listed, fetched, inserted, skippedDuplicates}` so re-runs
-    are safely idempotent. Console: a Sync Gmail button in the
+    into the `inbox_messages` table. First call is a full
+    pull; subsequent calls use Gmail's History API against a
+    per-household cursor stored in the new `sync_state` table
+    so only deltas travel. History 404 (cursor >~7d old) auto-
+    resets to a full pull. Response includes `mode: full |
+    incremental | up_to_date | cursor_reset` so the console
+    surfaces which path ran. Console: Sync Gmail button in the
     inbox section header (dimmed until Gmail is connected).
 - Credentials store — a first-class `credentials` table + repo +
   API for delegated tokens (OAuth, API keys) the platform holds
