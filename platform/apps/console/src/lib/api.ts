@@ -218,6 +218,44 @@ export const api = (token: string) => ({
       "DELETE",
       `/households/${id}/messaging/endpoints/${endpointId}`,
     ),
+  listPlaybooks: (id: HouseholdId) =>
+    request<{
+      playbooks: Array<{
+        id: string;
+        name: string;
+        description: string;
+        domain: string;
+        schedule: Record<string, unknown>;
+        defaultConfig: Record<string, unknown>;
+        enabled: boolean;
+        registered: boolean;
+        config: Record<string, unknown>;
+        lastFireAt: string | null;
+        nextFireAt: string | null;
+        lastRunId: string | null;
+      }>;
+    }>(token, "GET", `/households/${id}/playbooks`),
+  enablePlaybook: (
+    id: HouseholdId,
+    playbookId: string,
+    config?: Record<string, unknown>,
+  ) =>
+    request<{ playbook: Record<string, unknown> }>(
+      token,
+      "PUT",
+      `/households/${id}/playbooks/${playbookId}`,
+      config ? { config } : {},
+    ),
+  disablePlaybook: (id: HouseholdId, playbookId: string) =>
+    request<void>(token, "DELETE", `/households/${id}/playbooks/${playbookId}`),
+  runPlaybookNow: (id: HouseholdId, playbookId: string) =>
+    request<{
+      fire: {
+        outcome: "fired" | "skipped" | "unknown_playbook" | "error";
+        reason?: string;
+        runId?: string;
+      } | null;
+    }>(token, "POST", `/households/${id}/playbooks/${playbookId}/run`),
   listVerifications: (id: HouseholdId) =>
     request<{
       verifications: Array<{

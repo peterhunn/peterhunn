@@ -16,6 +16,7 @@ import {
 } from "@atelier/agents";
 import type { HouseholdId } from "@atelier/domain";
 import type { Autopilot } from "./autopilot.js";
+import type { PlaybookRunner } from "./playbook-runner.js";
 
 // Background sync scheduler. Every intervalSeconds it walks every
 // household and, per provider it has an unrevoked credential for,
@@ -38,6 +39,10 @@ export interface SchedulerOptions {
   // proposed actions land in the approval queue without a manager
   // clicking Run intent. Absent = pure sync only.
   readonly autopilot?: Autopilot;
+  // Optional. Fires playbooks whose next_fire_at has passed after
+  // per-household sync + autopilot completes. Absent = no playbook
+  // scheduling on this scheduler instance (useful in tests).
+  readonly playbookRunner?: PlaybookRunner;
 }
 
 export interface Scheduler {
@@ -47,6 +52,7 @@ export interface Scheduler {
     householdsChecked: number;
     householdsSynced: number;
     perHousehold: Array<{ householdId: string; result: unknown }>;
+    playbooksFired?: number;
   }>;
 }
 
@@ -228,10 +234,31 @@ export const buildScheduler = (db: Db, opts: SchedulerOptions): Scheduler => {
         perHousehold.push({ householdId: hh.id, result });
       }
 
+      let playbooksFired = 0;
+      if (opts.playbookRunner) {
+        try {
+          const fires = await opts.playbookRunner.runDue();
+          playbooksFired = fires.filter((f) => f.outcome === "fired").length;
+          if (fires.length > 0) {
+            opts.logger.info("scheduler playbook runner completed", {
+              total: fires.length,
+              fired: playbooksFired,
+              skipped: fires.filter((f) => f.outcome === "skipped").length,
+              errors: fires.filter((f) => f.outcome === "error").length,
+            });
+          }
+        } catch (err) {
+          opts.logger.error("scheduler playbook runner threw", {
+            error: (err as Error).message,
+          });
+        }
+      }
+
       return {
         householdsChecked: allHouseholds.length,
         householdsSynced: synced,
         perHousehold,
+        ...(opts.playbookRunner ? { playbooksFired } : {}),
       };
     } finally {
       inFlight = false;

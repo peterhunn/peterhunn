@@ -2,6 +2,7 @@
 import {
   openDb,
   householdRepo,
+  householdPlaybookRepo,
   identityRepo,
   policyRepo,
   actionRepo,
@@ -9,6 +10,7 @@ import {
   inboxRepo,
 } from "@atelier/db";
 import { nowIso, type PolicySpec } from "@atelier/domain";
+import { buildPlaybookRegistry, computeNextFireAt } from "@atelier/agents";
 
 // Development seed: creates one manager, one household, primary grant,
 // bearer token, and the onboarding starting policy set from
@@ -301,6 +303,23 @@ inbox.create({
   body: "Good afternoon — please return the signed permission form for the field trip on Thursday. Also please confirm that Ellie will be attending. Thanks!",
 });
 console.log("seeded 2 inbox messages");
+
+// Enable the weekly renewals playbook by default so a fresh clone
+// has something proactive scheduled from tick zero. The scheduler
+// won't fire it until nextFireAt passes (next Monday 14:00 UTC),
+// but the console shows it as enabled with the schedule preview.
+const playbookRegistry = buildPlaybookRegistry();
+const seededPlaybook = playbookRegistry.get("admin.weekly-renewals-review");
+if (seededPlaybook) {
+  const playbooks = householdPlaybookRepo(db);
+  playbooks.upsert({
+    householdId: household.id,
+    playbookId: seededPlaybook.id,
+    config: seededPlaybook.defaultConfig,
+    nextFireAt: computeNextFireAt(seededPlaybook.schedule, new Date()).toISOString(),
+  });
+  console.log("enabled weekly renewals review playbook");
+}
 
 actions.record({
   householdId: household.id,

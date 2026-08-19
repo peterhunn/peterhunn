@@ -14,6 +14,7 @@ import { AutopilotToggle } from "./autopilot-toggle";
 import { MessagingEndpoints } from "./messaging-endpoints";
 import { MessagingEvents } from "./messaging-events";
 import { VerifyEndpoint } from "./verify-endpoint";
+import { PlaybooksPanel } from "./playbooks-panel";
 
 export default async function HouseholdPage({
   params,
@@ -40,6 +41,7 @@ export default async function HouseholdPage({
     messagingEndpointsRes,
     messagingEventsRes,
     verificationsRes,
+    playbooksRes,
     oauthCfg,
   ] = await Promise.all([
     client.me(),
@@ -67,6 +69,9 @@ export default async function HouseholdPage({
     client
       .listVerifications(id as HouseholdId)
       .catch(() => ({ verifications: [] })),
+    client
+      .listPlaybooks(id as HouseholdId)
+      .catch(() => ({ playbooks: [] })),
     client.oauthConfig().catch(() => ({
       configured: false,
       clientId: false,
@@ -91,6 +96,7 @@ export default async function HouseholdPage({
   const messagingEndpoints = messagingEndpointsRes.endpoints;
   const messagingEvents = messagingEventsRes.events;
   const verifications = verificationsRes.verifications;
+  const playbooks = playbooksRes.playbooks;
 
   return (
     <>
@@ -162,6 +168,11 @@ export default async function HouseholdPage({
         <VerifyEndpoint
           householdId={hh.id as HouseholdId}
           initialVerifications={verifications}
+        />
+
+        <PlaybooksPanel
+          householdId={hh.id as HouseholdId}
+          initialPlaybooks={playbooks}
         />
 
         <MessagingEvents

@@ -812,3 +812,51 @@ form.login {
   align-items: center;
 }
 
+.playbook-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.playbook-row {
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.playbook-row.on {
+  border-left: 3px solid var(--accent);
+}
+.playbook-row.off {
+  border-left: 3px solid var(--border);
+  opacity: 0.85;
+}
+.playbook-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.25rem;
+}
+.playbook-name {
+  font-weight: 600;
+}
+.playbook-desc {
+  margin: 0 0 0.35rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.playbook-meta {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  font-size: 0.8rem;
+  margin-bottom: 0.5rem;
+}
+.playbook-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+

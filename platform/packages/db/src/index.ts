@@ -15,3 +15,4 @@ export * from "./repositories/sync_state.js";
 export * from "./repositories/calendar_events.js";
 export * from "./repositories/messaging.js";
 export * from "./repositories/verifications.js";
+export * from "./repositories/household_playbooks.js";

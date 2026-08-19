@@ -2,6 +2,7 @@ import { openDb } from "@atelier/db";
 import { buildServer } from "./server.js";
 import { buildScheduler } from "./scheduler.js";
 import { buildAutopilot } from "./autopilot.js";
+import { buildPlaybookRunner } from "./playbook-runner.js";
 
 const port = Number(process.env["PORT"] ?? 3001);
 const host = process.env["HOST"] ?? "0.0.0.0";
@@ -20,11 +21,16 @@ const schedulerLogger = {
 const autopilot = autopilotEnabled
   ? buildAutopilot(db, { logger: schedulerLogger })
   : undefined;
+const playbooksEnabled = process.env["ATELIER_PLAYBOOKS_ENABLED"] !== "0";
+const playbookRunner = playbooksEnabled
+  ? buildPlaybookRunner(db, { logger: schedulerLogger })
+  : undefined;
 const scheduler = buildScheduler(db, {
   intervalSeconds,
   enabled: schedulerEnabled,
   logger: schedulerLogger,
   ...(autopilot ? { autopilot } : {}),
+  ...(playbookRunner ? { playbookRunner } : {}),
 });
 
 const shutdown = async (signal: string) => {

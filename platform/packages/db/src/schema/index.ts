@@ -14,3 +14,4 @@ export * from "./sync_state.js";
 export * from "./calendar_events.js";
 export * from "./messaging.js";
 export * from "./verifications.js";
+export * from "./household_playbooks.js";

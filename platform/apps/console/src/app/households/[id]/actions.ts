@@ -142,6 +142,58 @@ export async function startGoogleOAuth(
   }
 }
 
+export async function enablePlaybook(
+  householdId: HouseholdId,
+  playbookId: string,
+): Promise<{ message: string }> {
+  const token = await getSessionToken();
+  if (!token) return { message: "Session expired." };
+  try {
+    await api(token).enablePlaybook(householdId, playbookId);
+    return { message: "Playbook enabled." };
+  } catch (err) {
+    if (err instanceof ApiError) return { message: `Error: ${err.message}` };
+    return { message: `Error: ${(err as Error).message}` };
+  }
+}
+
+export async function disablePlaybook(
+  householdId: HouseholdId,
+  playbookId: string,
+): Promise<{ message: string }> {
+  const token = await getSessionToken();
+  if (!token) return { message: "Session expired." };
+  try {
+    await api(token).disablePlaybook(householdId, playbookId);
+    return { message: "Playbook disabled." };
+  } catch (err) {
+    if (err instanceof ApiError) return { message: `Error: ${err.message}` };
+    return { message: `Error: ${(err as Error).message}` };
+  }
+}
+
+export async function runPlaybookNow(
+  householdId: HouseholdId,
+  playbookId: string,
+): Promise<{ message: string }> {
+  const token = await getSessionToken();
+  if (!token) return { message: "Session expired." };
+  try {
+    const res = await api(token).runPlaybookNow(householdId, playbookId);
+    const fire = res.fire;
+    if (!fire) return { message: "Playbook not enabled here." };
+    return {
+      message:
+        fire.outcome === "fired"
+          ? `Fired — run ${fire.runId?.slice(0, 10) ?? "?"}. Check Recent tasks.`
+          : `Skipped: ${fire.reason ?? fire.outcome}.`,
+    };
+  } catch (err) {
+    if (err instanceof ApiError) return { message: `Error: ${err.message}` };
+    return { message: `Error: ${(err as Error).message}` };
+  }
+}
+
 export async function createVerification(
   householdId: HouseholdId,
   input: {

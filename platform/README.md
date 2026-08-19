@@ -256,6 +256,24 @@ and audit paths end to end.
     mock send with a visible reason. Console: Reply button on
     each inbound message opens an inline compose that hits the
     send route.
+  - Playbooks — packaged autonomy templates. Each one bundles
+    a schedule (weekly, monthly, or interval), a domain, and an
+    intent shape; enabling one for a household starts a
+    recurring task that lands proposed actions in the approval
+    queue. Ships with three first-class templates:
+    `admin.weekly-renewals-review` (Monday scan of expiring
+    documents), `travel.prep-sweep` (Sunday scan of upcoming
+    trips), `family.coverage-check` (monthly coverage plan).
+    A playbook runner ticks alongside the sync scheduler,
+    respects the per-household autopilot toggle and freeze
+    state, and never builds a backlog on a paused household —
+    skipped-but-advanced. API:
+    `GET/PUT/DELETE /households/:id/playbooks/:playbookId`,
+    plus `POST .../run` for "fire it now." Console: Playbooks
+    panel on the household page. Global kill switch:
+    `ATELIER_PLAYBOOKS_ENABLED=0`. The seed script enables
+    the weekly renewals review by default so a fresh clone has
+    something proactive scheduled from tick zero.
   - Proactive autopilot — after each sync tick, freshly-inserted
     inbox messages are auto-dispatched to the inbox agent
     (triage → extract obligations → draft reply → propose

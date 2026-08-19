@@ -2,6 +2,7 @@ export * from "./types.js";
 export * from "./tool-registry.js";
 export * from "./orchestrator.js";
 export * from "./planner.js";
+export * from "./playbooks.js";
 export * from "./agents/household.js";
 export * from "./agents/calendar.js";
 export * from "./agents/inbox.js";
