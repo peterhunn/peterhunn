@@ -197,6 +197,13 @@ and audit paths end to end.
     `google_calendar` credential; OAuth access tokens are
     refreshed on expiry via the token endpoint. Fall back to
     the mock event id when no credential is present.
+  - Message send (`message.send`) hits Gmail when the household
+    has connected a `gmail` credential — RFC-822 body assembled
+    with `In-Reply-To` + `References` headers when a source
+    message id is passed, base64url-encoded, sent via
+    `users/me/messages/send`. Shares the OAuth refresh loop
+    with Calendar. Falls back to a mock sent-id when no
+    credential or on API error.
 - Credentials store — a first-class `credentials` table + repo +
   API for delegated tokens (OAuth, API keys) the platform holds
   on the customer's behalf. List endpoint returns metadata only;

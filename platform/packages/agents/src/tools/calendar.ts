@@ -1,5 +1,6 @@
 import { z } from "zod";
-import type { StoredCredential, Tool, ToolContext } from "../types.js";
+import type { Tool, ToolContext } from "../types.js";
+import { readGoogleAuth, type GoogleOAuthFields } from "./_google.js";
 
 // Calendar tools. Prefer a real Google Calendar API call when the
 // household has connected a google_calendar credential; otherwise
@@ -8,76 +9,20 @@ import type { StoredCredential, Tool, ToolContext } from "../types.js";
 
 const GOOGLE_CAL_BASE = "https://www.googleapis.com/calendar/v3";
 
-interface GoogleCalendarCredentialFields {
-  readonly access_token?: string;
-  readonly refresh_token?: string;
-  readonly client_id?: string;
-  readonly client_secret?: string;
+interface GoogleCalendarFields extends GoogleOAuthFields {
   readonly calendar_id?: string;
   readonly time_zone?: string;
 }
 
-const asGoogle = (c: StoredCredential | null): GoogleCalendarCredentialFields | null => {
-  if (!c) return null;
-  return c.credential as GoogleCalendarCredentialFields;
-};
-
-const isExpired = (expiresAt: string | null): boolean => {
-  if (!expiresAt) return false;
-  return Date.parse(expiresAt) < Date.now();
-};
-
-// Refresh a Google OAuth access token. Returns the new access_token
-// and its expiry. Throws on failure.
-const refreshGoogleAccessToken = async (
-  cred: GoogleCalendarCredentialFields,
-): Promise<{ accessToken: string; expiresAt: string }> => {
-  if (!cred.refresh_token || !cred.client_id || !cred.client_secret) {
-    throw new Error("google_calendar_missing_refresh_config");
-  }
-  const params = new URLSearchParams({
-    client_id: cred.client_id,
-    client_secret: cred.client_secret,
-    refresh_token: cred.refresh_token,
-    grant_type: "refresh_token",
-  });
-  const res = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: params.toString(),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => res.statusText);
-    throw new Error(`google_oauth_refresh_${res.status}: ${text.slice(0, 200)}`);
-  }
-  const json = (await res.json()) as { access_token?: string; expires_in?: number };
-  if (!json.access_token) throw new Error("google_oauth_no_access_token");
-  const expiresAt = new Date(Date.now() + ((json.expires_in ?? 3600) - 60) * 1000).toISOString();
-  return { accessToken: json.access_token, expiresAt };
-};
-
 const ensureAccessToken = async (
   ctx: ToolContext,
 ): Promise<{ accessToken: string; calendarId: string; timeZone: string } | null> => {
-  const raw = ctx.readCredential("google_calendar");
-  const cred = asGoogle(raw);
-  if (!cred) return null;
-  let accessToken = cred.access_token;
-  if (!accessToken || isExpired(raw!.expiresAt)) {
-    if (!cred.refresh_token) return null;
-    const refreshed = await refreshGoogleAccessToken(cred);
-    accessToken = refreshed.accessToken;
-    // Note: we do not persist the refreshed token here; the runtime
-    // factory wraps readCredential with an updater. For phase 0 the
-    // simplest safe path is to use the refreshed token in memory only.
-    ctx.logger?.info("google_calendar refreshed access token", {
-      credentialId: raw!.id,
-    });
-  }
+  const auth = await readGoogleAuth<GoogleCalendarFields>(ctx, "google_calendar");
+  if (!auth) return null;
   return {
-    accessToken,
-    calendarId: cred.calendar_id ?? "primary",
-    timeZone: cred.time_zone ?? "UTC",
+    accessToken: auth.accessToken,
+    calendarId: auth.calendar_id ?? "primary",
+    timeZone: auth.time_zone ?? "UTC",
   };
 };
 
