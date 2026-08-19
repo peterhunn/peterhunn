@@ -1,6 +1,7 @@
 import { openDb } from "@atelier/db";
 import { buildServer } from "./server.js";
 import { buildScheduler } from "./scheduler.js";
+import { buildAutopilot } from "./autopilot.js";
 
 const port = Number(process.env["PORT"] ?? 3001);
 const host = process.env["HOST"] ?? "0.0.0.0";
@@ -8,16 +9,22 @@ const intervalSeconds = Number(
   process.env["ATELIER_SYNC_INTERVAL_SECONDS"] ?? 300,
 );
 const schedulerEnabled = process.env["ATELIER_SYNC_ENABLED"] !== "0";
+const autopilotEnabled = process.env["ATELIER_AUTOPILOT_ENABLED"] !== "0";
 
 const db = openDb();
 const app = buildServer(db);
+const schedulerLogger = {
+  info: (msg: string, ctx?: unknown) => app.log.info(ctx as object, msg),
+  error: (msg: string, ctx?: unknown) => app.log.error(ctx as object, msg),
+};
+const autopilot = autopilotEnabled
+  ? buildAutopilot(db, { logger: schedulerLogger })
+  : undefined;
 const scheduler = buildScheduler(db, {
   intervalSeconds,
   enabled: schedulerEnabled,
-  logger: {
-    info: (msg, ctx) => app.log.info(ctx as object, msg),
-    error: (msg, ctx) => app.log.error(ctx as object, msg),
-  },
+  logger: schedulerLogger,
+  ...(autopilot ? { autopilot } : {}),
 });
 
 const shutdown = async (signal: string) => {

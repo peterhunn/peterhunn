@@ -4,7 +4,9 @@ import {
   householdRepo,
   inboxRepo,
   syncStateRepo,
+  type CalendarEventRow,
   type Db,
+  type InboxMessageRow,
 } from "@atelier/db";
 import {
   syncGmailInbox,
@@ -13,6 +15,7 @@ import {
   type GmailSyncCursor,
 } from "@atelier/agents";
 import type { HouseholdId } from "@atelier/domain";
+import type { Autopilot } from "./autopilot.js";
 
 // Background sync scheduler. Every intervalSeconds it walks every
 // household and, per provider it has an unrevoked credential for,
@@ -30,6 +33,11 @@ export interface SchedulerOptions {
     error: (msg: string, ctx?: unknown) => void;
   };
   readonly enabled?: boolean;
+  // Optional. When passed, freshly-inserted inbox messages and
+  // calendar events are handed to the autopilot after each sync, so
+  // proposed actions land in the approval queue without a manager
+  // clicking Run intent. Absent = pure sync only.
+  readonly autopilot?: Autopilot;
 }
 
 export interface Scheduler {
@@ -116,11 +124,20 @@ export const buildScheduler = (db: Db, opts: SchedulerOptions): Scheduler => {
           errors: string[];
         } = { errors: [] };
 
+        const newInboxRows: InboxMessageRow[] = [];
+        const newCalendarRows: CalendarEventRow[] = [];
+
         if (hasGmail) {
           try {
             const r = await syncGmailInbox(
               ctx,
-              { upsertMessage: (i) => inbox.upsertExternal(i) },
+              {
+                upsertMessage: (i) => {
+                  const out = inbox.upsertExternal(i);
+                  if (out.inserted) newInboxRows.push(out.row);
+                  return { inserted: out.inserted };
+                },
+              },
               { cursorStore: gmail },
             );
             result.gmail = r;
@@ -151,7 +168,11 @@ export const buildScheduler = (db: Db, opts: SchedulerOptions): Scheduler => {
             const r = await syncGoogleCalendar(
               ctx,
               {
-                upsertEvent: (e) => calendarEvents.upsertExternal(e),
+                upsertEvent: (e) => {
+                  const out = calendarEvents.upsertExternal(e);
+                  if (out.inserted) newCalendarRows.push(out.row);
+                  return { inserted: out.inserted, updated: out.updated };
+                },
               },
               { cursorStore: calendar },
             );
@@ -174,6 +195,29 @@ export const buildScheduler = (db: Db, opts: SchedulerOptions): Scheduler => {
           } catch (err) {
             result.errors.push(`calendar: ${(err as Error).message}`);
             opts.logger.error("scheduler calendar sync threw", {
+              householdId: hh.id,
+              error: (err as Error).message,
+            });
+          }
+        }
+
+        if (opts.autopilot && (newInboxRows.length > 0 || newCalendarRows.length > 0)) {
+          try {
+            const inboxSummary = await opts.autopilot.onNewInboxMessages(
+              hh.id as HouseholdId,
+              newInboxRows,
+            );
+            const calSummary = await opts.autopilot.onNewCalendarEvents(
+              hh.id as HouseholdId,
+              newCalendarRows,
+            );
+            (result as { autopilot?: unknown }).autopilot = {
+              inbox: inboxSummary,
+              calendar: calSummary,
+            };
+          } catch (err) {
+            result.errors.push(`autopilot: ${(err as Error).message}`);
+            opts.logger.error("scheduler autopilot threw", {
               householdId: hh.id,
               error: (err as Error).message,
             });

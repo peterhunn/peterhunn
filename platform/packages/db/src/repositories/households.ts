@@ -19,6 +19,7 @@ export interface CreateHouseholdInput {
 export interface HouseholdState extends Household {
   readonly frozenAt: string | undefined;
   readonly frozenReason: string | undefined;
+  readonly autopilotEnabled: boolean;
 }
 
 const toHousehold = (row: typeof households.$inferSelect): HouseholdState => ({
@@ -29,6 +30,7 @@ const toHousehold = (row: typeof households.$inferSelect): HouseholdState => ({
   createdAt: row.createdAt,
   frozenAt: row.frozenAt ?? undefined,
   frozenReason: row.frozenReason ?? undefined,
+  autopilotEnabled: row.autopilotEnabled !== "no",
 });
 
 export const householdRepo = (db: Db) => ({
@@ -41,7 +43,20 @@ export const householdRepo = (db: Db) => ({
       createdAt: nowIso(),
     } satisfies typeof households.$inferInsert;
     db.insert(households).values(row).run();
-    return toHousehold({ ...row, archivedAt: null, frozenAt: null, frozenReason: null });
+    return toHousehold({
+      ...row,
+      archivedAt: null,
+      frozenAt: null,
+      frozenReason: null,
+      autopilotEnabled: "yes",
+    });
+  },
+
+  setAutopilot(id: HouseholdId, enabled: boolean): void {
+    db.update(households)
+      .set({ autopilotEnabled: enabled ? "yes" : "no" })
+      .where(eq(households.id, id))
+      .run();
   },
 
   get(id: HouseholdId): HouseholdState | null {

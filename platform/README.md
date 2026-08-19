@@ -212,6 +212,20 @@ and audit paths end to end.
     `users/me/messages/send`. Shares the OAuth refresh loop
     with Calendar. Falls back to a mock sent-id when no
     credential or on API error.
+  - Proactive autopilot — after each sync tick, freshly-inserted
+    inbox messages are auto-dispatched to the inbox agent
+    (triage → extract obligations → draft reply → propose
+    `message.send`), and fresh calendar events are auto-checked
+    for conflict against the household's tracked obligations
+    (`calendar.event.observe` intent). Because `message.send` is
+    draft-authority, the drafted reply lands in the approval
+    queue for a manager to review — no manager click required to
+    get the work started. Per-household toggle
+    (`households.autopilotEnabled`, default on) via
+    `POST /households/:id/autopilot`; global kill switch via
+    `ATELIER_AUTOPILOT_ENABLED=0`. A frozen household is skipped
+    silently regardless. Console: on/off switch on the household
+    header.
   - Background sync scheduler — the API boots a scheduler that
     walks every household on an interval
     (`ATELIER_SYNC_INTERVAL_SECONDS`, default 300s) and runs the

@@ -142,6 +142,23 @@ export async function startGoogleOAuth(
   }
 }
 
+export async function setAutopilot(
+  householdId: HouseholdId,
+  enabled: boolean,
+): Promise<{ message: string }> {
+  const token = await getSessionToken();
+  if (!token) return { message: "Session expired." };
+  try {
+    await api(token).setAutopilot(householdId, enabled);
+    return {
+      message: enabled ? "Autopilot enabled." : "Autopilot paused.",
+    };
+  } catch (err) {
+    if (err instanceof ApiError) return { message: `Error: ${err.message}` };
+    return { message: `Error: ${(err as Error).message}` };
+  }
+}
+
 export async function planAndRun(
   householdId: HouseholdId,
   prompt: string,

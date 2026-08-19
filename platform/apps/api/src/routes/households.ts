@@ -42,4 +42,20 @@ export const householdRoutes = (db: Db): FastifyPluginAsync => async (app) => {
     const household = repo.create(body.data);
     return reply.code(201).send({ household });
   });
+
+  app.post<{ Params: { householdId: string }; Body: { enabled: boolean } }>(
+    "/households/:householdId/autopilot",
+    {
+      config: {
+        audit: { action: "household.autopilot.set", resourceType: "household" },
+      },
+    },
+    async (req, reply) => {
+      const body = z.object({ enabled: z.boolean() }).safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ error: "invalid_body" });
+      repo.setAutopilot(req.householdContext as HouseholdId, body.data.enabled);
+      const household = repo.get(req.householdContext as HouseholdId);
+      return { household };
+    },
+  );
 };

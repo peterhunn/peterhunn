@@ -698,3 +698,26 @@ form.login {
   transition: width 0.2s ease;
 }
 
+.autopilot-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin: 0.75rem 0 1rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-alt, transparent);
+}
+.autopilot-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  font-weight: 500;
+}
+.autopilot-help {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+

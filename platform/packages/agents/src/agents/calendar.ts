@@ -23,6 +23,20 @@ export const RescheduleAppointmentAttrs = z.object({
   toEndAt: z.string().datetime().optional(),
 });
 
+// A fresh event has just appeared on the household's Google Calendar
+// (surfaced by the background sync). The agent's job is not to touch
+// the calendar — the customer already put it there — but to check
+// whether it conflicts with an obligation we already track and, if
+// so, escalate so a manager can reshuffle. No side effects.
+export const ObserveEventAttrs = z.object({
+  eventRef: z.string(),
+  calendarId: z.string().optional(),
+  title: z.string(),
+  startAt: z.string().datetime(),
+  endAt: z.string().datetime().optional(),
+  location: z.string().optional(),
+});
+
 const NAME = "calendar";
 const VERSION = "0.1.0";
 
@@ -137,7 +151,8 @@ export const calendarAgent: Agent = {
   handles(intent: Intent): boolean {
     return (
       intent.kind === "calendar.appointment.create" ||
-      intent.kind === "calendar.appointment.reschedule"
+      intent.kind === "calendar.appointment.reschedule" ||
+      intent.kind === "calendar.event.observe"
     );
   },
 
@@ -174,9 +189,67 @@ export const calendarAgent: Agent = {
     if (intent.kind === "calendar.appointment.reschedule") {
       return handleReschedule(intent, ctx);
     }
+    if (intent.kind === "calendar.event.observe") {
+      return handleObserve(intent, ctx);
+    }
     return { state: "failed", errorMessage: `Unsupported intent: ${intent.kind}` };
   },
 };
+
+async function handleObserve(
+  intent: Intent,
+  ctx: AgentContext,
+): Promise<AgentTaskOutput> {
+  const parsed = ObserveEventAttrs.safeParse(intent.attrs);
+  if (!parsed.success) {
+    return { state: "failed", errorMessage: `Invalid intent attrs: ${parsed.error.message}` };
+  }
+  const attrs = parsed.data;
+  const startAtMs = Date.parse(attrs.startAt);
+  const endAtMs = attrs.endAt ? Date.parse(attrs.endAt) : startAtMs + 60 * 60 * 1000;
+  const { appointments, liveConsulted } = await readAppointmentsInWindow(ctx, {
+    startAtMs,
+    endAtMs,
+  });
+  // Dedupe against the event we just synced — if the graph already
+  // carries a node pointing at this eventRef, it isn't a conflict
+  // with itself.
+  const conflicts = appointments.filter(
+    (a) =>
+      a.eventRef !== attrs.eventRef &&
+      overlaps(a.startAt, a.endAt, attrs.startAt, attrs.endAt),
+  );
+  if (conflicts.length === 0) {
+    return {
+      state: "completed",
+      decisionSummary: `Observed new calendar event "${attrs.title}" — no conflict with tracked obligations.`,
+      outputs: {
+        eventRef: attrs.eventRef,
+        title: attrs.title,
+        startAt: attrs.startAt,
+        conflicts: [],
+        liveConsulted,
+      },
+    };
+  }
+  return {
+    state: "escalated",
+    decisionSummary: `New calendar event "${attrs.title}" conflicts with ${conflicts.length} tracked obligation${conflicts.length === 1 ? "" : "s"}; manager review recommended.`,
+    outputs: {
+      eventRef: attrs.eventRef,
+      title: attrs.title,
+      startAt: attrs.startAt,
+      liveConsulted,
+      conflicts: conflicts.map((c) => ({
+        id: c.id,
+        title: c.title,
+        startAt: c.startAt,
+        endAt: c.endAt,
+        source: c.source,
+      })),
+    },
+  };
+}
 
 async function handleCreate(
   intent: Intent,

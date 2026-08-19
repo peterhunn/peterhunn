@@ -10,6 +10,7 @@ import { InboxMessageCard } from "./inbox-message";
 import { TaskCard } from "./task-card";
 import { ConnectProviders } from "./connect-providers";
 import { SyncInboxButton } from "./sync-inbox-button";
+import { AutopilotToggle } from "./autopilot-toggle";
 
 export default async function HouseholdPage({
   params,
@@ -94,6 +95,12 @@ export default async function HouseholdPage({
             {hh.frozenReason ? ` — ${hh.frozenReason}` : ""}. Everything is in Observe.
           </div>
         ) : null}
+
+        <AutopilotToggle
+          householdId={hh.id as HouseholdId}
+          initialEnabled={hh.autopilotEnabled ?? true}
+        />
+
 
         {budget ? (
           <div className="budget-bar">

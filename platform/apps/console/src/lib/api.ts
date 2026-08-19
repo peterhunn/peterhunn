@@ -54,6 +54,7 @@ export interface Household {
   readonly createdAt: string;
   readonly frozenAt?: string;
   readonly frozenReason?: string;
+  readonly autopilotEnabled?: boolean;
 }
 
 export interface NodeSummary {
@@ -184,6 +185,13 @@ export const api = (token: string) => ({
       "POST",
       `/households/${id}/inbox/sync`,
       maxResults !== undefined ? { maxResults } : {},
+    ),
+  setAutopilot: (id: HouseholdId, enabled: boolean) =>
+    request<{ household: { id: string; autopilotEnabled: boolean } }>(
+      token,
+      "POST",
+      `/households/${id}/autopilot`,
+      { enabled },
     ),
   listCredentials: (id: HouseholdId) =>
     request<{ credentials: CredentialSummary[] }>(
