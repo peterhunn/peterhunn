@@ -212,6 +212,15 @@ and audit paths end to end.
     `users/me/messages/send`. Shares the OAuth refresh loop
     with Calendar. Falls back to a mock sent-id when no
     credential or on API error.
+  - Background sync scheduler — the API boots a scheduler that
+    walks every household with a stored `gmail` credential on an
+    interval (`ATELIER_SYNC_INTERVAL_SECONDS`, default 300s) and
+    runs the incremental Gmail pull. Overlapping ticks are
+    prevented; a failure on one household never stops the loop
+    for the others. Disable with `ATELIER_SYNC_ENABLED=0` (tests
+    and one-shot workers). Cursor state is observable at
+    `GET /households/:id/sync-state` — one row per provider with
+    the last cursor and result summary.
   - Gmail inbound sync — `POST /households/:id/inbox/sync`
     pulls unread INBOX messages via `users/me/messages` +
     `messages/{id}?format=full`, walks MIME parts for text

@@ -63,4 +63,23 @@ export const syncStateRepo = (db: Db) => ({
       .where(and(eq(syncState.householdId, householdId), eq(syncState.provider, provider)))
       .run();
   },
+
+  list(householdId: HouseholdId): Array<{
+    provider: string;
+    cursor: unknown;
+    updatedAt: string;
+    lastResult: unknown;
+  }> {
+    return db
+      .select()
+      .from(syncState)
+      .where(eq(syncState.householdId, householdId))
+      .all()
+      .map((r) => ({
+        provider: r.provider,
+        cursor: r.cursor,
+        updatedAt: r.updatedAt,
+        lastResult: r.lastResult ?? null,
+      }));
+  },
 });

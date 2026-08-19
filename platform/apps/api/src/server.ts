@@ -15,6 +15,7 @@ import { modelRoutes } from "./routes/models.js";
 import { inboxRoutes } from "./routes/inbox.js";
 import { credentialRoutes } from "./routes/credentials.js";
 import { oauthRoutes } from "./routes/oauth.js";
+import { syncStateRoutes } from "./routes/sync-state.js";
 
 export const buildServer = (db: Db) => {
   const app = Fastify({ logger: { level: process.env["LOG_LEVEL"] ?? "info" } });
@@ -34,6 +35,7 @@ export const buildServer = (db: Db) => {
   app.register(inboxRoutes(db));
   app.register(credentialRoutes(db));
   app.register(oauthRoutes(db));
+  app.register(syncStateRoutes(db));
 
   return app;
 };
