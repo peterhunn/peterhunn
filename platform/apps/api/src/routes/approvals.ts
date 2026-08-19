@@ -83,6 +83,8 @@ export const approvalRoutes = (db: Db): FastifyPluginAsync => async (app) => {
             },
             readCredential: (provider) =>
               credentials.getSecret(item.householdId, provider),
+            persistAccessToken: (id, accessToken, expiresAt) =>
+              credentials.updateAccessToken(id, accessToken, expiresAt),
             logger: { info: () => {} },
           },
           {

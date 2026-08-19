@@ -51,6 +51,15 @@ export interface ToolContext {
   // household — OAuth tokens, API keys, etc. Returns null when the
   // household has not connected the provider (mock fallback territory).
   readonly readCredential: (provider: string) => StoredCredential | null;
+  // Persist a refreshed OAuth access token back to the credentials
+  // store. Called by shared adapter helpers after a successful
+  // OAuth refresh so subsequent calls don't re-refresh. Optional so
+  // test contexts can leave it undefined.
+  readonly persistAccessToken?: (
+    credentialId: string,
+    accessToken: string,
+    expiresAt: string,
+  ) => void;
   readonly logger?: { info: (msg: string, ctx?: unknown) => void };
 }
 

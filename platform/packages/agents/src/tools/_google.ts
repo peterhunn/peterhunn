@@ -67,8 +67,21 @@ export const readGoogleAuth = async <T extends GoogleOAuthFields>(
     if (!cred.refresh_token) return null;
     const refreshed = await refreshGoogleAccessToken(cred);
     accessToken = refreshed.accessToken;
+    // Persist the refreshed token back to the credentials store so
+    // subsequent calls in this and the next hour don't refresh again.
+    // Optional on the context — tests can leave it undefined.
+    if (ctx.persistAccessToken) {
+      try {
+        ctx.persistAccessToken(raw.id, refreshed.accessToken, refreshed.expiresAt);
+      } catch (err) {
+        ctx.logger?.info(`${provider} persistAccessToken failed`, {
+          error: (err as Error).message,
+        });
+      }
+    }
     ctx.logger?.info(`${provider} refreshed access token`, {
       credentialId: raw.id,
+      persisted: Boolean(ctx.persistAccessToken),
     });
   }
   return { ...cred, accessToken, credentialId: raw.id };

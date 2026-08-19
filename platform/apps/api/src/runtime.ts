@@ -158,6 +158,8 @@ export const buildOrchestrator = (db: Db): Orchestrator => {
     },
     credentials: {
       read: (h, provider) => credentials.getSecret(h, provider),
+      updateAccessToken: (id, accessToken, expiresAt) =>
+        credentials.updateAccessToken(id, accessToken, expiresAt),
     },
     models: {
       callModel: async (

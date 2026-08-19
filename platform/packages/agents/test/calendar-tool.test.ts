@@ -12,6 +12,7 @@ const stubFetch = (impl: (url: string, init?: RequestInit) => Response) => {
 const mkCtx = (
   credential: Record<string, unknown> | null,
   expiresAt: string | null = null,
+  persist?: (id: string, at: string, exp: string) => void,
 ): ToolContext => ({
   householdId: HH,
   authorityId: "pol_test",
@@ -24,6 +25,7 @@ const mkCtx = (
       expiresAt,
     } satisfies StoredCredential;
   },
+  ...(persist && { persistAccessToken: persist }),
   logger: { info: () => {} },
 });
 
@@ -147,6 +149,54 @@ describe("calendar.create", () => {
     );
     expect(res.outputs.provider).toBe("google_calendar");
     expect(res.outputs.eventRef).toBe("gc_evt_refreshed");
+  });
+
+  it("persists the refreshed access token via ctx.persistAccessToken", async () => {
+    const past = new Date(Date.now() - 60_000).toISOString();
+    const persisted: Array<{ id: string; token: string; expiresAt: string }> = [];
+    stubFetch((url) => {
+      if (url === "https://oauth2.googleapis.com/token") {
+        return new Response(
+          JSON.stringify({ access_token: "fresh-token", expires_in: 3600 }),
+          { status: 200 },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          id: "gc_ok",
+          start: { dateTime: "2026-10-01T15:00:00.000Z" },
+          end: { dateTime: "2026-10-01T16:00:00.000Z" },
+        }),
+        { status: 200 },
+      );
+    });
+    await calendarCreateTool.invoke(
+      mkCtx(
+        {
+          access_token: "old-token",
+          refresh_token: "rt-abc",
+          client_id: "cid",
+          client_secret: "csec",
+          calendar_id: "primary",
+          time_zone: "UTC",
+        },
+        past,
+        (id, at, exp) => persisted.push({ id, token: at, expiresAt: exp }),
+      ),
+      {
+        inputs: {
+          title: "T",
+          startAt: "2026-10-01T15:00:00.000Z",
+          endAt: "2026-10-01T16:00:00.000Z",
+          attendees: [],
+        },
+        summary: "Create",
+      },
+    );
+    expect(persisted).toHaveLength(1);
+    expect(persisted[0]!.id).toBe("crd_test");
+    expect(persisted[0]!.token).toBe("fresh-token");
+    expect(Date.parse(persisted[0]!.expiresAt)).toBeGreaterThan(Date.now());
   });
 
   it("falls back to mock if the Google API returns an error", async () => {

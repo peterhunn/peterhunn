@@ -102,6 +102,7 @@ export interface CredentialSource {
     credential: Record<string, unknown>;
     expiresAt: string | null;
   } | null;
+  updateAccessToken?(credentialId: string, accessToken: string, expiresAt: string): void;
 }
 
 export interface ApprovalSink {
@@ -486,6 +487,9 @@ export class Orchestrator {
         authorityId: decision.authorityId,
         proposedBy: { actor: input.agent.name, version: input.agent.version },
         readCredential: (provider) => this.deps.credentials?.read(input.householdId, provider) ?? null,
+        ...(this.deps.credentials?.updateAccessToken && {
+          persistAccessToken: this.deps.credentials.updateAccessToken.bind(this.deps.credentials),
+        }),
         logger: this.deps.logger,
       },
       { inputs: input.inputs, amountUsd: input.request.amountUsd, summary: input.request.summary },
