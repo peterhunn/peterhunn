@@ -13,6 +13,7 @@ import { SyncInboxButton } from "./sync-inbox-button";
 import { AutopilotToggle } from "./autopilot-toggle";
 import { MessagingEndpoints } from "./messaging-endpoints";
 import { MessagingEvents } from "./messaging-events";
+import { VerifyEndpoint } from "./verify-endpoint";
 
 export default async function HouseholdPage({
   params,
@@ -38,6 +39,7 @@ export default async function HouseholdPage({
     credentialsRes,
     messagingEndpointsRes,
     messagingEventsRes,
+    verificationsRes,
     oauthCfg,
   ] = await Promise.all([
     client.me(),
@@ -62,6 +64,9 @@ export default async function HouseholdPage({
     client
       .listMessagingEvents(id as HouseholdId)
       .catch(() => ({ events: [] })),
+    client
+      .listVerifications(id as HouseholdId)
+      .catch(() => ({ verifications: [] })),
     client.oauthConfig().catch(() => ({
       configured: false,
       clientId: false,
@@ -85,6 +90,7 @@ export default async function HouseholdPage({
   const credentials = credentialsRes.credentials;
   const messagingEndpoints = messagingEndpointsRes.endpoints;
   const messagingEvents = messagingEventsRes.events;
+  const verifications = verificationsRes.verifications;
 
   return (
     <>
@@ -151,6 +157,11 @@ export default async function HouseholdPage({
         <MessagingEndpoints
           householdId={hh.id as HouseholdId}
           initialEndpoints={messagingEndpoints}
+        />
+
+        <VerifyEndpoint
+          householdId={hh.id as HouseholdId}
+          initialVerifications={verifications}
         />
 
         <MessagingEvents

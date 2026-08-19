@@ -142,6 +142,30 @@ export async function startGoogleOAuth(
   }
 }
 
+export async function createVerification(
+  householdId: HouseholdId,
+  input: {
+    channel: "sms" | "whatsapp" | "imessage" | "email";
+    label?: string;
+  },
+): Promise<{ message: string; code?: string; expiresAt?: string }> {
+  const token = await getSessionToken();
+  if (!token) return { message: "Session expired." };
+  try {
+    const res = await api(token).createVerification(householdId, input);
+    return {
+      message: `Code ${res.verification.code} — customer must text it from their ${input.channel.toUpperCase()} to the concierge line before ${new Date(
+        res.verification.expiresAt,
+      ).toLocaleTimeString()}.`,
+      code: res.verification.code,
+      expiresAt: res.verification.expiresAt,
+    };
+  } catch (err) {
+    if (err instanceof ApiError) return { message: `Error: ${err.message}` };
+    return { message: `Error: ${(err as Error).message}` };
+  }
+}
+
 export async function sendMessage(
   householdId: HouseholdId,
   input: { channel: "sms" | "whatsapp"; to: string; body: string },

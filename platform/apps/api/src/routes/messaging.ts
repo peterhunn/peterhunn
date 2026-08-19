@@ -4,7 +4,11 @@ import { z } from "zod";
 import {
   contactEndpointRepo,
   credentialRepo,
+  extractVerificationCode,
+  householdRepo,
   messagingEventRepo,
+  normalizeAddress,
+  pendingVerificationRepo,
   type Db,
   type MessagingChannel,
 } from "@atelier/db";
@@ -14,15 +18,17 @@ import { buildGraphView, buildGraphWriter, buildOrchestrator } from "../runtime.
 
 // Customer messaging surface.
 //
-// Inbound: a webhook per provider (mock for local dev, twilio for
-// SMS/WhatsApp) resolves an inbound number to a household via
-// contact_endpoints, records the messaging event (deduped by the
-// provider's message id), and dispatches the body to
-// orchestrator.planAndRun. Ack is provider-appropriate: TwiML for
-// twilio, JSON for mock.
-//
-// Manager-scoped CRUD on contact endpoints uses the household auth
-// guard as usual. Recent messaging events read via GET.
+// Inbound resolution is two-step so the same webhook works for a
+// dedicated-line deploy (customer texts a household's own Twilio
+// number) and a shared-line deploy (many households share one
+// concierge line, customers identify themselves by the from-number):
+//   1. Try (channel, from) — the customer's own address as endpoint.
+//   2. Fall back to (channel, to) — the household-owned DID case.
+// If both miss, look for a live verification code in the body; on
+// match, create the endpoint, mark the code consumed, ack the
+// customer, and skip planner dispatch (this message was a claim, not
+// a task). If none of that matches, ack minimally (no household
+// context to log against) so Twilio doesn't retry.
 
 const AddEndpointBody = z.object({
   channel: z.enum(["sms", "whatsapp", "imessage", "email"]),
@@ -36,6 +42,12 @@ const SendMessageBody = z.object({
   to: z.string().min(3),
   body: z.string().min(1).max(1600),
   inReplyToEventId: z.string().optional(),
+});
+
+const CreateVerificationBody = z.object({
+  channel: z.enum(["sms", "whatsapp", "imessage", "email"]).default("sms"),
+  ttlSeconds: z.number().int().positive().max(24 * 60 * 60).optional(),
+  label: z.string().optional(),
 });
 
 const MockInboundBody = z.object({
@@ -74,6 +86,15 @@ const verifyTwilioSignature = (
   const expected = createHmac("sha1", authToken).update(signed).digest("base64");
   return expected === signature;
 };
+
+interface InboundResult {
+  outcome: "dispatched" | "deduped" | "verified" | "already_verified" | "unrouted";
+  householdId?: HouseholdId;
+  householdName?: string;
+  eventId?: string;
+  runId?: string;
+  ackMessage?: string;
+}
 
 const dispatchToPlanner = async (
   db: Db,
@@ -125,9 +146,6 @@ const dispatchToPlanner = async (
       prompt: input.body,
       origin: { source: "customer", by: `${input.channel}:${input.from}` },
     });
-    // The result carries per-intent runIds; we link the messaging
-    // event to the planner run so the console can show "this SMS
-    // triggered these tasks."
     const firstRun = result.runs[0]?.runId;
     if (firstRun) events.linkRun(row.id, firstRun);
     return { eventId: row.id, deduped: false, ...(firstRun ? { runId: firstRun } : {}) };
@@ -138,6 +156,112 @@ const dispatchToPlanner = async (
     );
     return { eventId: row.id, deduped: false };
   }
+};
+
+// Full inbound-side pipeline: shared-line vs dedicated-line
+// resolution → verification claim on miss → planner dispatch on
+// hit. Kept independent of the webhook shape so both the mock and
+// Twilio endpoints ride the same code path.
+const handleInbound = async (
+  db: Db,
+  log: FastifyRequest["log"],
+  input: {
+    channel: MessagingChannel;
+    from: string;
+    to: string;
+    body: string;
+    provider: string;
+    externalMessageId?: string;
+  },
+): Promise<InboundResult> => {
+  const endpoints = contactEndpointRepo(db);
+  const events = messagingEventRepo(db);
+  const verifications = pendingVerificationRepo(db);
+  const households = householdRepo(db);
+
+  // 1. Resolve by the customer's from-address first (shared-line
+  //    deploy), then by the platform's to-address (dedicated-line
+  //    deploy per household).
+  const ep =
+    endpoints.resolve(input.channel, input.from) ??
+    endpoints.resolve(input.channel, input.to);
+  if (ep) {
+    const out = await dispatchToPlanner(db, log, {
+      householdId: ep.householdId as HouseholdId,
+      channel: input.channel,
+      from: input.from,
+      to: input.to,
+      body: input.body,
+      provider: input.provider,
+      ...(input.externalMessageId ? { externalMessageId: input.externalMessageId } : {}),
+      endpointId: ep.id,
+    });
+    return {
+      outcome: out.deduped ? "deduped" : "dispatched",
+      householdId: ep.householdId as HouseholdId,
+      eventId: out.eventId,
+      ...(out.runId ? { runId: out.runId } : {}),
+    };
+  }
+
+  // 2. No endpoint → look for a verification code in the body.
+  //    If one matches a live pending verification, bind the
+  //    from-address as a new endpoint for that household and mark
+  //    the code consumed. The customer is now onboarded.
+  const code = extractVerificationCode(input.body);
+  if (code) {
+    const pending = verifications.findLiveByCode(input.channel, code);
+    if (pending) {
+      const normalizedFrom = normalizeAddress(input.channel, input.from);
+      // If the same address is already an endpoint on this
+      // household (maybe registered manually), still consume the
+      // code so the pending list clears — just don't double-insert.
+      const existing = endpoints.resolve(input.channel, normalizedFrom);
+      let endpointId: string;
+      if (existing && existing.householdId === pending.householdId) {
+        endpointId = existing.id;
+      } else if (existing) {
+        // The address is bound to a different household — refuse
+        // the verification to prevent hijacking.
+        log.info(
+          { code, otherHousehold: existing.householdId },
+          "verification claim refused — from-address already bound elsewhere",
+        );
+        return { outcome: "unrouted" };
+      } else {
+        const created = endpoints.create({
+          householdId: pending.householdId as HouseholdId,
+          channel: input.channel,
+          address: normalizedFrom,
+          label: pending.label ?? undefined,
+        });
+        endpointId = created.id;
+      }
+      verifications.consume(pending.id, normalizedFrom, endpointId);
+      // Record the claim itself as an inbound messaging event so
+      // the household's traffic view carries a full history.
+      events.record({
+        householdId: pending.householdId as HouseholdId,
+        endpointId,
+        direction: "inbound",
+        channel: input.channel,
+        provider: input.provider,
+        ...(input.externalMessageId ? { externalMessageId: input.externalMessageId } : {}),
+        fromAddress: input.from,
+        toAddress: input.to,
+        body: input.body,
+      });
+      const hh = households.get(pending.householdId as HouseholdId);
+      return {
+        outcome: existing ? "already_verified" : "verified",
+        householdId: pending.householdId as HouseholdId,
+        householdName: hh?.name ?? "your household",
+        ackMessage: `Verified — you're now connected to ${hh?.name ?? "your household"}. Text again anytime.`,
+      };
+    }
+  }
+
+  return { outcome: "unrouted" };
 };
 
 const escapeXml = (s: string): string =>
@@ -290,15 +414,7 @@ export const messagingRoutes = (db: Db): FastifyPluginAsync => async (app) => {
       if (!parsed.success) {
         return reply.code(400).send({ error: "invalid_body", issues: parsed.error.issues });
       }
-      const ep = endpoints.resolve(parsed.data.channel, parsed.data.to);
-      if (!ep) {
-        return reply.code(404).send({
-          error: "unrouted",
-          message: `No contact endpoint registered for ${parsed.data.channel}:${parsed.data.to}.`,
-        });
-      }
-      const out = await dispatchToPlanner(db, req.log, {
-        householdId: ep.householdId as HouseholdId,
+      const out = await handleInbound(db, req.log, {
         channel: parsed.data.channel,
         from: parsed.data.from,
         to: parsed.data.to,
@@ -307,13 +423,20 @@ export const messagingRoutes = (db: Db): FastifyPluginAsync => async (app) => {
         ...(parsed.data.externalMessageId
           ? { externalMessageId: parsed.data.externalMessageId }
           : {}),
-        endpointId: ep.id,
       });
+      if (out.outcome === "unrouted") {
+        return reply.code(404).send({
+          error: "unrouted",
+          message: `No contact endpoint or live verification for ${parsed.data.channel}:${parsed.data.from} → ${parsed.data.to}.`,
+        });
+      }
       return {
         ok: true,
-        eventId: out.eventId,
-        deduped: out.deduped,
+        outcome: out.outcome,
+        ...(out.eventId ? { eventId: out.eventId } : {}),
+        ...(out.householdId ? { householdId: out.householdId } : {}),
         ...(out.runId ? { plannerRunId: out.runId } : {}),
+        ...(out.ackMessage ? { ackMessage: out.ackMessage } : {}),
       };
     },
   );
@@ -360,33 +483,86 @@ export const messagingRoutes = (db: Db): FastifyPluginAsync => async (app) => {
       const body = form.Body ?? "";
       const externalMessageId = form.MessageSid ?? form.SmsMessageSid;
 
-      const ep = endpoints.resolve(channel, to);
-      if (!ep) {
-        // Twilio still expects a 200 to stop retries; respond with an
-        // empty TwiML so the sender doesn't get an auto-error.
-        req.log.info({ channel, to }, "twilio inbound unrouted");
-        return reply
-          .header("content-type", "text/xml; charset=utf-8")
-          .send('<?xml version="1.0" encoding="UTF-8"?><Response/>');
-      }
-
-      const out = await dispatchToPlanner(db, req.log, {
-        householdId: ep.householdId as HouseholdId,
+      const out = await handleInbound(db, req.log, {
         channel,
         from,
         to,
         body,
         provider: "twilio",
         ...(externalMessageId ? { externalMessageId } : {}),
-        endpointId: ep.id,
       });
 
-      const ack = out.deduped
-        ? ""
-        : `<Message>${escapeXml("Got it — I'm working on this and will follow up.")}</Message>`;
+      let ackText: string | null = null;
+      if (out.outcome === "dispatched") {
+        ackText = "Got it — I'm working on this and will follow up.";
+      } else if (out.outcome === "verified") {
+        ackText = out.ackMessage ?? "Verified.";
+      } else if (out.outcome === "already_verified") {
+        ackText = out.ackMessage ?? "You're already connected.";
+      }
+      // "deduped" and "unrouted" both return an empty TwiML — we
+      // don't want to double-reply to a retried webhook, and we
+      // don't want to tip an outsider that unrouted numbers just
+      // silently get dropped.
+      if (out.outcome === "unrouted") {
+        req.log.info({ channel, from, to }, "twilio inbound unrouted");
+      }
+      const inner = ackText ? `<Message>${escapeXml(ackText)}</Message>` : "";
       return reply
         .header("content-type", "text/xml; charset=utf-8")
-        .send(`<?xml version="1.0" encoding="UTF-8"?><Response>${ack}</Response>`);
+        .send(`<?xml version="1.0" encoding="UTF-8"?><Response>${inner}</Response>`);
+    },
+  );
+
+  // ── Verifications (manager-scoped) ─────────────────────────────
+  const verifications = pendingVerificationRepo(db);
+
+  app.get<{ Params: { householdId: string } }>(
+    "/households/:householdId/messaging/verifications",
+    {
+      config: {
+        audit: {
+          action: "messaging.verifications.list",
+          resourceType: "pending_verification",
+        },
+      },
+    },
+    async (req) => ({
+      verifications: verifications.list(req.householdContext as HouseholdId),
+    }),
+  );
+
+  app.post<{ Params: { householdId: string } }>(
+    "/households/:householdId/messaging/verifications",
+    {
+      config: {
+        audit: {
+          action: "messaging.verifications.create",
+          resourceType: "pending_verification",
+        },
+      },
+    },
+    async (req, reply) => {
+      const parsed = CreateVerificationBody.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return reply.code(400).send({ error: "invalid_body", issues: parsed.error.issues });
+      }
+      const created = verifications.create({
+        householdId: req.householdContext as HouseholdId,
+        channel: parsed.data.channel,
+        createdBy: `${req.actor.type}:${req.actor.id}`,
+        ...(parsed.data.ttlSeconds ? { ttlSeconds: parsed.data.ttlSeconds } : {}),
+        ...(parsed.data.label ? { label: parsed.data.label } : {}),
+      });
+      return reply.code(201).send({
+        verification: {
+          id: created.id,
+          channel: created.channel,
+          code: created.code,
+          expiresAt: created.expiresAt,
+          label: created.label,
+        },
+      });
     },
   );
 };

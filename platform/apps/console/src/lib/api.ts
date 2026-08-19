@@ -218,6 +218,35 @@ export const api = (token: string) => ({
       "DELETE",
       `/households/${id}/messaging/endpoints/${endpointId}`,
     ),
+  listVerifications: (id: HouseholdId) =>
+    request<{
+      verifications: Array<{
+        id: string;
+        channel: "sms" | "whatsapp" | "imessage" | "email";
+        code: string;
+        expiresAt: string;
+        consumedAt: string | null;
+        consumedFromAddress: string | null;
+        label: string | null;
+      }>;
+    }>(token, "GET", `/households/${id}/messaging/verifications`),
+  createVerification: (
+    id: HouseholdId,
+    input: {
+      channel: "sms" | "whatsapp" | "imessage" | "email";
+      ttlSeconds?: number;
+      label?: string;
+    },
+  ) =>
+    request<{
+      verification: {
+        id: string;
+        channel: "sms" | "whatsapp" | "imessage" | "email";
+        code: string;
+        expiresAt: string;
+        label: string | null;
+      };
+    }>(token, "POST", `/households/${id}/messaging/verifications`, input),
   sendMessage: (
     id: HouseholdId,
     input: { channel: "sms" | "whatsapp"; to: string; body: string },

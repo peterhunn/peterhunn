@@ -218,12 +218,28 @@ and audit paths end to end.
     `users/me/messages/send`. Shares the OAuth refresh loop
     with Calendar. Falls back to a mock sent-id when no
     credential or on API error.
+  - Verification loop for new customer numbers — a manager mints
+    a 6-digit code via
+    `POST /households/:id/messaging/verifications`, the customer
+    texts the code from the number they want to bind, and the
+    webhook (`/messaging/inbound/twilio` or `.../mock`) detects
+    the code in the body, creates the endpoint, marks the
+    verification consumed, and replies "Verified — you're now
+    connected to <household name>." Codes live 15 min by
+    default (`ttlSeconds`), one-shot, and a code cannot bind an
+    address already routed to a different household (anti-
+    hijack). Console: "Verify a customer number" section on the
+    household page mints codes and shows the pending list.
   - Customer messaging surface — an inbound SMS / WhatsApp
     reaches the platform via `POST /messaging/inbound/twilio`
     (and `POST /messaging/inbound/mock` for local dev). The
-    webhook resolves the destination number to a household via
-    the new `contact_endpoints` table
-    (`{channel, address}` uniquely identifies the route), records
+    webhook resolves via `contact_endpoints` — first by the
+    customer's from-address (shared-line deploy: one DID for
+    many households, customers identified by their number) and
+    then by the to-address (dedicated-line deploy: one DID per
+    household). On a miss it looks for a live verification code
+    in the body — see the verification loop item above — and
+    silently ignores otherwise. On a hit it records
     the messaging event, and dispatches the message body to the
     orchestrator planner as a customer-origin prompt — so
     "book the plumber for Thursday" texted from the customer's
