@@ -11,7 +11,7 @@ platform/
 │   ├── domain/     # Life Graph types, provenance, ontology, identity, policy, models (no framework)
 │   ├── db/         # Drizzle schema, migrations, repositories
 │   ├── policy/     # Autonomy-rung evaluator, scope matcher, rolling limits
-│   ├── agents/    # Orchestrator, agent + tool contracts, household + calendar + inbox + research + admin + family agents
+│   ├── agents/    # Orchestrator, agent + tool contracts, household + calendar + inbox + research + admin + family + travel agents
 │   └── router/     # Model registry, tier-aware router, callModel + mock provider
 ├── apps/
 │   ├── api/        # Fastify HTTP service (auth + audit + graph + policy + actions + orchestrator + models)
@@ -139,6 +139,18 @@ and audit paths end to end.
     `family.school.form_due` (deterministic — queues an
     `obligation.deadline` candidate for a school form due for a
     specific member).
+  - `travel` — handles `travel.trip.plan` (T3
+    `travel.plan.multi`: reads principals + members, travel
+    preferences, and identity documents; flags any identity doc
+    that expires inside the 6-month post-trip validity window;
+    proposes flights + hotels + ground + coordination needs
+    across calendar / household / family / inbox) and
+    `travel.flight.search` (narrower T2 `travel.match` for a
+    single itinerary). The mock planner recognizes "we're going
+    to <destination> for <n> weeks in <month>"–style prompts
+    and decomposes them into travel + calendar + household +
+    family intents, so the "London for two weeks in October"
+    bench from models.md runs end-to-end on a fresh clone.
 - Console: "Run intent" form on the household page.
 - Approval queue — non-execute policy decisions (draft, ask) persist
   as `approvals` rows carrying the tool name, inputs, authority policy

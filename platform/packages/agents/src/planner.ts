@@ -100,6 +100,28 @@ export const PLANNER_REGISTRY: readonly PlannerIntentSpec[] = [
       dueAt: "2026-10-01T00:00:00.000Z",
     },
   },
+  {
+    kind: "travel.trip.plan",
+    description:
+      "Plan a full trip: propose flights, hotels, and ground; flag document issues; and summarize coordination needs. Use for prompts like 'we're going to London for two weeks in October'.",
+    attrsExample: {
+      destination: "London, UK",
+      startAt: "2026-10-05T00:00:00.000Z",
+      endAt: "2026-10-19T23:59:59.000Z",
+      notes: "Board meetings Oct 7 and Oct 13.",
+    },
+  },
+  {
+    kind: "travel.flight.search",
+    description:
+      "Search flight candidates for a single itinerary. Narrower than travel.trip.plan.",
+    attrsExample: {
+      origin: "DFW",
+      destination: "LHR",
+      departAt: "2026-10-05T14:00:00.000Z",
+      returnAt: "2026-10-19T20:00:00.000Z",
+    },
+  },
 ];
 
 // A plan is what the planner produces from a prompt. `notes` is a

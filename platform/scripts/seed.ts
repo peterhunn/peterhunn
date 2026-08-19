@@ -250,7 +250,39 @@ graph.createNode(household.id, {
     status: "confirmed",
   },
 });
-console.log("seeded property + two vendors + two documents + family scaffolding");
+// Travel preferences so travel.trip.plan can surface loyalty
+// matches and the demo's flight options feel real.
+graph.createNode(household.id, {
+  type: "preference.travel",
+  data: {
+    scope: "airline",
+    value: { airline: "American Airlines", tier: "Executive Platinum" },
+  },
+  provenance: {
+    source: "customer_direct",
+    assertedBy: manager.id,
+    assertedAt: now,
+    confidence: 1,
+    status: "confirmed",
+  },
+});
+graph.createNode(household.id, {
+  type: "preference.travel",
+  data: {
+    scope: "hotel",
+    value: { hotel: "Rosewood", tier: "Elite" },
+  },
+  provenance: {
+    source: "customer_direct",
+    assertedBy: manager.id,
+    assertedAt: now,
+    confidence: 1,
+    status: "confirmed",
+  },
+});
+console.log(
+  "seeded property + two vendors + two documents + family + travel preferences",
+);
 
 // A sample inbound message so the Inbox agent has something to
 // process on first boot.

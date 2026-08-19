@@ -57,6 +57,8 @@ function TaskBody({
   if (kind === "inbox.message.process") return <InboxBody outputs={outputs} />;
   if (kind.startsWith("calendar.appointment")) return <CalendarBody outputs={outputs} />;
   if (kind.startsWith("household.vendor")) return <VendorBody outputs={outputs} />;
+  if (kind === "travel.trip.plan") return <TravelTripBody outputs={outputs} />;
+  if (kind === "travel.flight.search") return <TravelFlightBody outputs={outputs} />;
 
   return <RawOutputs outputs={outputs} />;
 }
@@ -317,6 +319,212 @@ function CalendarBody({ outputs }: { outputs: Record<string, unknown> }) {
       {endAt ? ` → ${new Date(endAt).toLocaleTimeString()}` : ""}
       {supersedes ? ` (supersedes ${supersedes.slice(0, 8)}…)` : ""}
     </p>
+  );
+}
+
+function TravelTripBody({ outputs }: { outputs: Record<string, unknown> }) {
+  const dest = String(outputs["destination"] ?? "");
+  const dates = isRecord(outputs["dates"]) ? outputs["dates"] : null;
+  const travelers = Array.isArray(outputs["travelers"])
+    ? (outputs["travelers"] as Array<{ id: string; name: string; type: string }>)
+    : [];
+  const plan = isRecord(outputs["plan"]) ? outputs["plan"] : null;
+  const flights =
+    plan && Array.isArray(plan["flights"])
+      ? (plan["flights"] as Array<{
+          direction?: string;
+          note?: string;
+          price?: number;
+          refundable?: boolean;
+          loyaltyMatch?: boolean;
+        }>)
+      : [];
+  const hotels =
+    plan && Array.isArray(plan["hotels"])
+      ? (plan["hotels"] as Array<{
+          name?: string;
+          area?: string;
+          nightly?: number;
+          note?: string;
+          loyaltyMatch?: boolean;
+        }>)
+      : [];
+  const ground = plan ? String(plan["groundTransportation"] ?? "") : "";
+  const documentNotes =
+    plan && Array.isArray(plan["documentNotes"])
+      ? (plan["documentNotes"] as string[])
+      : [];
+  const coord = plan && isRecord(plan["coordinationNeeds"]) ? plan["coordinationNeeds"] : null;
+  const openQs =
+    plan && Array.isArray(plan["openQuestions"])
+      ? (plan["openQuestions"] as string[])
+      : [];
+
+  return (
+    <>
+      <p className="task-meta">
+        <span className="mono">
+          {dest}
+          {dates
+            ? ` · ${String(dates["startAt"]).slice(0, 10)} → ${String(dates["endAt"]).slice(0, 10)}`
+            : ""}
+        </span>
+        {travelers.length > 0 ? (
+          <span className="mono">
+            {travelers.length} traveler{travelers.length === 1 ? "" : "s"}
+          </span>
+        ) : null}
+      </p>
+
+      {flights.length > 0 ? (
+        <>
+          <p className="task-eyebrow">Flights</p>
+          <table className="data inline-data">
+            <thead>
+              <tr>
+                <th>Direction</th>
+                <th>Note</th>
+                <th>Price</th>
+                <th>Refundable</th>
+                <th>Loyalty</th>
+              </tr>
+            </thead>
+            <tbody>
+              {flights.map((f, i) => (
+                <tr key={i}>
+                  <td className="mono">{f.direction ?? ""}</td>
+                  <td>{f.note ?? ""}</td>
+                  <td className="mono">
+                    {typeof f.price === "number" ? `$${f.price.toFixed(0)}` : ""}
+                  </td>
+                  <td className="mono">{f.refundable ? "yes" : "no"}</td>
+                  <td className="mono">{f.loyaltyMatch ? "yes" : "no"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      ) : null}
+
+      {hotels.length > 0 ? (
+        <>
+          <p className="task-eyebrow">Hotels</p>
+          <table className="data inline-data">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Area</th>
+                <th>Nightly</th>
+                <th>Loyalty</th>
+                <th>Note</th>
+              </tr>
+            </thead>
+            <tbody>
+              {hotels.map((h, i) => (
+                <tr key={i}>
+                  <td>{h.name ?? ""}</td>
+                  <td className="mono">{h.area ?? ""}</td>
+                  <td className="mono">
+                    {typeof h.nightly === "number" ? `$${h.nightly.toFixed(0)}` : ""}
+                  </td>
+                  <td className="mono">{h.loyaltyMatch ? "yes" : "no"}</td>
+                  <td>{h.note ?? ""}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      ) : null}
+
+      {ground ? (
+        <>
+          <p className="task-eyebrow">Ground</p>
+          <p className="task-prose">{ground}</p>
+        </>
+      ) : null}
+
+      {documentNotes.length > 0 ? (
+        <>
+          <p className="task-eyebrow">Documents</p>
+          <ul className="open-questions">
+            {documentNotes.map((n, i) => (
+              <li key={i}>{n}</li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+
+      {coord ? (
+        <>
+          <p className="task-eyebrow">Coordination</p>
+          <table className="data inline-data">
+            <tbody>
+              {Object.entries(coord).map(([domain, note]) => (
+                <tr key={domain}>
+                  <td className="mono" style={{ width: 120 }}>
+                    {domain}
+                  </td>
+                  <td>{String(note)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      ) : null}
+
+      {openQs.length > 0 ? (
+        <>
+          <p className="task-eyebrow">Open questions</p>
+          <ul className="open-questions">
+            {openQs.map((q, i) => (
+              <li key={i}>{q}</li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+    </>
+  );
+}
+
+function TravelFlightBody({ outputs }: { outputs: Record<string, unknown> }) {
+  const candidates = Array.isArray(outputs["candidates"])
+    ? (outputs["candidates"] as Array<{
+        airline?: string;
+        cabin?: string;
+        price?: number;
+        refundable?: boolean;
+        loyaltyMatch?: boolean;
+        note?: string;
+      }>)
+    : [];
+  if (candidates.length === 0) return null;
+  return (
+    <table className="data inline-data">
+      <thead>
+        <tr>
+          <th>Airline</th>
+          <th>Cabin</th>
+          <th>Price</th>
+          <th>Refundable</th>
+          <th>Loyalty</th>
+          <th>Note</th>
+        </tr>
+      </thead>
+      <tbody>
+        {candidates.map((c, i) => (
+          <tr key={i}>
+            <td>{c.airline ?? ""}</td>
+            <td className="mono">{c.cabin ?? ""}</td>
+            <td className="mono">
+              {typeof c.price === "number" ? `$${c.price.toFixed(0)}` : ""}
+            </td>
+            <td className="mono">{c.refundable ? "yes" : "no"}</td>
+            <td className="mono">{c.loyaltyMatch ? "yes" : "no"}</td>
+            <td>{c.note ?? ""}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 

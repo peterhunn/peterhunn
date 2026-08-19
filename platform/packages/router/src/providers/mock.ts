@@ -68,6 +68,12 @@ const cannedResponse = (model: ModelSpec, call: ModelCall): string => {
     case "family.coverage_plan":
       return familyCoveragePlan(userMsg);
 
+    case "travel.plan.multi":
+      return travelPlanMulti(userMsg);
+
+    case "travel.match":
+      return travelMatch(userMsg);
+
     case "orchestrator.simple":
     case "orchestrator.cross_domain":
       return JSON.stringify(plannerPlan(userMsg));
@@ -90,6 +96,49 @@ const plannerPlan = (
   const lower = prompt.toLowerCase();
   const intents: Array<{ kind: string; attrs: Record<string, unknown> }> = [];
   const reasons: string[] = [];
+
+  // Trip prompts get decomposed across travel + calendar + household +
+  // family so a single natural-language ask exercises the whole
+  // orchestrator surface. This is the "London for two weeks in
+  // October" bench from ../life-management/models.md.
+  const trip = detectTrip(prompt);
+  if (trip) {
+    intents.push({
+      kind: "travel.trip.plan",
+      attrs: {
+        destination: trip.destination,
+        startAt: trip.startAt,
+        endAt: trip.endAt,
+        notes: prompt.slice(0, 200),
+      },
+    });
+    intents.push({
+      kind: "calendar.appointment.create",
+      attrs: {
+        title: `OOO — ${trip.destination} (travel)`,
+        startAt: trip.startAt,
+        endAt: trip.endAt,
+      },
+    });
+    intents.push({
+      kind: "family.coverage.propose",
+      attrs: {
+        startAt: trip.startAt,
+        endAt: trip.endAt,
+        notes: `Coverage during ${trip.destination} trip.`,
+      },
+    });
+    intents.push({
+      kind: "household.vendor.schedule",
+      attrs: {
+        propertyNodeId: "nod_home",
+        serviceType: "cleaning",
+        notes: "Mid-trip clean.",
+      },
+    });
+    reasons.push(`recognized trip to ${trip.destination}`);
+    return { reasoning: reasons.join("; "), intents };
+  }
 
   if (/hvac|plumb|contractor|repair|fence|clean(er|ing)|maintenance/i.test(lower)) {
     const serviceType = /hvac/i.test(lower)
@@ -244,6 +293,159 @@ const familyCoveragePlan = (userMsg: string): string => {
   });
 };
 
+// Canned travel.plan.multi — reads destination + dates + travelers +
+// preferences and returns a plausible option grid. Real T3 output is
+// vastly richer; this is enough to demo the shape.
+const travelPlanMulti = (userMsg: string): string => {
+  type Payload = {
+    destination?: string;
+    dates?: { startAt?: string; endAt?: string };
+    travelers?: Array<{ id: string; name: string; type: string }>;
+    documentConcerns?: Array<{ ref: string; title: string; concern: string }>;
+    preferences?: Array<{ scope: string; value: unknown }>;
+    notes?: string;
+  };
+  let payload: Payload = {};
+  try {
+    payload = JSON.parse(userMsg) as Payload;
+  } catch {
+    // fall through
+  }
+  const dest = payload.destination ?? "the destination";
+  const startAt = payload.dates?.startAt ?? "TBD";
+  const endAt = payload.dates?.endAt ?? "TBD";
+  const numTravelers = (payload.travelers ?? []).length;
+  const hasChildren = (payload.travelers ?? []).some((t) => t.type === "person.member");
+  const preferredAirline = pickPreference(payload.preferences, "airline");
+  const preferredHotel = pickPreference(payload.preferences, "hotel");
+
+  const flights = [
+    {
+      direction: "outbound",
+      note: preferredAirline
+        ? `Direct with ${preferredAirline}, business cabin.`
+        : "Direct, business cabin.",
+      price: 3500,
+      refundable: false,
+      loyaltyMatch: Boolean(preferredAirline),
+    },
+    {
+      direction: "outbound",
+      note: "One-stop via a partner alliance; refundable fare.",
+      price: 4100,
+      refundable: true,
+      loyaltyMatch: Boolean(preferredAirline),
+    },
+    {
+      direction: "return",
+      note: preferredAirline
+        ? `Direct with ${preferredAirline}, business cabin.`
+        : "Direct, business cabin.",
+      price: 3300,
+      refundable: false,
+      loyaltyMatch: Boolean(preferredAirline),
+    },
+  ];
+  const hotels = [
+    {
+      name: preferredHotel ?? "Curated boutique hotel",
+      area: `Central ${dest.split(",")[0] ?? dest}`,
+      nightly: 750,
+      note: "Suite with sitting room; walking distance to meetings.",
+      loyaltyMatch: Boolean(preferredHotel),
+    },
+    {
+      name: "Serviced apartment (2BR)",
+      area: `Quiet district, ${dest.split(",")[0] ?? dest}`,
+      nightly: 950,
+      note: hasChildren ? "Two bedrooms + kitchen; better for a family stay." : "Two bedrooms for team + guests.",
+      loyaltyMatch: false,
+    },
+  ];
+
+  const documentNotes = (payload.documentConcerns ?? []).map((d) => `${d.title}: ${d.concern}`);
+
+  return JSON.stringify({
+    summary: `Draft plan for ${dest} (${startAt.slice(0, 10)} → ${endAt.slice(0, 10)}) for ${numTravelers} traveler${numTravelers === 1 ? "" : "s"}.`,
+    flights,
+    hotels,
+    groundTransportation:
+      "Recommend arranging a car service for arrival + departure and a hotel car for meetings.",
+    documentNotes,
+    coordinationNeeds: {
+      calendar: "Block travel days as OOO; reschedule the recurring team meetings that fall in-window.",
+      household: "Place mail on hold; brief cleaner + gardener; pause perishable deliveries.",
+      family: hasChildren
+        ? "Confirm school pickup + bedtime coverage with nanny + trusted contact."
+        : "No family coordination required (adults-only trip).",
+      inbox: "Draft an out-of-office reply and forward-of-record note to the assistants team.",
+    },
+    openQuestions: [
+      "Confirm business vs first class threshold for this trip.",
+      "Confirm hotel selection: boutique suite vs serviced apartment.",
+      documentNotes.length > 0
+        ? "Passport(s) expiring inside the six-month post-trip validity window — action needed."
+        : "No document concerns detected.",
+    ].filter(Boolean),
+  });
+};
+
+const pickPreference = (
+  prefs: Array<{ scope: string; value: unknown }> | undefined,
+  key: string,
+): string | null => {
+  if (!prefs) return null;
+  const match = prefs.find((p) => p.scope === key);
+  if (!match || typeof match.value !== "object" || match.value === null) return null;
+  const v = match.value as Record<string, unknown>;
+  const preferred = v[key] ?? v["preferred"] ?? v["value"] ?? v["name"];
+  return typeof preferred === "string" ? preferred : null;
+};
+
+const travelMatch = (userMsg: string): string => {
+  type Payload = {
+    origin?: string;
+    destination?: string;
+    preferences?: Array<{ scope: string; value: unknown }>;
+  };
+  let payload: Payload = {};
+  try {
+    payload = JSON.parse(userMsg) as Payload;
+  } catch {
+    // fall through
+  }
+  const preferredAirline = pickPreference(payload.preferences, "airline") ?? "American";
+  return JSON.stringify({
+    summary: `Top 3 candidates for ${payload.origin ?? "?"} → ${payload.destination ?? "?"}.`,
+    candidates: [
+      {
+        airline: preferredAirline,
+        cabin: "business",
+        price: 3500,
+        refundable: false,
+        loyaltyMatch: true,
+        note: "Preferred airline, direct routing.",
+      },
+      {
+        airline: preferredAirline,
+        cabin: "premium_economy",
+        price: 1650,
+        refundable: true,
+        loyaltyMatch: true,
+        note: "Refundable and cheaper; longer flight time.",
+      },
+      {
+        airline: "Alliance partner",
+        cabin: "business",
+        price: 3900,
+        refundable: true,
+        loyaltyMatch: false,
+        note: "Alternative if preferred availability is limited.",
+      },
+    ],
+  });
+};
+
 const recommendActionFor = (type: string, title: string): string => {
   const t = title.toLowerCase();
   if (type === "document.identity") {
@@ -258,6 +460,71 @@ const recommendActionFor = (type: string, title: string): string => {
   }
   if (type === "document.legal") return "Route to counsel for renewal review.";
   return "Handle upcoming renewal.";
+};
+
+// Naïve trip detector — matches "we're going / trip / travel to
+// <destination> [for <n> <units>] [in <month>]" against the prompt.
+// Real planners parse relative dates properly; this is enough for the
+// London bench to fire on a fresh clone.
+const detectTrip = (
+  prompt: string,
+): { destination: string; startAt: string; endAt: string } | null => {
+  const patterns = [
+    /(?:we(?:'re| are)?|i(?:'m| am)?)\s+(?:going|travel(?:ing|ling)?|traveling|heading|off)\s+to\s+([A-Z][A-Za-z\s]+?)\b/,
+    /trip\s+to\s+([A-Z][A-Za-z\s]+?)\b/,
+    /travel\s+to\s+([A-Z][A-Za-z\s]+?)\b/,
+  ];
+  let destination: string | null = null;
+  for (const p of patterns) {
+    const m = p.exec(prompt);
+    if (m && m[1]) {
+      destination = m[1].trim();
+      break;
+    }
+  }
+  if (!destination) return null;
+
+  // Duration: "two weeks", "one week", "10 days" — default two weeks.
+  const numberWord: Record<string, number> = {
+    one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7,
+    eight: 8, nine: 9, ten: 10,
+  };
+  let days = 14;
+  const wordDur = /\b(one|two|three|four|five|six|seven|eight|nine|ten)\s+(day|days|week|weeks)\b/i.exec(prompt);
+  if (wordDur) {
+    const n = numberWord[wordDur[1]!.toLowerCase()] ?? 1;
+    days = /week/i.test(wordDur[2]!) ? n * 7 : n;
+  } else {
+    const numDur = /\b(\d+)\s+(days?|weeks?)\b/i.exec(prompt);
+    if (numDur) {
+      const n = Number(numDur[1]);
+      days = /week/i.test(numDur[2]!) ? n * 7 : n;
+    }
+  }
+
+  // Month: "in October" → next October; default 30 days from now.
+  const monthNames = [
+    "january","february","march","april","may","june","july","august",
+    "september","october","november","december",
+  ];
+  const monthMatch = /\bin\s+(january|february|march|april|may|june|july|august|september|october|november|december)\b/i.exec(prompt);
+  let startAt: Date;
+  if (monthMatch) {
+    const monthIdx = monthNames.indexOf(monthMatch[1]!.toLowerCase());
+    const now = new Date();
+    let year = now.getUTCFullYear();
+    if (monthIdx <= now.getUTCMonth()) year++;
+    startAt = new Date(Date.UTC(year, monthIdx, 5, 0, 0, 0));
+  } else {
+    startAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+  }
+  const endAt = new Date(startAt.getTime() + days * 24 * 60 * 60 * 1000);
+
+  return {
+    destination,
+    startAt: startAt.toISOString(),
+    endAt: endAt.toISOString(),
+  };
 };
 
 const nextBusinessAt = (hourUtc: number): string => {

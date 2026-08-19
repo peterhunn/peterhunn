@@ -11,6 +11,7 @@ import {
   runResearchIntent,
   runAdminReviewIntent,
   runFamilyCoverageIntent,
+  runTravelTripPlanIntent,
   planAndRun,
 } from "./actions";
 
@@ -22,7 +23,8 @@ type Mode =
   | "calendar_reschedule"
   | "research"
   | "admin_review"
-  | "family_coverage";
+  | "family_coverage"
+  | "travel_trip";
 
 export function RunIntentForm({ householdId }: { householdId: HouseholdId }) {
   const [mode, setMode] = useState<Mode>("plan");
@@ -37,6 +39,7 @@ export function RunIntentForm({ householdId }: { householdId: HouseholdId }) {
     "Compare three ergonomic office chairs under $800.",
   );
   const [windowDays, setWindowDays] = useState("60");
+  const [destination, setDestination] = useState("London, UK");
   const [title, setTitle] = useState("Board meeting");
   const [startAt, setStartAt] = useState("2026-09-01T15:00");
   const [endAt, setEndAt] = useState("2026-09-01T16:00");
@@ -99,6 +102,13 @@ export function RunIntentForm({ householdId }: { householdId: HouseholdId }) {
                 endAt: toIso(endAt),
               });
               break;
+            case "travel_trip":
+              res = await runTravelTripPlanIntent(householdId, {
+                destination,
+                startAt: toIso(startAt),
+                endAt: toIso(endAt),
+              });
+              break;
           }
           setMessage(res.message);
           router.refresh();
@@ -116,8 +126,20 @@ export function RunIntentForm({ householdId }: { householdId: HouseholdId }) {
           <option value="research">research.query</option>
           <option value="admin_review">admin.renewals.review</option>
           <option value="family_coverage">family.coverage.propose</option>
+          <option value="travel_trip">travel.trip.plan</option>
         </select>
       </div>
+
+      {mode === "travel_trip" ? (
+        <div className="form-field inline">
+          <label htmlFor="destination">Destination</label>
+          <input
+            id="destination"
+            value={destination}
+            onChange={(e) => setDestination(e.target.value)}
+          />
+        </div>
+      ) : null}
 
       {mode === "admin_review" ? (
         <div className="form-field inline">
@@ -221,7 +243,8 @@ export function RunIntentForm({ householdId }: { householdId: HouseholdId }) {
 
       {mode === "calendar_create" ||
       mode === "calendar_reschedule" ||
-      mode === "family_coverage" ? (
+      mode === "family_coverage" ||
+      mode === "travel_trip" ? (
         <>
           <div className="form-field inline">
             <label htmlFor="startAt">Start (local)</label>

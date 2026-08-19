@@ -93,6 +93,18 @@ export async function runFamilyCoverageIntent(
   return runIntent(householdId, "family.coverage.propose", input);
 }
 
+export async function runTravelTripPlanIntent(
+  householdId: HouseholdId,
+  input: {
+    destination: string;
+    startAt: string;
+    endAt: string;
+    notes?: string;
+  },
+): Promise<{ message: string }> {
+  return runIntent(householdId, "travel.trip.plan", input);
+}
+
 export async function planAndRun(
   householdId: HouseholdId,
   prompt: string,
