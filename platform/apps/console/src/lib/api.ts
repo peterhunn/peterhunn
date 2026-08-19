@@ -196,6 +196,7 @@ export interface TaskSummary {
   readonly state: string;
   readonly decisionSummary: string | null;
   readonly errorMessage: string | null;
+  readonly outputs: Record<string, unknown> | null;
   readonly createdAt: string;
 }
 

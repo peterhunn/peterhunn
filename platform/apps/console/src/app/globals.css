@@ -483,6 +483,130 @@ form.login {
   flex-wrap: wrap;
 }
 
+/* Task cards */
+
+.tasks-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.task-card {
+  padding: 18px 20px;
+}
+
+.task-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.task-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--ink-muted);
+  margin: 0 0 8px;
+}
+
+.task-summary {
+  font-family: var(--serif);
+  font-size: 18px;
+  line-height: 1.3;
+  margin: 0;
+}
+
+.task-summary.error {
+  color: var(--danger);
+}
+
+.task-eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  margin: 12px 0 4px;
+}
+
+.task-prose {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  margin: 4px 0 8px;
+  padding: 10px 12px;
+  background: var(--paper);
+  border-radius: 4px;
+  border: 1px solid var(--rule-soft);
+}
+
+.task-details {
+  margin-top: 10px;
+  border-top: 1px dashed var(--rule-soft);
+  padding-top: 8px;
+}
+
+.task-details summary {
+  cursor: pointer;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.task-details pre {
+  margin: 8px 0 0;
+  font-size: 12px;
+  overflow-x: auto;
+  padding: 10px;
+  background: var(--paper);
+  border-radius: 4px;
+  border: 1px solid var(--rule-soft);
+  max-height: 260px;
+}
+
+.inline-data {
+  margin-top: 6px;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.muted {
+  color: var(--ink-muted);
+  font-size: 11px;
+}
+
+.trace-list {
+  list-style: none;
+  padding: 8px 0 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.trace-list li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.open-questions {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--ink-2);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 /* Budget bar */
 
 .budget-bar {

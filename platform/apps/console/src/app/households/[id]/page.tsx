@@ -7,6 +7,7 @@ import { ConsoleNav } from "../../console-nav";
 import { RunIntentForm } from "./run-intent-form";
 import { ApprovalCard } from "../../approvals/approval-card";
 import { InboxMessageCard } from "./inbox-message";
+import { TaskCard } from "./task-card";
 
 export default async function HouseholdPage({
   params,
@@ -150,42 +151,11 @@ export default async function HouseholdPage({
         {tasks.length === 0 ? (
           <div className="empty">No tasks yet.</div>
         ) : (
-          <table className="data">
-            <thead>
-              <tr>
-                <th>When</th>
-                <th>Agent</th>
-                <th>Kind</th>
-                <th>State</th>
-                <th>Summary</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tasks.map((t) => (
-                <tr key={t.id}>
-                  <td className="mono">{new Date(t.createdAt).toLocaleString()}</td>
-                  <td className="mono">
-                    {t.agent}@{t.agentVersion}
-                  </td>
-                  <td className="mono">{t.kind}</td>
-                  <td>
-                    <span
-                      className={`tag ${
-                        t.state === "completed"
-                          ? "confirmed"
-                          : t.state === "failed" || t.state === "rejected"
-                            ? "retired"
-                            : "candidate"
-                      }`}
-                    >
-                      {t.state}
-                    </span>
-                  </td>
-                  <td>{t.decisionSummary ?? t.errorMessage ?? "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="tasks-stack">
+            {tasks.map((t) => (
+              <TaskCard key={t.id} task={t} />
+            ))}
+          </div>
         )}
 
         <div className="section-head">

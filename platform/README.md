@@ -149,6 +149,12 @@ and audit paths end to end.
 - Console: cross-household approval Inbox on the dashboard; per-
   household Awaiting decision cards on the household page; Approve /
   Reject controls with optional edit note.
+- Console: Recent tasks renders per-kind cards — research summary +
+  tool trace, admin scan as a table with urgency badges, family
+  coverage plan with assignments + open questions, inbox draft
+  reply inline, calendar / vendor / school-form projections. Raw
+  JSON fallback stays behind a details toggle for anything without
+  a bespoke renderer.
 - Model registry — four tiers (T0 rules / T1 small / T2 mid / T3
   frontier). Router picks a specific model per task class with hard
   rules (execute+hazardous → T3 always; HNW household → T3 pin) and
