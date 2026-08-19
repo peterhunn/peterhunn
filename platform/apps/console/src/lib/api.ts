@@ -170,7 +170,42 @@ export const api = (token: string) => ({
     }>(token, "GET", `/households/${id}/inference-budget`),
   listInbox: (id: HouseholdId) =>
     request<{ messages: InboxMessageSummary[] }>(token, "GET", `/households/${id}/inbox`),
+  listCredentials: (id: HouseholdId) =>
+    request<{ credentials: CredentialSummary[] }>(
+      token,
+      "GET",
+      `/households/${id}/credentials`,
+    ),
+  startGoogleOAuth: (id: HouseholdId, body: { returnTo?: string }) =>
+    request<{ authUrl: string }>(
+      token,
+      "POST",
+      `/households/${id}/oauth/google/start`,
+      body,
+    ),
+  oauthConfig: () =>
+    request<{
+      configured: boolean;
+      clientId: boolean;
+      clientSecret: boolean;
+      stateSecret: boolean;
+      redirectUri: string;
+      scopes: string[];
+    }>(token, "GET", "/oauth/google/config"),
 });
+
+export interface CredentialSummary {
+  readonly id: string;
+  readonly provider: string;
+  readonly kind: string;
+  readonly label: string;
+  readonly principalRef: string | null;
+  readonly scopes: readonly string[];
+  readonly createdAt: string;
+  readonly expiresAt: string | null;
+  readonly revokedAt: string | null;
+  readonly lastUsedAt: string | null;
+}
 
 export interface InboxMessageSummary {
   readonly id: string;

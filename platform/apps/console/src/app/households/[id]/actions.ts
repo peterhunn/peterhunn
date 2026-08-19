@@ -105,6 +105,21 @@ export async function runTravelTripPlanIntent(
   return runIntent(householdId, "travel.trip.plan", input);
 }
 
+export async function startGoogleOAuth(
+  householdId: HouseholdId,
+  returnTo: string,
+): Promise<{ authUrl?: string; error?: string }> {
+  const token = await getSessionToken();
+  if (!token) return { error: "Session expired." };
+  try {
+    const res = await api(token).startGoogleOAuth(householdId, { returnTo });
+    return { authUrl: res.authUrl };
+  } catch (err) {
+    if (err instanceof ApiError) return { error: err.message };
+    return { error: (err as Error).message };
+  }
+}
+
 export async function planAndRun(
   householdId: HouseholdId,
   prompt: string,

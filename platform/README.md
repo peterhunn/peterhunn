@@ -209,6 +209,16 @@ and audit paths end to end.
   on the customer's behalf. List endpoint returns metadata only;
   the raw blob never leaves the server. Tools access credentials
   through `ToolContext.readCredential(provider)`.
+- Google OAuth consent flow — one-click "Connect Google" on
+  the household page requests Calendar + Gmail scopes in a
+  single consent, exchanges the code for tokens on callback,
+  hits userinfo for from_address/from_name, and stores two
+  credential entries (google_calendar + gmail) automatically.
+  Signed HMAC state carries the household id + returnTo through
+  the redirect; state has a 15-minute TTL. Manager posts
+  through server action → API issues authUrl → browser bounces
+  to Google → API callback stores credentials → browser lands
+  back on the household page with a ?oauth=ok banner.
 - Tool use across Anthropic, OpenAI, and OpenAI-compatible
   adapters. `ModelCall.tools` + `toolChoice` are provider-agnostic;
   each adapter translates to native shape (Anthropic tool blocks,

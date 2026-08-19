@@ -8,6 +8,7 @@ import { RunIntentForm } from "./run-intent-form";
 import { ApprovalCard } from "../../approvals/approval-card";
 import { InboxMessageCard } from "./inbox-message";
 import { TaskCard } from "./task-card";
+import { ConnectProviders } from "./connect-providers";
 
 export default async function HouseholdPage({
   params,
@@ -30,6 +31,8 @@ export default async function HouseholdPage({
     approvalsRes,
     budget,
     inboxRes,
+    credentialsRes,
+    oauthCfg,
   ] = await Promise.all([
     client.me(),
     client
@@ -46,6 +49,15 @@ export default async function HouseholdPage({
     client.listApprovals(id as HouseholdId).catch(() => ({ approvals: [] })),
     client.inferenceBudget(id as HouseholdId).catch(() => null),
     client.listInbox(id as HouseholdId).catch(() => ({ messages: [] })),
+    client.listCredentials(id as HouseholdId).catch(() => ({ credentials: [] })),
+    client.oauthConfig().catch(() => ({
+      configured: false,
+      clientId: false,
+      clientSecret: false,
+      stateSecret: false,
+      redirectUri: "",
+      scopes: [],
+    })),
   ]);
 
   if (!hhRes) notFound();
@@ -58,6 +70,7 @@ export default async function HouseholdPage({
   const approvals = approvalsRes.approvals;
   const pendingApprovals = approvals.filter((a) => a.state === "pending");
   const inbox = inboxRes.messages;
+  const credentials = credentialsRes.credentials;
 
   return (
     <>
@@ -102,6 +115,18 @@ export default async function HouseholdPage({
             </div>
           </div>
         ) : null}
+
+        <div className="section-head">
+          <h2>Connected accounts</h2>
+          <span className="mono">
+            {credentials.filter((c) => !c.revokedAt).length} live
+          </span>
+        </div>
+        <ConnectProviders
+          householdId={hh.id}
+          credentials={credentials}
+          oauthConfigured={oauthCfg.configured}
+        />
 
         {pendingApprovals.length > 0 ? (
           <>
