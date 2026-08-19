@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   Orchestrator,
   ToolRegistry,
@@ -8,6 +8,7 @@ import {
   type ActionRecorder,
   type AgentGraphWriter,
   type ApprovalSink,
+  type CredentialSource,
   type GraphView,
   type Intent,
   type ModelRuntime,
@@ -277,5 +278,185 @@ describe("calendar agent", () => {
     expect(res.tasks[0]!.state).toBe("escalated");
     expect(recorder.recorded).toHaveLength(0);
     expect(approvals.queued).toHaveLength(1);
+  });
+});
+
+describe("calendar agent — google calendar conflict detection", () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  const mkCredSource = (): CredentialSource => ({
+    read: (_hh, provider) => {
+      if (provider !== "google_calendar") return null;
+      return {
+        id: "crd_test",
+        credential: {
+          access_token: "at-abc",
+          calendar_id: "primary",
+          time_zone: "UTC",
+        },
+        expiresAt: null,
+      };
+    },
+  });
+
+  it("detects a conflict from a live Google Calendar event even when the graph is empty", async () => {
+    // Stub the events.list response with one event that overlaps.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes("/calendar/v3/calendars/primary/events")) {
+          return new Response(
+            JSON.stringify({
+              items: [
+                {
+                  id: "gc_evt_1",
+                  summary: "Team standup",
+                  start: { dateTime: "2026-09-01T15:15:00.000Z" },
+                  end: { dateTime: "2026-09-01T15:45:00.000Z" },
+                },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      }),
+    );
+
+    const orch = new Orchestrator({
+      agents: [calendarAgent],
+      tools: mkTools(),
+      ledger: mkLedger(),
+      policy: mkPolicy(() => ({})),
+      actions: mkRecorder(),
+      approvals: mkApprovals(),
+      models: mkModels(),
+      credentials: mkCredSource(),
+    });
+    const res = await orch.run({
+      householdId: HH,
+      actor,
+      graph: mkGraph(),
+      writer: mkWriter(),
+      intent: createIntent,
+    });
+    expect(res.tasks[0]!.state).toBe("escalated");
+    const outputs = res.tasks[0]!.outputs as {
+      liveConsulted: boolean;
+      conflicts: Array<{ id: string; source: string; title: string }>;
+    };
+    expect(outputs.liveConsulted).toBe(true);
+    expect(outputs.conflicts).toHaveLength(1);
+    expect(outputs.conflicts[0]!.source).toBe("google_calendar");
+    expect(outputs.conflicts[0]!.title).toBe("Team standup");
+  });
+
+  it("dedupes a Google Calendar event whose eventRef matches an existing graph node", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes("/calendar/v3/calendars/primary/events")) {
+          return new Response(
+            JSON.stringify({
+              items: [
+                {
+                  id: "gc_dup",
+                  summary: "Duplicate",
+                  start: { dateTime: "2026-09-01T14:00:00.000Z" },
+                  end: { dateTime: "2026-09-01T14:30:00.000Z" },
+                },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      }),
+    );
+    const graphWithSameRef: GraphView = {
+      listNodes: (opts) =>
+        (opts?.type ? [] : []).concat(
+          opts?.type === "obligation.appointment" || !opts?.type
+            ? [
+                {
+                  id: "nod_dup",
+                  type: "obligation.appointment",
+                  data: {
+                    title: "Already known",
+                    startAt: "2026-09-01T14:00:00.000Z",
+                    endAt: "2026-09-01T14:30:00.000Z",
+                    eventRef: "gc_dup",
+                  },
+                },
+              ]
+            : [],
+        ),
+    };
+
+    const orch = new Orchestrator({
+      agents: [calendarAgent],
+      tools: mkTools(),
+      ledger: mkLedger(),
+      policy: mkPolicy(() => ({})),
+      actions: mkRecorder(),
+      approvals: mkApprovals(),
+      models: mkModels(),
+      credentials: mkCredSource(),
+    });
+    const res = await orch.run({
+      householdId: HH,
+      actor,
+      graph: graphWithSameRef,
+      writer: mkWriter(),
+      intent: {
+        kind: "calendar.appointment.create",
+        subjectPrincipalId: "any_principal",
+        attrs: {
+          title: "New meeting",
+          startAt: "2026-09-01T14:00:00.000Z",
+          endAt: "2026-09-01T14:30:00.000Z",
+        },
+        origin: { source: "manager", by: "test" },
+      },
+    });
+    const outputs = res.tasks[0]!.outputs as {
+      conflicts: Array<{ id: string; source: string }>;
+    };
+    // Only one conflict — the graph node — not two.
+    expect(outputs.conflicts).toHaveLength(1);
+    expect(outputs.conflicts[0]!.source).toBe("graph");
+  });
+
+  it("falls back to graph-only when the live read fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("boom", { status: 500 })),
+    );
+    const orch = new Orchestrator({
+      agents: [calendarAgent],
+      tools: mkTools(),
+      ledger: mkLedger(),
+      policy: mkPolicy(() => ({})),
+      actions: mkRecorder(),
+      approvals: mkApprovals(),
+      models: mkModels(),
+      credentials: mkCredSource(),
+    });
+    const res = await orch.run({
+      householdId: HH,
+      actor,
+      graph: mkGraph(),
+      writer: mkWriter(),
+      intent: createIntent,
+    });
+    // Empty graph → no conflicts → completed.
+    expect(res.tasks[0]!.state).toBe("completed");
   });
 });

@@ -323,6 +323,8 @@ export class Orchestrator {
         actor,
         graph,
         writer,
+        readCredential: (provider) =>
+          this.deps.credentials?.read(householdId, provider) ?? null,
         evaluatePolicy: (req) =>
           this.deps.policy.evaluate(householdId, req as ActionRequest),
         invokeTool: <I, O>(

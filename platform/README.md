@@ -195,8 +195,16 @@ and audit paths end to end.
   - Calendar tools (`calendar.create`, `calendar.reschedule`)
     hit Google Calendar when the household has connected a
     `google_calendar` credential; OAuth access tokens are
-    refreshed on expiry via the token endpoint. Fall back to
-    the mock event id when no credential is present.
+    refreshed on expiry via the token endpoint and persisted
+    back to the credentials store. Fall back to the mock event
+    id when no credential is present.
+  - Calendar agent's conflict detector merges graph
+    `obligation.appointment` nodes with a live Google Calendar
+    `events.list` read when the credential is stored — dedupes
+    by eventRef so a graph node carrying its Google event id
+    doesn't double-count. Falls back to graph-only on read
+    failure. Task output flags `liveConsulted` and per-conflict
+    `source: "graph" | "google_calendar"`.
   - Message send (`message.send`) hits Gmail when the household
     has connected a `gmail` credential — RFC-822 body assembled
     with `In-Reply-To` + `References` headers when a source

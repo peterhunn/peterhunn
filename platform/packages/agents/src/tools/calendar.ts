@@ -26,6 +26,65 @@ const ensureAccessToken = async (
   };
 };
 
+// List real Google Calendar events overlapping a window. Returns null
+// when no google_calendar credential is stored — callers fall through
+// to graph-only conflict detection. Throws only on unexpected fetch
+// failure; the calendar agent catches and falls back to the graph on
+// any error.
+export interface GoogleCalendarEvent {
+  readonly id: string;
+  readonly title: string;
+  readonly startAt: string;
+  readonly endAt: string | null;
+  readonly eventRef: string;
+}
+
+export const listGoogleCalendarEvents = async (
+  ctx: ToolContext,
+  window: { timeMin: string; timeMax: string },
+): Promise<readonly GoogleCalendarEvent[] | null> => {
+  const auth = await ensureAccessToken(ctx);
+  if (!auth) return null;
+
+  const url =
+    `${GOOGLE_CAL_BASE}/calendars/${encodeURIComponent(auth.calendarId)}/events` +
+    `?timeMin=${encodeURIComponent(window.timeMin)}` +
+    `&timeMax=${encodeURIComponent(window.timeMax)}` +
+    `&singleEvents=true` +
+    `&orderBy=startTime` +
+    `&maxResults=50`;
+
+  const res = await fetch(url, {
+    headers: { authorization: `Bearer ${auth.accessToken}` },
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`google_calendar_list_${res.status}: ${text.slice(0, 200)}`);
+  }
+  const json = (await res.json()) as {
+    items?: Array<{
+      id?: string;
+      summary?: string;
+      start?: { dateTime?: string; date?: string };
+      end?: { dateTime?: string; date?: string };
+    }>;
+  };
+  return (json.items ?? [])
+    .map((e): GoogleCalendarEvent | null => {
+      const startAt = e.start?.dateTime ?? (e.start?.date ? `${e.start.date}T00:00:00.000Z` : null);
+      if (!e.id || !startAt) return null;
+      const endAt = e.end?.dateTime ?? (e.end?.date ? `${e.end.date}T00:00:00.000Z` : null);
+      return {
+        id: e.id,
+        title: e.summary ?? "",
+        startAt,
+        endAt,
+        eventRef: e.id,
+      };
+    })
+    .filter((e): e is GoogleCalendarEvent => e !== null);
+};
+
 // ─── calendar.create ────────────────────────────────────────────
 
 export const CalendarCreateInputs = z.object({

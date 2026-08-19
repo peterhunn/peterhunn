@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { Agent, AgentContext, AgentTaskOutput, Intent } from "../types.js";
+import { listGoogleCalendarEvents } from "../tools/calendar.js";
 
 // Calendar agent — handles appointment create and reschedule intents.
 // Reads existing `obligation.appointment` nodes to detect conflicts
@@ -31,6 +32,7 @@ type Appointment = {
   startAt: string;
   endAt: string | undefined;
   eventRef: string | undefined;
+  source: "graph" | "google_calendar";
 };
 
 const readAppointments = (ctx: AgentContext): Appointment[] => {
@@ -48,9 +50,68 @@ const readAppointments = (ctx: AgentContext): Appointment[] => {
           typeof n.data["eventRef"] === "string"
             ? String(n.data["eventRef"])
             : undefined,
+        source: "graph",
       },
     ];
   });
+};
+
+// Merge graph appointments with a live Google Calendar read for a
+// window. Dedupe by eventRef so a graph node that carries its
+// Google event id doesn't double-count. Falls through to graph only
+// when no google_calendar credential is stored, and on any live-read
+// failure so we never silently skip conflict detection.
+const readAppointmentsInWindow = async (
+  ctx: AgentContext,
+  window: { startAtMs: number; endAtMs: number },
+): Promise<{
+  appointments: Appointment[];
+  liveConsulted: boolean;
+  liveError: string | null;
+}> => {
+  const graphAppts = readAppointments(ctx);
+  const paddedMin = new Date(window.startAtMs - 24 * 60 * 60 * 1000).toISOString();
+  const paddedMax = new Date(window.endAtMs + 24 * 60 * 60 * 1000).toISOString();
+  let live: Awaited<ReturnType<typeof listGoogleCalendarEvents>> = null;
+  let liveError: string | null = null;
+  try {
+    // Present the agent context as a ToolContext (the fields
+    // listGoogleCalendarEvents reads — readCredential and logger —
+    // are already on AgentContext).
+    live = await listGoogleCalendarEvents(
+      {
+        householdId: ctx.householdId,
+        authorityId: undefined,
+        proposedBy: { actor: "calendar_agent", version: "0.1.0" },
+        readCredential: ctx.readCredential,
+        logger: ctx.logger,
+      },
+      { timeMin: paddedMin, timeMax: paddedMax },
+    );
+  } catch (err) {
+    liveError = (err as Error).message;
+  }
+
+  if (!live) {
+    return { appointments: graphAppts, liveConsulted: false, liveError };
+  }
+
+  const known = new Set(graphAppts.map((a) => a.eventRef).filter((r): r is string => Boolean(r)));
+  const liveAppts: Appointment[] = live
+    .filter((e) => !known.has(e.eventRef))
+    .map((e) => ({
+      id: e.id,
+      title: e.title,
+      startAt: e.startAt,
+      endAt: e.endAt ?? undefined,
+      eventRef: e.eventRef,
+      source: "google_calendar",
+    }));
+  return {
+    appointments: [...graphAppts, ...liveAppts],
+    liveConsulted: true,
+    liveError: null,
+  };
 };
 
 const overlaps = (
@@ -127,7 +188,13 @@ async function handleCreate(
   }
   const attrs = parsed.data;
 
-  const conflicts = readAppointments(ctx).filter((a) =>
+  const startAtMs = Date.parse(attrs.startAt);
+  const endAtMs = attrs.endAt ? Date.parse(attrs.endAt) : startAtMs + 60 * 60 * 1000;
+  const { appointments, liveConsulted } = await readAppointmentsInWindow(ctx, {
+    startAtMs,
+    endAtMs,
+  });
+  const conflicts = appointments.filter((a) =>
     overlaps(a.startAt, a.endAt, attrs.startAt, attrs.endAt),
   );
   if (conflicts.length > 0) {
@@ -135,10 +202,16 @@ async function handleCreate(
       state: "escalated",
       decisionSummary: `Conflict with ${conflicts.length} existing appointment${
         conflicts.length === 1 ? "" : "s"
-      }; escalating for resolution.`,
+      }${liveConsulted ? " (graph + Google Calendar)" : ""}; escalating for resolution.`,
       outputs: {
         reason: "conflict",
-        conflicts: conflicts.map((c) => ({ id: c.id, title: c.title, startAt: c.startAt })),
+        liveConsulted,
+        conflicts: conflicts.map((c) => ({
+          id: c.id,
+          title: c.title,
+          startAt: c.startAt,
+          source: c.source,
+        })),
       },
     };
   }
@@ -227,8 +300,8 @@ async function handleReschedule(
   }
   const attrs = parsed.data;
 
-  const all = readAppointments(ctx);
-  const target = all.find((a) => a.id === attrs.appointmentNodeId);
+  const graphAll = readAppointments(ctx);
+  const target = graphAll.find((a) => a.id === attrs.appointmentNodeId);
   if (!target) {
     return {
       state: "failed",
@@ -236,18 +309,31 @@ async function handleReschedule(
     };
   }
 
-  const otherConflicts = all
-    .filter((a) => a.id !== target.id)
+  const toStartMs = Date.parse(attrs.toStartAt);
+  const toEndMs = attrs.toEndAt ? Date.parse(attrs.toEndAt) : toStartMs + 60 * 60 * 1000;
+  const { appointments, liveConsulted } = await readAppointmentsInWindow(ctx, {
+    startAtMs: toStartMs,
+    endAtMs: toEndMs,
+  });
+
+  const otherConflicts = appointments
+    .filter((a) => a.id !== target.id && a.eventRef !== target.eventRef)
     .filter((a) => overlaps(a.startAt, a.endAt, attrs.toStartAt, attrs.toEndAt));
   if (otherConflicts.length > 0) {
     return {
       state: "escalated",
       decisionSummary: `Target time conflicts with ${otherConflicts.length} appointment${
         otherConflicts.length === 1 ? "" : "s"
-      }.`,
+      }${liveConsulted ? " (graph + Google Calendar)" : ""}.`,
       outputs: {
         reason: "conflict",
-        conflicts: otherConflicts.map((c) => ({ id: c.id, title: c.title, startAt: c.startAt })),
+        liveConsulted,
+        conflicts: otherConflicts.map((c) => ({
+          id: c.id,
+          title: c.title,
+          startAt: c.startAt,
+          source: c.source,
+        })),
       },
     };
   }

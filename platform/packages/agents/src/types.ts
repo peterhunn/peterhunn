@@ -126,6 +126,10 @@ export interface AgentContext {
   readonly graph: GraphView;
   readonly writer: AgentGraphWriter;
   readonly evaluatePolicy: (req: unknown) => PolicyDecision;
+  // Agents may read delegated credentials directly for read-only
+  // integrations (e.g. calendar.list to detect conflicts). Side-
+  // effecting integrations go through invokeTool + the policy engine.
+  readonly readCredential: (provider: string) => StoredCredential | null;
   readonly invokeTool: <I, O>(
     toolName: string,
     inputs: I,
