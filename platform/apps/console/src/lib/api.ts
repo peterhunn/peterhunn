@@ -218,6 +218,21 @@ export const api = (token: string) => ({
       "DELETE",
       `/households/${id}/messaging/endpoints/${endpointId}`,
     ),
+  sendMessage: (
+    id: HouseholdId,
+    input: { channel: "sms" | "whatsapp"; to: string; body: string },
+  ) =>
+    request<{
+      sent: {
+        provider: "twilio" | "mock";
+        externalMessageId: string;
+        from: string;
+        to: string;
+        eventId: string;
+        status?: string;
+        reason?: string;
+      };
+    }>(token, "POST", `/households/${id}/messaging/send`, input),
   listMessagingEvents: (id: HouseholdId) =>
     request<{
       events: Array<{

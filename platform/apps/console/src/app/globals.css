@@ -791,4 +791,24 @@ form.login {
   margin: 0.35rem 0 0;
   white-space: pre-wrap;
 }
+.reply-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+}
+.reply-form textarea {
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: inherit;
+  background: var(--surface, transparent);
+  color: inherit;
+  resize: vertical;
+}
+.reply-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
 

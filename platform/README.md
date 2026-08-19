@@ -227,6 +227,13 @@ and audit paths end to end.
     message ids dedupe retried webhooks. Console: "Customer
     channels" section on the household page to register phone
     numbers and see recent inbound/outbound traffic.
+    Outbound: `POST /households/:id/messaging/send { channel,
+    to, body }` sends via Twilio when a `twilio` credential
+    (`account_sid`, `auth_token`, `from_number` or
+    `messaging_service_sid`) is stored, else falls back to a
+    mock send with a visible reason. Console: Reply button on
+    each inbound message opens an inline compose that hits the
+    send route.
   - Proactive autopilot — after each sync tick, freshly-inserted
     inbox messages are auto-dispatched to the inbox agent
     (triage → extract obligations → draft reply → propose

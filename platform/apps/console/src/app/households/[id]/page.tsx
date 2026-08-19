@@ -153,7 +153,10 @@ export default async function HouseholdPage({
           initialEndpoints={messagingEndpoints}
         />
 
-        <MessagingEvents events={messagingEvents} />
+        <MessagingEvents
+          householdId={hh.id as HouseholdId}
+          events={messagingEvents}
+        />
 
         {pendingApprovals.length > 0 ? (
           <>

@@ -3,11 +3,13 @@ import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { z } from "zod";
 import {
   contactEndpointRepo,
+  credentialRepo,
   messagingEventRepo,
   type Db,
   type MessagingChannel,
 } from "@atelier/db";
 import type { HouseholdId } from "@atelier/domain";
+import { sendTwilioMessage } from "@atelier/agents";
 import { buildGraphView, buildGraphWriter, buildOrchestrator } from "../runtime.js";
 
 // Customer messaging surface.
@@ -27,6 +29,13 @@ const AddEndpointBody = z.object({
   address: z.string().min(3),
   principalId: z.string().optional(),
   label: z.string().optional(),
+});
+
+const SendMessageBody = z.object({
+  channel: z.enum(["sms", "whatsapp"]).default("sms"),
+  to: z.string().min(3),
+  body: z.string().min(1).max(1600),
+  inReplyToEventId: z.string().optional(),
 });
 
 const MockInboundBody = z.object({
@@ -208,6 +217,54 @@ export const messagingRoutes = (db: Db): FastifyPluginAsync => async (app) => {
       }
       endpoints.revoke(ep.id);
       return reply.code(204).send();
+    },
+  );
+
+  app.post<{ Params: { householdId: string } }>(
+    "/households/:householdId/messaging/send",
+    {
+      config: {
+        audit: {
+          action: "messaging.send",
+          resourceType: "messaging_event",
+          sensitive: true,
+        },
+      },
+    },
+    async (req, reply) => {
+      const parsed = SendMessageBody.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: "invalid_body", issues: parsed.error.issues });
+      }
+      const householdId = req.householdContext as HouseholdId;
+      const credentials = credentialRepo(db);
+      const twilioCred = credentials.getSecret(householdId, "twilio");
+      const out = await sendTwilioMessage(twilioCred, parsed.data, {
+        logger: {
+          info: (msg, ctx) => req.log.info({ ...(ctx as object) }, msg),
+        },
+      });
+      const record = events.record({
+        householdId,
+        direction: "outbound",
+        channel: parsed.data.channel,
+        provider: out.provider,
+        externalMessageId: out.externalMessageId,
+        fromAddress: out.from,
+        toAddress: out.to,
+        body: parsed.data.body,
+      });
+      return {
+        sent: {
+          provider: out.provider,
+          externalMessageId: out.externalMessageId,
+          from: out.from,
+          to: out.to,
+          eventId: record.row.id,
+          ...(out.status ? { status: out.status } : {}),
+          ...(out.reason ? { reason: out.reason } : {}),
+        },
+      };
     },
   );
 

@@ -142,6 +142,27 @@ export async function startGoogleOAuth(
   }
 }
 
+export async function sendMessage(
+  householdId: HouseholdId,
+  input: { channel: "sms" | "whatsapp"; to: string; body: string },
+): Promise<{ message: string }> {
+  const token = await getSessionToken();
+  if (!token) return { message: "Session expired." };
+  try {
+    const res = await api(token).sendMessage(householdId, input);
+    const p = res.sent.provider;
+    return {
+      message:
+        p === "twilio"
+          ? `Sent ${input.channel} to ${input.to} via Twilio (${res.sent.externalMessageId}).`
+          : `Sent ${input.channel} to ${input.to} via mock — ${res.sent.reason ?? "no live credential"}. Add a twilio credential to send for real.`,
+    };
+  } catch (err) {
+    if (err instanceof ApiError) return { message: `Error: ${err.message}` };
+    return { message: `Error: ${(err as Error).message}` };
+  }
+}
+
 export async function addMessagingEndpoint(
   householdId: HouseholdId,
   input: {

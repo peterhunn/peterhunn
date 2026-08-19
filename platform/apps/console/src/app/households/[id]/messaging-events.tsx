@@ -1,3 +1,9 @@
+"use client";
+
+import { useState, useTransition } from "react";
+import { sendMessage } from "./actions";
+import type { HouseholdId } from "@atelier/domain";
+
 interface MessagingEvent {
   id: string;
   direction: "inbound" | "outbound";
@@ -10,7 +16,18 @@ interface MessagingEvent {
   plannerRunId: string | null;
 }
 
-export function MessagingEvents({ events }: { events: MessagingEvent[] }) {
+export function MessagingEvents({
+  householdId,
+  events,
+}: {
+  householdId: HouseholdId;
+  events: MessagingEvent[];
+}) {
+  const [replyOpen, setReplyOpen] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [status, setStatus] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+
   if (events.length === 0) return null;
   return (
     <div>
@@ -36,9 +53,69 @@ export function MessagingEvents({ events }: { events: MessagingEvent[] }) {
               <span className="mono">{e.toAddress}</span>
             </div>
             <p className="messaging-body">{e.body}</p>
+            {e.direction === "inbound" &&
+            (e.channel === "sms" || e.channel === "whatsapp") ? (
+              replyOpen === e.id ? (
+                <form
+                  className="reply-form"
+                  onSubmit={(evt) => {
+                    evt.preventDefault();
+                    startTransition(async () => {
+                      const res = await sendMessage(householdId, {
+                        channel: e.channel as "sms" | "whatsapp",
+                        to: e.fromAddress,
+                        body: draft,
+                      });
+                      setStatus(res.message);
+                      if (!res.message.startsWith("Error")) {
+                        setDraft("");
+                        setReplyOpen(null);
+                      }
+                    });
+                  }}
+                >
+                  <textarea
+                    value={draft}
+                    onChange={(x) => setDraft(x.target.value)}
+                    placeholder="Reply…"
+                    rows={2}
+                    disabled={isPending}
+                    required
+                  />
+                  <div className="reply-actions">
+                    <button type="submit" disabled={isPending || !draft}>
+                      Send
+                    </button>
+                    <button
+                      type="button"
+                      className="link-btn"
+                      disabled={isPending}
+                      onClick={() => {
+                        setReplyOpen(null);
+                        setDraft("");
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <button
+                  type="button"
+                  className="link-btn"
+                  onClick={() => {
+                    setReplyOpen(e.id);
+                    setStatus(null);
+                  }}
+                >
+                  Reply
+                </button>
+              )
+            ) : null}
           </li>
         ))}
       </ul>
+      {status ? <p className="mono muted">{status}</p> : null}
     </div>
   );
 }
