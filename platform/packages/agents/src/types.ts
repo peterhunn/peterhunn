@@ -37,10 +37,20 @@ export type Intent = z.infer<typeof Intent>;
 // outside the graph. Every tool declares its side_effect_class so the
 // policy engine can decide authority, and the runtime records an
 // action ledger row on every invocation.
+export interface StoredCredential {
+  readonly id: string;
+  readonly credential: Record<string, unknown>;
+  readonly expiresAt: string | null;
+}
+
 export interface ToolContext {
   readonly householdId: HouseholdId;
   readonly authorityId: string | undefined;
   readonly proposedBy: { actor: string; version: string };
+  // Look up a delegated credential the platform holds for this
+  // household — OAuth tokens, API keys, etc. Returns null when the
+  // household has not connected the provider (mock fallback territory).
+  readonly readCredential: (provider: string) => StoredCredential | null;
   readonly logger?: { info: (msg: string, ctx?: unknown) => void };
 }
 

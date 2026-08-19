@@ -96,6 +96,14 @@ export interface ActionRecorder {
   }): { id: string };
 }
 
+export interface CredentialSource {
+  read(householdId: HouseholdId, provider: string): {
+    id: string;
+    credential: Record<string, unknown>;
+    expiresAt: string | null;
+  } | null;
+}
+
 export interface ApprovalSink {
   enqueue(input: {
     householdId: HouseholdId;
@@ -158,6 +166,7 @@ export interface OrchestratorDeps {
   readonly actions: ActionRecorder;
   readonly approvals: ApprovalSink;
   readonly models: ModelRuntime;
+  readonly credentials?: CredentialSource;
   readonly logger?: { info: (msg: string, ctx?: unknown) => void };
 }
 
@@ -476,6 +485,7 @@ export class Orchestrator {
         householdId: input.householdId,
         authorityId: decision.authorityId,
         proposedBy: { actor: input.agent.name, version: input.agent.version },
+        readCredential: (provider) => this.deps.credentials?.read(input.householdId, provider) ?? null,
         logger: this.deps.logger,
       },
       { inputs: input.inputs, amountUsd: input.request.amountUsd, summary: input.request.summary },

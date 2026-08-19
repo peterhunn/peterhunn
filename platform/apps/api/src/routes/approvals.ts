@@ -3,6 +3,7 @@ import type { FastifyPluginAsync } from "fastify";
 import {
   actionRepo,
   approvalRepo,
+  credentialRepo,
   identityRepo,
   taskRepo,
   type Db,
@@ -25,6 +26,7 @@ export const approvalRoutes = (db: Db): FastifyPluginAsync => async (app) => {
   const actions = actionRepo(db);
   const tasks = taskRepo(db);
   const identity = identityRepo(db);
+  const credentials = credentialRepo(db);
   const tools = buildToolRegistry();
 
   app.get<{ Params: { householdId: string } }>(
@@ -79,6 +81,8 @@ export const approvalRoutes = (db: Db): FastifyPluginAsync => async (app) => {
               actor: item.proposedBy.agent,
               version: item.proposedBy.agentVersion,
             },
+            readCredential: (provider) =>
+              credentials.getSecret(item.householdId, provider),
             logger: { info: () => {} },
           },
           {

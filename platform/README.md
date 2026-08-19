@@ -188,6 +188,20 @@ and audit paths end to end.
   adapter and stamp a visible reason on the response so the
   fallback is never silent. Configure via `.env` — see
   `.env.example`.
+- Real integrations behind agent tools:
+  - Research uses Tavily / Serper / Brave for web search (first
+    provider with a key wins) and Jina Reader for URL fetch,
+    with graceful mock fallback for every path.
+  - Calendar tools (`calendar.create`, `calendar.reschedule`)
+    hit Google Calendar when the household has connected a
+    `google_calendar` credential; OAuth access tokens are
+    refreshed on expiry via the token endpoint. Fall back to
+    the mock event id when no credential is present.
+- Credentials store — a first-class `credentials` table + repo +
+  API for delegated tokens (OAuth, API keys) the platform holds
+  on the customer's behalf. List endpoint returns metadata only;
+  the raw blob never leaves the server. Tools access credentials
+  through `ToolContext.readCredential(provider)`.
 - Tool use across Anthropic, OpenAI, and OpenAI-compatible
   adapters. `ModelCall.tools` + `toolChoice` are provider-agnostic;
   each adapter translates to native shape (Anthropic tool blocks,

@@ -18,6 +18,7 @@ import {
 import {
   actionRepo,
   approvalRepo,
+  credentialRepo,
   graphRepo,
   householdRepo,
   modelCallRepo,
@@ -84,6 +85,7 @@ export const buildOrchestrator = (db: Db): Orchestrator => {
   const tasks = taskRepo(db);
   const approvals = approvalRepo(db);
   const modelCalls = modelCallRepo(db);
+  const credentials = credentialRepo(db);
 
   const householdCache = new Map<
     string,
@@ -153,6 +155,9 @@ export const buildOrchestrator = (db: Db): Orchestrator => {
     actions: { record: (i) => actions.record(i) },
     approvals: {
       enqueue: (i) => approvals.create({ ...i, proposedBy: i.proposedBy }),
+    },
+    credentials: {
+      read: (h, provider) => credentials.getSecret(h, provider),
     },
     models: {
       callModel: async (
