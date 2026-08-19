@@ -1,0 +1,37 @@
+# Root-level .dockerignore for the platform build context.
+# Everything below is excluded from the image to keep the build fast
+# and the runtime lean.
+
+**/node_modules
+**/.turbo
+**/dist
+**/.next
+**/.cache
+**/.tsbuildinfo
+
+# Local databases, secrets, and dev artifacts — never bake into the
+# image. SQLite data lives on a fly volume at runtime; secrets come
+# from fly secrets.
+**/data/*.db
+**/data/*.db-wal
+**/data/*.db-shm
+**/.env
+**/.env.local
+**/.env.*.local
+
+# VCS + editor + macOS noise
+.git
+.gitignore
+.github
+.vscode
+.idea
+.DS_Store
+
+# Tests — not needed to serve traffic.
+**/test
+**/tests
+**/*.test.ts
+**/*.spec.ts
+
+# (Sibling directories like ../atelier and ../life-management sit
+# outside the build context and never make it in.)

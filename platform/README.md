@@ -65,6 +65,12 @@ you're inside the console.
 - Route configs (`{ config: { audit: { action, resourceType, sensitive } } }`)
   refine the entry per handler.
 
+## Deploy
+
+The API deploys to [fly.io](https://fly.io) via
+`apps/api/Dockerfile` + `fly.toml`. First-time setup, secrets,
+verification, and update flow live in [`DEPLOY.md`](./DEPLOY.md).
+
 ## Running tests
 
 ```

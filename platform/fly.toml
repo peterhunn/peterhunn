@@ -1,0 +1,52 @@
+# fly.toml — ATELIER API deployment.
+#
+# Build context is this directory (platform/). Dockerfile lives at
+# apps/api/Dockerfile. On first deploy:
+#   fly launch --no-deploy --name atelier-api --region sea --copy-config
+#   fly volumes create atelier_data --size 1 --region sea
+#   fly secrets set ANTHROPIC_API_KEY=... GOOGLE_OAUTH_CLIENT_ID=... etc
+#   fly deploy
+# See platform/DEPLOY.md for the full checklist.
+
+app = "atelier-api"
+primary_region = "sea"
+
+[build]
+  dockerfile = "apps/api/Dockerfile"
+
+[env]
+  PORT = "3001"
+  HOST = "0.0.0.0"
+  # SQLite lives on the fly volume mounted below; the Dockerfile
+  # sets ATELIER_DB_URL to the same path so this is redundant but
+  # explicit — moving to Postgres later is a single env var flip.
+  ATELIER_DB_URL = "/app/packages/db/data/atelier.db"
+  # Scheduler + autopilot are on by default; flip either to "0" via
+  # fly secrets if you want a single-instance manual-only deploy.
+  ATELIER_SYNC_INTERVAL_SECONDS = "300"
+
+[[mounts]]
+  source = "atelier_data"
+  destination = "/app/packages/db/data"
+
+[http_service]
+  internal_port = 3001
+  force_https = true
+  # Never auto-stop — the scheduler needs a persistent process to
+  # tick, and cold starts would drop cursor-based sync progress
+  # mid-fetch. Set auto_stop_machines = "off" so fly leaves it up.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "get"
+    path = "/healthz"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
