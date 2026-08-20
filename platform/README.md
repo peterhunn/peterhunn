@@ -256,6 +256,15 @@ and audit paths end to end.
     mock send with a visible reason. Console: Reply button on
     each inbound message opens an inline compose that hits the
     send route.
+  - Properties & assets management — parallel to people, over
+    `place.property` + `asset.vehicle` + `asset.equipment` +
+    `asset.membership` + `asset.pet` graph nodes.
+    `GET /households/:id/assets` returns a bucketed list;
+    `POST` with `{ kind, data }` validates against the
+    ontology's Zod schema for that kind and creates a node;
+    `PATCH` merges + supersedes; `DELETE` retires. Console:
+    Properties & assets panel on the household page — per-kind
+    sections with inline add/edit/remove.
   - First-class people management — `GET /households/:id/people`
     returns `{ principal, member, staff, contact }` bucketed
     from the graph; `POST` accepts

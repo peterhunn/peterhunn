@@ -142,6 +142,54 @@ export async function startGoogleOAuth(
   }
 }
 
+export type AssetKind = "property" | "vehicle" | "equipment" | "membership" | "pet";
+
+export async function addAsset(
+  householdId: HouseholdId,
+  input: { kind: AssetKind; data: Record<string, unknown> },
+): Promise<{ message: string; id?: string }> {
+  const token = await getSessionToken();
+  if (!token) return { message: "Session expired." };
+  try {
+    const res = await api(token).createAsset(householdId, input);
+    return { message: `Added ${input.kind}.`, id: res.asset.id };
+  } catch (err) {
+    if (err instanceof ApiError) return { message: `Error: ${err.message}` };
+    return { message: `Error: ${(err as Error).message}` };
+  }
+}
+
+export async function updateAsset(
+  householdId: HouseholdId,
+  nodeId: string,
+  data: Record<string, unknown>,
+): Promise<{ message: string; id?: string }> {
+  const token = await getSessionToken();
+  if (!token) return { message: "Session expired." };
+  try {
+    const res = await api(token).updateAsset(householdId, nodeId, data);
+    return { message: "Updated.", id: res.asset.id };
+  } catch (err) {
+    if (err instanceof ApiError) return { message: `Error: ${err.message}` };
+    return { message: `Error: ${(err as Error).message}` };
+  }
+}
+
+export async function removeAsset(
+  householdId: HouseholdId,
+  nodeId: string,
+): Promise<{ message: string }> {
+  const token = await getSessionToken();
+  if (!token) return { message: "Session expired." };
+  try {
+    await api(token).deleteAsset(householdId, nodeId);
+    return { message: "Removed." };
+  } catch (err) {
+    if (err instanceof ApiError) return { message: `Error: ${err.message}` };
+    return { message: `Error: ${(err as Error).message}` };
+  }
+}
+
 export async function addPerson(
   householdId: HouseholdId,
   input: {

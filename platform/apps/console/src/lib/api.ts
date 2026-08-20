@@ -247,6 +247,36 @@ export const api = (token: string) => ({
     }>(token, "PATCH", `/households/${id}/people/${nodeId}`, { data }),
   deletePerson: (id: HouseholdId, nodeId: string) =>
     request<void>(token, "DELETE", `/households/${id}/people/${nodeId}`),
+  listAssets: (id: HouseholdId) =>
+    request<{
+      assets: {
+        property: Array<{ id: string; data: Record<string, unknown> }>;
+        vehicle: Array<{ id: string; data: Record<string, unknown> }>;
+        equipment: Array<{ id: string; data: Record<string, unknown> }>;
+        membership: Array<{ id: string; data: Record<string, unknown> }>;
+        pet: Array<{ id: string; data: Record<string, unknown> }>;
+      };
+    }>(token, "GET", `/households/${id}/assets`),
+  createAsset: (
+    id: HouseholdId,
+    input: {
+      kind: "property" | "vehicle" | "equipment" | "membership" | "pet";
+      data: Record<string, unknown>;
+    },
+  ) =>
+    request<{
+      asset: { id: string; kind: string; data: Record<string, unknown> };
+    }>(token, "POST", `/households/${id}/assets`, input),
+  updateAsset: (
+    id: HouseholdId,
+    nodeId: string,
+    data: Record<string, unknown>,
+  ) =>
+    request<{
+      asset: { id: string; kind: string; data: Record<string, unknown> };
+    }>(token, "PATCH", `/households/${id}/assets/${nodeId}`, { data }),
+  deleteAsset: (id: HouseholdId, nodeId: string) =>
+    request<void>(token, "DELETE", `/households/${id}/assets/${nodeId}`),
   listPlaybooks: (id: HouseholdId) =>
     request<{
       playbooks: Array<{

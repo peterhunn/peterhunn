@@ -16,6 +16,7 @@ import { MessagingEvents } from "./messaging-events";
 import { VerifyEndpoint } from "./verify-endpoint";
 import { PlaybooksPanel } from "./playbooks-panel";
 import { PeoplePanel } from "./people-panel";
+import { AssetsPanel } from "./assets-panel";
 
 export default async function HouseholdPage({
   params,
@@ -44,6 +45,7 @@ export default async function HouseholdPage({
     verificationsRes,
     playbooksRes,
     peopleRes,
+    assetsRes,
     oauthCfg,
   ] = await Promise.all([
     client.me(),
@@ -79,6 +81,11 @@ export default async function HouseholdPage({
       .catch(() => ({
         people: { principal: [], member: [], staff: [], contact: [] },
       })),
+    client
+      .listAssets(id as HouseholdId)
+      .catch(() => ({
+        assets: { property: [], vehicle: [], equipment: [], membership: [], pet: [] },
+      })),
     client.oauthConfig().catch(() => ({
       configured: false,
       clientId: false,
@@ -105,6 +112,7 @@ export default async function HouseholdPage({
   const verifications = verificationsRes.verifications;
   const playbooks = playbooksRes.playbooks;
   const people = peopleRes.people;
+  const assets = assetsRes.assets;
 
   return (
     <>
@@ -181,6 +189,11 @@ export default async function HouseholdPage({
         <PeoplePanel
           householdId={hh.id as HouseholdId}
           initialPeople={people}
+        />
+
+        <AssetsPanel
+          householdId={hh.id as HouseholdId}
+          initialAssets={assets}
         />
 
         <PlaybooksPanel
