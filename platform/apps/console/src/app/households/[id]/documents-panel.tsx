@@ -74,6 +74,11 @@ const summarize = (data: Record<string, unknown>): string => {
   return title;
 };
 
+const hasBlob = (data: Record<string, unknown>): boolean => {
+  const s = data["storedAt"];
+  return typeof s === "string" && s.startsWith("atelier://blob/");
+};
+
 const toApiData = (raw: Record<string, string>): Record<string, unknown> => {
   const out: Record<string, unknown> = {};
   for (const f of FIELDS) {
@@ -173,8 +178,71 @@ function DocRow({
         </form>
       ) : (
         <div className="person-line">
-          <span className="person-name">{summarize(doc.data)}</span>
+          <span className="person-name">
+            {summarize(doc.data)}
+            {hasBlob(doc.data) ? (
+              <span className="tag tag-attached" title="File attached">
+                {" file attached"}
+              </span>
+            ) : null}
+          </span>
           <div className="person-actions">
+            <label className="link-btn attach-label">
+              {hasBlob(doc.data) ? "Replace file" : "Attach file"}
+              <input
+                type="file"
+                style={{ display: "none" }}
+                disabled={isPending}
+                onChange={(evt) => {
+                  const file = evt.target.files?.[0];
+                  if (!file) return;
+                  startTransition(async () => {
+                    setMessage("Uploading…");
+                    try {
+                      const resp = await fetch(
+                        `/api/documents/${householdId}/${doc.id}/file`,
+                        {
+                          method: "PUT",
+                          headers: {
+                            "content-type": file.type || "application/octet-stream",
+                            "x-original-filename": file.name,
+                          },
+                          body: await file.arrayBuffer(),
+                        },
+                      );
+                      if (!resp.ok) {
+                        setMessage(`Error: ${resp.status}`);
+                        return;
+                      }
+                      const json = (await resp.json()) as {
+                        blob: { sha256: string; deduped: boolean };
+                        document: { data: Record<string, unknown> };
+                      };
+                      setMessage(
+                        json.blob.deduped
+                          ? `Uploaded (deduped ${json.blob.sha256.slice(0, 8)}).`
+                          : `Uploaded ${json.blob.sha256.slice(0, 8)}.`,
+                      );
+                      onUpdated(json.document.data);
+                    } catch (err) {
+                      setMessage(`Error: ${(err as Error).message}`);
+                    }
+                  });
+                  // reset so the same file can be re-selected
+                  evt.target.value = "";
+                }}
+              />
+            </label>
+            {hasBlob(doc.data) ? (
+              <a
+                className="link-btn"
+                href={`/api/documents/${householdId}/${doc.id}/file`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Download
+              </a>
+            ) : null}
             <button type="button" className="link-btn" onClick={() => setEditing(true)}>Edit</button>
             <button
               type="button"

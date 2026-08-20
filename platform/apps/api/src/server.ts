@@ -23,9 +23,19 @@ import { peopleRoutes } from "./routes/people.js";
 import { assetRoutes } from "./routes/assets.js";
 import { graphByCategoryRoutes } from "./routes/graph-by-category.js";
 import { documentRoutes } from "./routes/documents.js";
+import { documentFileRoutes } from "./routes/document-files.js";
 
 export const buildServer = (db: Db) => {
-  const app = Fastify({ logger: { level: process.env["LOG_LEVEL"] ?? "info" } });
+  // Global body limit — document uploads bump it above Fastify's
+  // 1 MiB default. The per-route upload path also enforces the same
+  // cap, so this is the outer sanity boundary.
+  const maxUploadBytes = Number(
+    process.env["ATELIER_MAX_UPLOAD_BYTES"] ?? 25 * 1024 * 1024,
+  );
+  const app = Fastify({
+    logger: { level: process.env["LOG_LEVEL"] ?? "info" },
+    bodyLimit: maxUploadBytes,
+  });
 
   // Twilio webhooks POST application/x-www-form-urlencoded. Fastify
   // only parses JSON by default; register a minimal urlencoded
@@ -45,6 +55,28 @@ export const buildServer = (db: Db) => {
       }
     },
   );
+
+  // Catch-all binary parser for document file uploads. Anything
+  // whose content-type isn't JSON or urlencoded (already parsed
+  // above) is buffered raw so PUT
+  // /households/:id/documents/:nodeId/file can hash + persist it.
+  // Fastify calls this for octet-stream, image/*, application/pdf,
+  // etc.  Size is enforced by the app-wide bodyLimit above.
+  const rawBinaryParser = (
+    _req: unknown,
+    body: Buffer,
+    done: (err: Error | null, body?: Buffer) => void,
+  ): void => {
+    done(null, body);
+  };
+  for (const mime of [
+    "application/octet-stream",
+    "application/pdf",
+    "image/*",
+    "text/plain",
+  ]) {
+    app.addContentTypeParser(mime, { parseAs: "buffer" }, rawBinaryParser as never);
+  }
 
   app.register(authPlugin, { db });
   app.register(auditPlugin, { db });
@@ -69,6 +101,7 @@ export const buildServer = (db: Db) => {
   app.register(assetRoutes(db));
   app.register(graphByCategoryRoutes(db));
   app.register(documentRoutes(db));
+  app.register(documentFileRoutes(db));
 
   return app;
 };

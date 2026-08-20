@@ -256,6 +256,25 @@ and audit paths end to end.
     mock send with a visible reason. Console: Reply button on
     each inbound message opens an inline compose that hits the
     send route.
+  - Documents CRUD + file uploads — `GET /households/:id/documents`
+    returns `{ identity, legal, policy, record, receipt }`
+    bucketed from `document.*` graph nodes; `POST` with
+    `{ subcategory, data }` creates a validated node;
+    `PATCH` merges + supersedes; `DELETE` retires. File
+    attachments live in a content-addressed blob store
+    (local disk under `ATELIER_BLOB_DIR`; portable to S3):
+    `PUT /households/:id/documents/:nodeId/file` with the raw
+    file body hashes on sha256, dedupes, records a
+    `document_blobs` row, and stamps
+    `storedAt: atelier://blob/<sha256>` on a new node version.
+    `GET .../file` streams back with the recorded MIME. Console:
+    Documents panel on the household page — one section per
+    subcategory, Attach/Replace/Download inline. Per-request cap
+    `ATELIER_MAX_UPLOAD_BYTES` (default 25 MiB) also raises the
+    app-wide Fastify bodyLimit. The console proxies uploads via
+    a Next.js route handler
+    (`/api/documents/[id]/[nodeId]/file`) so the App Router's
+    1MB action-body cap doesn't apply.
   - Properties & assets management — parallel to people, over
     `place.property` + `asset.vehicle` + `asset.equipment` +
     `asset.membership` + `asset.pet` graph nodes.

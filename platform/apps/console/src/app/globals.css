@@ -920,6 +920,18 @@ form.login {
 .person-field span {
   color: var(--muted);
 }
+.attach-label {
+  cursor: pointer;
+}
+.tag-attached {
+  margin-left: 0.35rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 4px;
+  background: #dcfce7;
+  color: #166534;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
 .person-field input,
 .person-field select {
   padding: 0.35rem 0.5rem;

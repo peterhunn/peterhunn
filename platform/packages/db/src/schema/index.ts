@@ -15,3 +15,4 @@ export * from "./calendar_events.js";
 export * from "./messaging.js";
 export * from "./verifications.js";
 export * from "./household_playbooks.js";
+export * from "./document_blobs.js";

@@ -144,6 +144,12 @@ export async function startGoogleOAuth(
 
 export type DocumentSubcategory = "identity" | "legal" | "policy" | "record" | "receipt";
 
+// Files are uploaded via a Route Handler proxy at
+// /api/documents/[householdId]/[nodeId]/file rather than through a
+// server action — server actions cap request bodies at 1MB which
+// would rule out real documents. The handler reads the session
+// cookie and streams to the Fastify API with the bearer.
+
 export async function addDocument(
   householdId: HouseholdId,
   input: { subcategory: DocumentSubcategory; data: Record<string, unknown> },

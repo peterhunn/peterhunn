@@ -43,6 +43,9 @@ ENV PORT=3001
 ENV HOST=0.0.0.0
 # SQLite lives under packages/db/data — a fly volume mounts here.
 ENV ATELIER_DB_URL=/app/packages/db/data/atelier.db
+# Document blobs share the same volume mount so backups cover the
+# database + the uploaded files together.
+ENV ATELIER_BLOB_DIR=/app/packages/db/data/blobs
 
 # Bring the installed workspace + source over. We copy source (not
 # dist) because tsx is the runtime — see the file header.

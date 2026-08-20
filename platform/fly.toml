@@ -21,6 +21,7 @@ primary_region = "sea"
   # sets ATELIER_DB_URL to the same path so this is redundant but
   # explicit — moving to Postgres later is a single env var flip.
   ATELIER_DB_URL = "/app/packages/db/data/atelier.db"
+  ATELIER_BLOB_DIR = "/app/packages/db/data/blobs"
   # Scheduler + autopilot are on by default; flip either to "0" via
   # fly secrets if you want a single-instance manual-only deploy.
   ATELIER_SYNC_INTERVAL_SECONDS = "300"
