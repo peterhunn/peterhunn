@@ -12,12 +12,14 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "generate:cto": "tsx src/generate-cto.ts",
     "clean": "rm -rf dist .turbo *.tsbuildinfo"
   },
   "dependencies": {
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "tsx": "^4.19.0",
     "typescript": "^5.5.4",
     "vitest": "^2.0.5"
   }
