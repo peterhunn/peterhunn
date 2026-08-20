@@ -247,6 +247,44 @@ export const api = (token: string) => ({
     }>(token, "PATCH", `/households/${id}/people/${nodeId}`, { data }),
   deletePerson: (id: HouseholdId, nodeId: string) =>
     request<void>(token, "DELETE", `/households/${id}/people/${nodeId}`),
+  listDocuments: (id: HouseholdId) =>
+    request<{
+      documents: {
+        identity: Array<{ id: string; data: Record<string, unknown> }>;
+        legal: Array<{ id: string; data: Record<string, unknown> }>;
+        policy: Array<{ id: string; data: Record<string, unknown> }>;
+        record: Array<{ id: string; data: Record<string, unknown> }>;
+        receipt: Array<{ id: string; data: Record<string, unknown> }>;
+      };
+    }>(token, "GET", `/households/${id}/documents`),
+  createDocument: (
+    id: HouseholdId,
+    input: {
+      subcategory: "identity" | "legal" | "policy" | "record" | "receipt";
+      data: Record<string, unknown>;
+    },
+  ) =>
+    request<{
+      document: {
+        id: string;
+        subcategory: string;
+        data: Record<string, unknown>;
+      };
+    }>(token, "POST", `/households/${id}/documents`, input),
+  updateDocument: (
+    id: HouseholdId,
+    nodeId: string,
+    data: Record<string, unknown>,
+  ) =>
+    request<{
+      document: {
+        id: string;
+        subcategory: string;
+        data: Record<string, unknown>;
+      };
+    }>(token, "PATCH", `/households/${id}/documents/${nodeId}`, { data }),
+  deleteDocument: (id: HouseholdId, nodeId: string) =>
+    request<void>(token, "DELETE", `/households/${id}/documents/${nodeId}`),
   listAssets: (id: HouseholdId) =>
     request<{
       assets: {

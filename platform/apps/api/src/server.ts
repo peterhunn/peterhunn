@@ -22,6 +22,7 @@ import { playbookRoutes } from "./routes/playbooks.js";
 import { peopleRoutes } from "./routes/people.js";
 import { assetRoutes } from "./routes/assets.js";
 import { graphByCategoryRoutes } from "./routes/graph-by-category.js";
+import { documentRoutes } from "./routes/documents.js";
 
 export const buildServer = (db: Db) => {
   const app = Fastify({ logger: { level: process.env["LOG_LEVEL"] ?? "info" } });
@@ -67,6 +68,7 @@ export const buildServer = (db: Db) => {
   app.register(peopleRoutes(db));
   app.register(assetRoutes(db));
   app.register(graphByCategoryRoutes(db));
+  app.register(documentRoutes(db));
 
   return app;
 };
