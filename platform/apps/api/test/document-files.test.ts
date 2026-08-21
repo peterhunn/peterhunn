@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -54,7 +54,48 @@ beforeAll(async () => {
 
 afterAll(async () => await app.close());
 
+// Force the extractor onto its mock path regardless of local env,
+// so tests don't attempt real Anthropic calls when a key is present.
+beforeEach(() => {
+  vi.stubEnv("ANTHROPIC_API_KEY", "");
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe("document file blob store", () => {
+  it("upload response carries an extraction proposal (mock fallback without API key)", async () => {
+    const doc = graphRepo(db).createNode(hh, {
+      type: "document.identity",
+      data: { title: "US Passport", category: "identity" },
+      provenance: {
+        source: "manager_observed",
+        assertedBy: "test",
+        assertedAt: new Date().toISOString(),
+        confidence: 1,
+        status: "confirmed",
+      },
+    });
+    const bytes = Buffer.from([0xff, 0xd8, 0xff, 0xe0]);
+    const upload = await app.inject({
+      method: "PUT",
+      url: `/households/${hh}/documents/${doc.id}/file`,
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "image/jpeg",
+        "x-original-filename": "us-passport-alex.jpg",
+      },
+      payload: bytes,
+    });
+    expect(upload.statusCode).toBe(201);
+    const body = upload.json();
+    expect(body.extraction).toBeDefined();
+    expect(body.extraction.provider).toBe("mock");
+    expect(body.extraction.proposed.title?.toLowerCase()).toContain(
+      "us passport alex",
+    );
+  });
+
   it("upload records a blob, stamps storedAt on a new node version, download streams it back", async () => {
     const bytes = Buffer.from("%PDF-1.7\n%%EOF");
     const upload = await app.inject({

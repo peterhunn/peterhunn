@@ -16,3 +16,4 @@ export * from "./tools/message.js";
 export * from "./tools/gmail-sync.js";
 export * from "./tools/calendar-sync.js";
 export * from "./tools/twilio.js";
+export * from "./tools/document-extract.js";

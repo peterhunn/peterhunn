@@ -99,6 +99,12 @@ const toFormData = (data: Record<string, unknown>): Record<string, string> => {
   return out;
 };
 
+interface Extraction {
+  provider: "anthropic" | "mock";
+  reason?: string;
+  proposed: Record<string, unknown>;
+}
+
 function DocRow({
   householdId,
   doc,
@@ -113,6 +119,9 @@ function DocRow({
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<Record<string, string>>(toFormData(doc.data));
   const [message, setMessage] = useState<string | null>(null);
+  const [pendingExtraction, setPendingExtraction] = useState<Extraction | null>(
+    null,
+  );
   const [isPending, startTransition] = useTransition();
 
   return (
@@ -217,6 +226,7 @@ function DocRow({
                       const json = (await resp.json()) as {
                         blob: { sha256: string; deduped: boolean };
                         document: { data: Record<string, unknown> };
+                        extraction?: Extraction;
                       };
                       setMessage(
                         json.blob.deduped
@@ -224,6 +234,12 @@ function DocRow({
                           : `Uploaded ${json.blob.sha256.slice(0, 8)}.`,
                       );
                       onUpdated(json.document.data);
+                      if (
+                        json.extraction &&
+                        Object.keys(json.extraction.proposed).length > 0
+                      ) {
+                        setPendingExtraction(json.extraction);
+                      }
                     } catch (err) {
                       setMessage(`Error: ${(err as Error).message}`);
                     }
@@ -262,6 +278,71 @@ function DocRow({
           </div>
         </div>
       )}
+
+      {pendingExtraction ? (
+        <div className="extraction-review">
+          <div className="extraction-header">
+            <strong>Fields extracted from file</strong>
+            <span className="mono muted">
+              via {pendingExtraction.provider}
+              {pendingExtraction.reason ? ` — ${pendingExtraction.reason}` : ""}
+            </span>
+          </div>
+          <ul className="extraction-fields">
+            {Object.entries(pendingExtraction.proposed).map(([k, v]) => (
+              <li key={k}>
+                <span className="mono muted">{k}</span>{" "}
+                <span>{typeof v === "string" ? v : JSON.stringify(v)}</span>
+              </li>
+            ))}
+          </ul>
+          <div className="person-actions">
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={() =>
+                startTransition(async () => {
+                  const merged = {
+                    ...(doc.data as Record<string, unknown>),
+                    ...pendingExtraction.proposed,
+                  };
+                  const res = await updateDocument(householdId, doc.id, merged);
+                  setMessage(res.message);
+                  if (!res.message.startsWith("Error")) {
+                    onUpdated(merged);
+                    setPendingExtraction(null);
+                  }
+                })
+              }
+            >
+              Accept all
+            </button>
+            <button
+              type="button"
+              className="link-btn"
+              disabled={isPending}
+              onClick={() => {
+                setEditing(true);
+                setForm({
+                  ...toFormData(doc.data),
+                  ...toFormData(pendingExtraction.proposed),
+                });
+                setPendingExtraction(null);
+              }}
+            >
+              Edit before accepting
+            </button>
+            <button
+              type="button"
+              className="link-btn"
+              disabled={isPending}
+              onClick={() => setPendingExtraction(null)}
+            >
+              Discard
+            </button>
+          </div>
+        </div>
+      ) : null}
     </li>
   );
 }

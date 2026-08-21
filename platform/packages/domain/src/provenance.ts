@@ -11,6 +11,7 @@ export const FactSource = z.enum([
   "manager_observed",
   "agent_inferred_email",
   "agent_inferred_calendar",
+  "agent_inferred_document",
   "agent_inferred_action_outcome",
   "integration_pull",
   "bulk_import",

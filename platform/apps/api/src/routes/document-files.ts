@@ -10,6 +10,7 @@ import {
   type HouseholdId,
   type NodeId,
 } from "@atelier/domain";
+import { extractDocumentFields } from "@atelier/agents";
 import { getBlobStore } from "../blob-store.js";
 
 // File upload + download for document nodes.
@@ -117,6 +118,29 @@ export const documentFileRoutes = (db: Db): FastifyPluginAsync => async (app) =>
       });
       graph.supersedeNode(householdId, current.id as NodeId, replacement.id as NodeId);
 
+      // Run extraction inline. Result comes back as a *proposal* —
+      // the manager reviews via PATCH. We don't auto-promote onto
+      // the node so a bad extraction can't overwrite manager-typed
+      // metadata without human review. Extraction latency (2-5s
+      // typical) rides on the upload response for phase-0; a real
+      // product would go async with a task ledger row.
+      let extraction: Awaited<ReturnType<typeof extractDocumentFields>> | null = null;
+      try {
+        extraction = await extractDocumentFields({
+          bytes: body,
+          mime,
+          ...(originalFilename ? { filename: originalFilename } : {}),
+          logger: {
+            info: (msg, ctx) => req.log.info({ ...(ctx as object) }, msg),
+          },
+        });
+      } catch (err) {
+        req.log.error(
+          { error: (err as Error).message },
+          "document extraction threw — continuing without proposal",
+        );
+      }
+
       return reply.code(recorded.inserted ? 201 : 200).send({
         blob: {
           sha256,
@@ -129,6 +153,15 @@ export const documentFileRoutes = (db: Db): FastifyPluginAsync => async (app) =>
           id: replacement.id,
           data: replacement.data,
         },
+        ...(extraction
+          ? {
+              extraction: {
+                provider: extraction.provider,
+                proposed: extraction.proposed,
+                ...(extraction.reason ? { reason: extraction.reason } : {}),
+              },
+            }
+          : {}),
       });
     },
   );

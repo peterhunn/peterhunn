@@ -256,6 +256,22 @@ and audit paths end to end.
     mock send with a visible reason. Console: Reply button on
     each inbound message opens an inline compose that hits the
     send route.
+  - Document field extraction on upload — after a document file
+    lands in the blob store, the API runs a vision call
+    (Anthropic Messages API with an image content block when
+    `ANTHROPIC_API_KEY` is set; deterministic mock otherwise
+    stamped with a visible reason) and returns the proposed
+    fields in the upload response as
+    `extraction: { provider, proposed, reason? }`. The proposal
+    is *not* auto-written — the manager reviews it inline
+    (Accept all / Edit before accepting / Discard) and only an
+    explicit accept PATCH lands the fields on the document node.
+    Supported vision MIMEs: `image/jpeg`, `image/png`,
+    `image/gif`, `image/webp`. Others fall through to mock with
+    `reason: unsupported_mime: <mime>`. Extracts `title`,
+    `category`, `expiresAt`, `issuer`, `subject`, `notes` — the
+    weekly-renewals playbook finally has real expiry dates to
+    scan.
   - Documents CRUD + file uploads — `GET /households/:id/documents`
     returns `{ identity, legal, policy, record, receipt }`
     bucketed from `document.*` graph nodes; `POST` with
