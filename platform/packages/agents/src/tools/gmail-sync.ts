@@ -1,23 +1,25 @@
+import gmailApi, { type gmail_v1 } from "@googleapis/gmail";
 import { readGoogleAuth, type GoogleOAuthFields } from "./_google.js";
 import type { HouseholdId } from "@atelier/domain";
 import type { StoredCredential } from "../types.js";
 
 // Gmail inbound sync with incremental delta via the History API.
 //
-// First call for a household: full pull of unread INBOX, then we
-// record the highest historyId seen as the cursor.
+// First call for a household: full pull of unread INBOX via
+// gmail.users.messages.list + gmail.users.messages.get; record the
+// highest historyId as the cursor.
 //
-// Subsequent calls: users/me/history?startHistoryId=<cursor>&
-// historyTypes=messageAdded returns only the deltas. If Gmail
-// returns 404 (cursor too old — history retained ~7 days), we
-// clear the cursor and fall back to a full pull.
+// Subsequent calls: gmail.users.history.list with the stored
+// startHistoryId + historyTypes:["messageAdded"] + labelId:"INBOX"
+// returns only the deltas. If the SDK throws a 404 (cursor too old
+// — Gmail retains history ~7 days), we clear the cursor and fall
+// back to a full pull.
 //
 // Not a Tool in the agent sense — this is a background sync the
-// runtime calls on a schedule or on-demand. Reuses the shared
-// Google OAuth helper so token refresh + persistence work the same
-// way as the send path.
+// runtime calls on a schedule or on-demand. Uses the same shared
+// Google OAuth helper as the message.send path so token refresh +
+// persistence work identically.
 
-const GMAIL_BASE = "https://gmail.googleapis.com/gmail/v1";
 const LIST_QUERY = "is:unread label:INBOX";
 
 export interface GmailSyncSink {
@@ -78,11 +80,7 @@ const b64UrlToUtf8 = (data: string): string => {
   }
 };
 
-interface GmailPart {
-  mimeType?: string;
-  body?: { data?: string; size?: number };
-  parts?: GmailPart[];
-}
+type GmailPart = gmail_v1.Schema$MessagePart;
 
 const extractBody = (payload: GmailPart | undefined): string => {
   if (!payload) return "";
@@ -123,7 +121,7 @@ const parseFrom = (raw: string): { fromName: string; fromAddress: string } => {
 };
 
 const headerValue = (
-  headers: Array<{ name?: string; value?: string }>,
+  headers: Array<{ name?: string | null; value?: string | null }>,
   name: string,
 ): string => {
   const h = headers.find((x) => x.name?.toLowerCase() === name.toLowerCase());
@@ -133,7 +131,6 @@ const headerValue = (
 const maxHistoryId = (a: string | undefined, b: string | undefined): string | undefined => {
   if (!a) return b;
   if (!b) return a;
-  // History ids are ints as strings — compare as BigInt for correctness.
   try {
     return BigInt(a) > BigInt(b) ? a : b;
   } catch {
@@ -141,10 +138,19 @@ const maxHistoryId = (a: string | undefined, b: string | undefined): string | un
   }
 };
 
-// Fetch + parse one message; return an object suitable for the sink,
-// plus the message's historyId so callers can advance the cursor.
+const gmailErrCode = (err: unknown): number | undefined => {
+  const e = err as { code?: number | string; status?: number };
+  const raw = e?.code ?? e?.status;
+  if (typeof raw === "number") return raw;
+  if (typeof raw === "string") {
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : undefined;
+  }
+  return undefined;
+};
+
 const fetchAndParse = async (
-  auth: { accessToken: string },
+  gmail: gmail_v1.Gmail,
   id: string,
 ): Promise<
   | {
@@ -159,26 +165,23 @@ const fetchAndParse = async (
     }
   | null
 > => {
-  const url = `${GMAIL_BASE}/users/me/messages/${encodeURIComponent(id)}?format=full`;
-  const res = await fetch(url, {
-    headers: { authorization: `Bearer ${auth.accessToken}` },
-  });
-  if (!res.ok) return null;
-  const msg = (await res.json()) as {
-    id?: string;
-    threadId?: string;
-    historyId?: string;
-    internalDate?: string;
-    payload?: {
-      headers?: Array<{ name?: string; value?: string }>;
-    } & GmailPart;
-  };
+  let res: Awaited<ReturnType<gmail_v1.Gmail["users"]["messages"]["get"]>>;
+  try {
+    res = await gmail.users.messages.get({
+      userId: "me",
+      id,
+      format: "full",
+    });
+  } catch {
+    return null;
+  }
+  const msg = res.data;
   const headers = msg.payload?.headers ?? [];
   const fromRaw = headerValue(headers, "From");
   const subject = headerValue(headers, "Subject") || "(no subject)";
   const dateHeader = headerValue(headers, "Date");
   const { fromName, fromAddress } = parseFrom(fromRaw);
-  const body = extractBody(msg.payload);
+  const body = extractBody(msg.payload ?? undefined);
   const receivedAt = msg.internalDate
     ? new Date(Number(msg.internalDate)).toISOString()
     : dateHeader
@@ -186,13 +189,13 @@ const fetchAndParse = async (
       : new Date().toISOString();
   return {
     externalMessageId: id,
-    externalThreadId: msg.threadId,
+    externalThreadId: msg.threadId ?? undefined,
     fromName,
     fromAddress,
     subject,
     body,
     receivedAt,
-    historyId: msg.historyId,
+    historyId: msg.historyId ?? undefined,
   };
 };
 
@@ -216,59 +219,20 @@ export const syncGmailInbox = async (
     };
   }
 
+  const gmail = gmailApi.gmail({ version: "v1", auth: auth.client });
   const cursorStore = opts.cursorStore;
   const existingCursor = cursorStore?.read(ctx.householdId, "gmail") ?? null;
 
   // ── Incremental path: history API ────────────────────────────
   if (cursorStore && existingCursor?.historyId) {
-    const url =
-      `${GMAIL_BASE}/users/me/history` +
-      `?startHistoryId=${encodeURIComponent(existingCursor.historyId)}` +
-      `&historyTypes=messageAdded` +
-      `&labelId=INBOX`;
-    let res: Response;
     try {
-      res = await fetch(url, {
-        headers: { authorization: `Bearer ${auth.accessToken}` },
+      const historyRes = await gmail.users.history.list({
+        userId: "me",
+        startHistoryId: existingCursor.historyId,
+        historyTypes: ["messageAdded"],
+        labelId: "INBOX",
       });
-    } catch (err) {
-      return {
-        consulted: true,
-        mode: "incremental",
-        listed: 0,
-        fetched: 0,
-        inserted: 0,
-        skippedDuplicates: 0,
-        error: `gmail_history_fetch: ${(err as Error).message}`,
-      };
-    }
-    // 404 → cursor too old, wipe and fall through to the full path.
-    if (res.status === 404) {
-      cursorStore.clear(ctx.householdId, "gmail");
-      ctx.logger?.info("gmail history cursor expired; resetting to full sync", {
-        oldHistoryId: existingCursor.historyId,
-      });
-    } else if (!res.ok) {
-      const text = await res.text().catch(() => res.statusText);
-      return {
-        consulted: true,
-        mode: "incremental",
-        listed: 0,
-        fetched: 0,
-        inserted: 0,
-        skippedDuplicates: 0,
-        error: `gmail_history_${res.status}: ${text.slice(0, 200)}`,
-      };
-    } else {
-      const json = (await res.json()) as {
-        history?: Array<{
-          id?: string;
-          messagesAdded?: Array<{
-            message?: { id?: string; threadId?: string; labelIds?: string[] };
-          }>;
-        }>;
-        historyId?: string;
-      };
+      const json = historyRes.data;
       const addedIds = new Set<string>();
       for (const h of json.history ?? []) {
         for (const ma of h.messagesAdded ?? []) {
@@ -300,7 +264,7 @@ export const syncGmailInbox = async (
       let skipped = 0;
       let newHistoryId: string | undefined = json.historyId ?? existingCursor.historyId;
       for (const id of addedIds) {
-        const parsed = await fetchAndParse(auth, id);
+        const parsed = await fetchAndParse(gmail, id);
         if (!parsed) continue;
         fetched++;
         newHistoryId = maxHistoryId(newHistoryId, parsed.historyId);
@@ -337,32 +301,38 @@ export const syncGmailInbox = async (
         skippedDuplicates: skipped,
         ...(newHistoryId ? { historyId: newHistoryId } : {}),
       };
+    } catch (err) {
+      const status = gmailErrCode(err);
+      if (status === 404) {
+        // Cursor too old — wipe and fall through to the full path.
+        cursorStore.clear(ctx.householdId, "gmail");
+        ctx.logger?.info("gmail history cursor expired; resetting to full sync", {
+          oldHistoryId: existingCursor.historyId,
+        });
+      } else {
+        return {
+          consulted: true,
+          mode: "incremental",
+          listed: 0,
+          fetched: 0,
+          inserted: 0,
+          skippedDuplicates: 0,
+          error: `gmail_history_${status ?? "err"}: ${(err as Error).message.slice(0, 200)}`,
+        };
+      }
     }
   }
 
   // ── Full pull ────────────────────────────────────────────────
   const maxResults = Math.min(Math.max(opts.maxResults ?? 25, 1), 100);
-  const listUrl =
-    `${GMAIL_BASE}/users/me/messages?q=${encodeURIComponent(LIST_QUERY)}` +
-    `&maxResults=${maxResults}`;
-  let listJson: { messages?: Array<{ id?: string; threadId?: string }> };
+  let listJson: gmail_v1.Schema$ListMessagesResponse;
   try {
-    const listRes = await fetch(listUrl, {
-      headers: { authorization: `Bearer ${auth.accessToken}` },
+    const listRes = await gmail.users.messages.list({
+      userId: "me",
+      q: LIST_QUERY,
+      maxResults,
     });
-    if (!listRes.ok) {
-      const text = await listRes.text().catch(() => listRes.statusText);
-      return {
-        consulted: true,
-        mode: existingCursor ? "cursor_reset" : "full",
-        listed: 0,
-        fetched: 0,
-        inserted: 0,
-        skippedDuplicates: 0,
-        error: `gmail_list_${listRes.status}: ${text.slice(0, 200)}`,
-      };
-    }
-    listJson = (await listRes.json()) as typeof listJson;
+    listJson = listRes.data;
   } catch (err) {
     return {
       consulted: true,
@@ -371,7 +341,7 @@ export const syncGmailInbox = async (
       fetched: 0,
       inserted: 0,
       skippedDuplicates: 0,
-      error: `gmail_list_fetch: ${(err as Error).message}`,
+      error: `gmail_list_${gmailErrCode(err) ?? "err"}: ${(err as Error).message.slice(0, 200)}`,
     };
   }
 
@@ -384,7 +354,7 @@ export const syncGmailInbox = async (
   let skipped = 0;
   let newHistoryId: string | undefined;
   for (const id of ids) {
-    const parsed = await fetchAndParse(auth, id);
+    const parsed = await fetchAndParse(gmail, id);
     if (!parsed) continue;
     fetched++;
     newHistoryId = maxHistoryId(newHistoryId, parsed.historyId);

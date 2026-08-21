@@ -1,3 +1,4 @@
+import calendarApi, { type calendar_v3 } from "@googleapis/calendar";
 import { readGoogleAuth, type GoogleOAuthFields } from "./_google.js";
 import type { HouseholdId } from "@atelier/domain";
 import type { StoredCredential } from "../types.js";
@@ -5,15 +6,19 @@ import type { StoredCredential } from "../types.js";
 // Google Calendar incremental sync via the events.list syncToken
 // pattern. First call for a household: a bounded full pull (past
 // horizon + future horizon) and we record the returned nextSyncToken.
-// Subsequent calls: events.list?syncToken=<token> streams only
-// changed events (including cancellations, showDeleted=true is
-// implied when using syncToken). 410 Gone → the token has been
-// invalidated (Google keeps them ~30 days); wipe and full-pull.
+// Subsequent calls: events.list with syncToken streams only changed
+// events (including cancellations, showDeleted=true is implied when
+// using syncToken). 410 Gone → the token has been invalidated
+// (Google keeps them ~30 days); wipe and full-pull.
+//
+// Uses @googleapis/calendar for the events.list calls; the control
+// flow (cursor read → incremental / full → apply items → persist
+// cursor) stays exactly as before. 410/404 detection is against the
+// SDK's error.code numeric.
 //
 // Not a Tool — this is the calendar analogue of syncGmailInbox,
 // invoked by the background scheduler or on-demand from the API.
 
-const GOOGLE_CAL_BASE = "https://www.googleapis.com/calendar/v3";
 const DEFAULT_PAST_DAYS = 30;
 const DEFAULT_FUTURE_DAYS = 365;
 const PAGE_MAX = 250;
@@ -77,28 +82,14 @@ export interface CalendarSyncResult {
   readonly error?: string;
 }
 
-interface GoogleEvent {
-  id?: string;
-  status?: string;
-  summary?: string;
-  location?: string;
-  description?: string;
-  htmlLink?: string;
-  updated?: string;
-  start?: { dateTime?: string; date?: string; timeZone?: string };
-  end?: { dateTime?: string; date?: string; timeZone?: string };
-}
+type GoogleEvent = calendar_v3.Schema$Event;
 
-interface GoogleListResponse {
-  items?: GoogleEvent[];
-  nextPageToken?: string;
-  nextSyncToken?: string;
-}
-
-const startFromEvent = (e: GoogleEvent): { startAt: string; endAt?: string; allDay: boolean } | null => {
+const startFromEvent = (
+  e: GoogleEvent,
+): { startAt: string; endAt?: string; allDay: boolean } | null => {
   if (e.start?.dateTime) {
     const startAt = e.start.dateTime;
-    const endAt = e.end?.dateTime;
+    const endAt = e.end?.dateTime ?? undefined;
     return endAt ? { startAt, endAt, allDay: false } : { startAt, allDay: false };
   }
   if (e.start?.date) {
@@ -112,42 +103,44 @@ const startFromEvent = (e: GoogleEvent): { startAt: string; endAt?: string; allD
   return null;
 };
 
+const calErrCode = (err: unknown): number | undefined => {
+  const e = err as { code?: number | string; status?: number };
+  const raw = e?.code ?? e?.status;
+  if (typeof raw === "number") return raw;
+  if (typeof raw === "string") {
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : undefined;
+  }
+  return undefined;
+};
+
+// Walk paginated events.list, collect items, return the terminal
+// nextSyncToken. Uses either the syncToken or the timeMin/timeMax
+// mode based on which is passed. Errors bubble up so the caller can
+// distinguish 410 (syncToken expired) from other statuses.
 const walkPages = async (
-  auth: { accessToken: string },
-  buildUrl: (pageToken?: string) => string,
-  onPage: (page: GoogleListResponse) => void,
-): Promise<
-  | { ok: true; syncToken: string | undefined }
-  | { ok: false; status: number; error: string }
-> => {
+  calendar: calendar_v3.Calendar,
+  base: calendar_v3.Params$Resource$Events$List,
+): Promise<{ items: GoogleEvent[]; syncToken: string | undefined }> => {
   let pageToken: string | undefined = undefined;
   let syncToken: string | undefined;
-  // Cap iterations defensively; Google will return nextSyncToken on
-  // the final page — we should never really loop this many times.
+  const items: GoogleEvent[] = [];
   for (let i = 0; i < 50; i++) {
-    const url = buildUrl(pageToken);
-    let res: Response;
-    try {
-      res = await fetch(url, {
-        headers: { authorization: `Bearer ${auth.accessToken}` },
-      });
-    } catch (err) {
-      return { ok: false, status: 0, error: `google_calendar_list_fetch: ${(err as Error).message}` };
-    }
-    if (!res.ok) {
-      const text = await res.text().catch(() => res.statusText);
-      return { ok: false, status: res.status, error: `google_calendar_list_${res.status}: ${text.slice(0, 200)}` };
-    }
-    const json = (await res.json()) as GoogleListResponse;
-    onPage(json);
-    if (json.nextPageToken) {
-      pageToken = json.nextPageToken;
+    const params: calendar_v3.Params$Resource$Events$List = {
+      ...base,
+      maxResults: PAGE_MAX,
+      ...(pageToken ? { pageToken } : {}),
+    };
+    const res = await calendar.events.list(params);
+    for (const it of res.data.items ?? []) items.push(it);
+    if (res.data.nextPageToken) {
+      pageToken = res.data.nextPageToken;
       continue;
     }
-    syncToken = json.nextSyncToken;
+    syncToken = res.data.nextSyncToken ?? undefined;
     break;
   }
-  return { ok: true, syncToken };
+  return { items, syncToken };
 };
 
 export const syncGoogleCalendar = async (
@@ -179,78 +172,10 @@ export const syncGoogleCalendar = async (
     };
   }
 
+  const calendar = calendarApi.calendar({ version: "v3", auth: auth.client });
   const calendarId = auth.credential.calendar_id ?? "primary";
   const cursorStore = opts.cursorStore;
   const existingCursor = cursorStore?.read(ctx.householdId, "google_calendar") ?? null;
-
-  const drain = (json: GoogleListResponse, acc: GoogleEvent[]): void => {
-    for (const e of json.items ?? []) acc.push(e);
-  };
-
-  const runFull = async (): Promise<CalendarSyncResult> => {
-    const pastDays = opts.pastDays ?? DEFAULT_PAST_DAYS;
-    const futureDays = opts.futureDays ?? DEFAULT_FUTURE_DAYS;
-    const timeMin = new Date(Date.now() - pastDays * 86400_000).toISOString();
-    const timeMax = new Date(Date.now() + futureDays * 86400_000).toISOString();
-    const items: GoogleEvent[] = [];
-
-    const walk = await walkPages(
-      auth,
-      (pageToken) =>
-        `${GOOGLE_CAL_BASE}/calendars/${encodeURIComponent(calendarId)}/events` +
-        `?singleEvents=true` +
-        `&showDeleted=true` +
-        `&maxResults=${PAGE_MAX}` +
-        `&timeMin=${encodeURIComponent(timeMin)}` +
-        `&timeMax=${encodeURIComponent(timeMax)}` +
-        (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ""),
-      (page) => drain(page, items),
-    );
-    if (!walk.ok) {
-      return {
-        consulted: true,
-        mode: existingCursor ? "token_reset" : "full",
-        listed: 0,
-        upserted: 0,
-        inserted: 0,
-        updated: 0,
-        cancelled: 0,
-        error: walk.error,
-      };
-    }
-
-    const applied = applyItems(items);
-    if (cursorStore && walk.syncToken) {
-      cursorStore.save(
-        ctx.householdId,
-        "google_calendar",
-        { syncToken: walk.syncToken },
-        {
-          at: new Date().toISOString(),
-          mode: existingCursor ? "token_reset" : "full",
-          inserted: applied.inserted,
-          updated: applied.updated,
-        },
-      );
-    }
-    ctx.logger?.info("google_calendar sync completed", {
-      mode: existingCursor ? "token_reset" : "full",
-      listed: items.length,
-      inserted: applied.inserted,
-      updated: applied.updated,
-      cancelled: applied.cancelled,
-    });
-    return {
-      consulted: true,
-      mode: existingCursor ? "token_reset" : "full",
-      listed: items.length,
-      upserted: applied.upserted,
-      inserted: applied.inserted,
-      updated: applied.updated,
-      cancelled: applied.cancelled,
-      ...(walk.syncToken ? { syncToken: walk.syncToken } : {}),
-    };
-  };
 
   const applyItems = (
     items: readonly GoogleEvent[],
@@ -292,86 +217,137 @@ export const syncGoogleCalendar = async (
     return { upserted, inserted, updated, cancelled };
   };
 
-  // ── Incremental path: syncToken ──────────────────────────────
-  if (cursorStore && existingCursor?.syncToken) {
-    const items: GoogleEvent[] = [];
-    let last410 = false;
-    const walk = await walkPages(
-      auth,
-      (pageToken) =>
-        `${GOOGLE_CAL_BASE}/calendars/${encodeURIComponent(calendarId)}/events` +
-        `?syncToken=${encodeURIComponent(existingCursor.syncToken!)}` +
-        `&maxResults=${PAGE_MAX}` +
-        (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ""),
-      (page) => drain(page, items),
-    );
-    if (!walk.ok) {
-      if (walk.status === 410) {
-        cursorStore.clear(ctx.householdId, "google_calendar");
-        ctx.logger?.info("google_calendar syncToken expired; resetting to full sync", {});
-        last410 = true;
-      } else {
-        return {
-          consulted: true,
-          mode: "incremental",
-          listed: 0,
-          upserted: 0,
-          inserted: 0,
-          updated: 0,
-          cancelled: 0,
-          error: walk.error,
-        };
-      }
+  const runFull = async (): Promise<CalendarSyncResult> => {
+    const pastDays = opts.pastDays ?? DEFAULT_PAST_DAYS;
+    const futureDays = opts.futureDays ?? DEFAULT_FUTURE_DAYS;
+    const timeMin = new Date(Date.now() - pastDays * 86400_000).toISOString();
+    const timeMax = new Date(Date.now() + futureDays * 86400_000).toISOString();
+
+    let walk: Awaited<ReturnType<typeof walkPages>>;
+    try {
+      walk = await walkPages(calendar, {
+        calendarId,
+        singleEvents: true,
+        showDeleted: true,
+        timeMin,
+        timeMax,
+      });
+    } catch (err) {
+      return {
+        consulted: true,
+        mode: existingCursor ? "token_reset" : "full",
+        listed: 0,
+        upserted: 0,
+        inserted: 0,
+        updated: 0,
+        cancelled: 0,
+        error: `google_calendar_list_${calErrCode(err) ?? "err"}: ${(err as Error).message.slice(0, 200)}`,
+      };
     }
 
-    if (!last410) {
-      if (items.length === 0) {
-        if (walk.ok && walk.syncToken) {
-          cursorStore.save(
-            ctx.householdId,
-            "google_calendar",
-            { syncToken: walk.syncToken },
-            { at: new Date().toISOString(), mode: "up_to_date" },
-          );
-        }
-        return {
-          consulted: true,
-          mode: "up_to_date",
-          listed: 0,
-          upserted: 0,
-          inserted: 0,
-          updated: 0,
-          cancelled: 0,
-          ...(walk.ok && walk.syncToken
-            ? { syncToken: walk.syncToken }
-            : { syncToken: existingCursor.syncToken }),
-        };
-      }
-      const applied = applyItems(items);
-      const nextToken =
-        walk.ok && walk.syncToken ? walk.syncToken : existingCursor.syncToken;
+    const applied = applyItems(walk.items);
+    if (cursorStore && walk.syncToken) {
       cursorStore.save(
         ctx.householdId,
         "google_calendar",
-        { syncToken: nextToken },
+        { syncToken: walk.syncToken },
         {
           at: new Date().toISOString(),
-          mode: "incremental",
+          mode: existingCursor ? "token_reset" : "full",
           inserted: applied.inserted,
           updated: applied.updated,
         },
       );
+    }
+    ctx.logger?.info("google_calendar sync completed", {
+      mode: existingCursor ? "token_reset" : "full",
+      listed: walk.items.length,
+      inserted: applied.inserted,
+      updated: applied.updated,
+      cancelled: applied.cancelled,
+    });
+    return {
+      consulted: true,
+      mode: existingCursor ? "token_reset" : "full",
+      listed: walk.items.length,
+      upserted: applied.upserted,
+      inserted: applied.inserted,
+      updated: applied.updated,
+      cancelled: applied.cancelled,
+      ...(walk.syncToken ? { syncToken: walk.syncToken } : {}),
+    };
+  };
+
+  // ── Incremental path: syncToken ──────────────────────────────
+  if (cursorStore && existingCursor?.syncToken) {
+    let walk: Awaited<ReturnType<typeof walkPages>>;
+    try {
+      walk = await walkPages(calendar, {
+        calendarId,
+        syncToken: existingCursor.syncToken,
+      });
+    } catch (err) {
+      if (calErrCode(err) === 410) {
+        cursorStore.clear(ctx.householdId, "google_calendar");
+        ctx.logger?.info("google_calendar syncToken expired; resetting to full sync", {});
+        return await runFull();
+      }
       return {
         consulted: true,
         mode: "incremental",
-        listed: items.length,
-        upserted: applied.upserted,
-        inserted: applied.inserted,
-        updated: applied.updated,
-        cancelled: applied.cancelled,
-        syncToken: nextToken,
+        listed: 0,
+        upserted: 0,
+        inserted: 0,
+        updated: 0,
+        cancelled: 0,
+        error: `google_calendar_list_${calErrCode(err) ?? "err"}: ${(err as Error).message.slice(0, 200)}`,
       };
     }
+
+    if (walk.items.length === 0) {
+      if (walk.syncToken) {
+        cursorStore.save(
+          ctx.householdId,
+          "google_calendar",
+          { syncToken: walk.syncToken },
+          { at: new Date().toISOString(), mode: "up_to_date" },
+        );
+      }
+      return {
+        consulted: true,
+        mode: "up_to_date",
+        listed: 0,
+        upserted: 0,
+        inserted: 0,
+        updated: 0,
+        cancelled: 0,
+        syncToken: walk.syncToken ?? existingCursor.syncToken,
+      };
+    }
+
+    const applied = applyItems(walk.items);
+    const nextToken = walk.syncToken ?? existingCursor.syncToken;
+    cursorStore.save(
+      ctx.householdId,
+      "google_calendar",
+      { syncToken: nextToken },
+      {
+        at: new Date().toISOString(),
+        mode: "incremental",
+        inserted: applied.inserted,
+        updated: applied.updated,
+      },
+    );
+    return {
+      consulted: true,
+      mode: "incremental",
+      listed: walk.items.length,
+      upserted: applied.upserted,
+      inserted: applied.inserted,
+      updated: applied.updated,
+      cancelled: applied.cancelled,
+      syncToken: nextToken,
+    };
   }
 
   return await runFull();
