@@ -1,5 +1,6 @@
 import { createHmac, randomBytes } from "node:crypto";
 import type { FastifyPluginAsync } from "fastify";
+import { OAuth2Client } from "google-auth-library";
 import { credentialRepo, householdRepo, type Db } from "@atelier/db";
 import type { HouseholdId } from "@atelier/domain";
 
@@ -205,40 +206,34 @@ export const oauthRoutes = (db: Db): FastifyPluginAsync => async (app) => {
         return reply.redirect(errRedirect(returnTo, (err as Error).message));
       }
 
-      // Exchange code → tokens.
+      // Exchange code → tokens via OAuth2Client.
+      const oauth2Client = new OAuth2Client(
+        google.clientId,
+        google.clientSecret,
+        google.redirectUri,
+      );
       let tokens: {
-        access_token?: string;
-        refresh_token?: string;
-        expires_in?: number;
-        scope?: string;
+        access_token?: string | null;
+        refresh_token?: string | null;
+        expiry_date?: number | null;
+        scope?: string | null;
       };
       try {
-        const tokenRes = await fetch(GOOGLE_TOKEN_URL, {
-          method: "POST",
-          headers: { "content-type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({
-            code,
-            client_id: google.clientId,
-            client_secret: google.clientSecret,
-            redirect_uri: google.redirectUri,
-            grant_type: "authorization_code",
-          }).toString(),
-        });
-        if (!tokenRes.ok) {
-          const text = await tokenRes.text().catch(() => tokenRes.statusText);
-          return reply.redirect(
-            errRedirect(returnTo, `token_exchange_${tokenRes.status}:${text.slice(0, 60)}`),
-          );
-        }
-        tokens = (await tokenRes.json()) as typeof tokens;
+        const tokenRes = await oauth2Client.getToken(code);
+        tokens = tokenRes.tokens;
       } catch (err) {
-        return reply.redirect(errRedirect(returnTo, `token_fetch:${(err as Error).message}`));
+        return reply.redirect(
+          errRedirect(returnTo, `token_exchange:${(err as Error).message.slice(0, 80)}`),
+        );
       }
       if (!tokens.access_token) {
         return reply.redirect(errRedirect(returnTo, "no_access_token"));
       }
+      oauth2Client.setCredentials(tokens);
 
-      // Fetch userinfo for from_address / from_name.
+      // Fetch userinfo for from_address / from_name. Fetch stays raw
+      // (googleapis has a userinfo endpoint but it lives in a
+      // separate service package we'd need to add for one call).
       let email = "";
       let name = "";
       try {
@@ -254,9 +249,9 @@ export const oauthRoutes = (db: Db): FastifyPluginAsync => async (app) => {
         // non-fatal — the tokens are still usable for Calendar
       }
 
-      const expiresAt = new Date(
-        Date.now() + ((tokens.expires_in ?? 3600) - 60) * 1000,
-      ).toISOString();
+      const expiresAt = tokens.expiry_date
+        ? new Date(tokens.expiry_date).toISOString()
+        : new Date(Date.now() + 3540 * 1000).toISOString();
       const scopeStr = tokens.scope ?? GOOGLE_SCOPES.join(" ");
 
       const shared = {

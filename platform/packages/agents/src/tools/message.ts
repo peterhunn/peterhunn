@@ -1,4 +1,5 @@
 import { z } from "zod";
+import gmailApi from "@googleapis/gmail";
 import type { Tool, ToolContext } from "../types.js";
 import { base64UrlEncode, readGoogleAuth, type GoogleOAuthFields } from "./_google.js";
 
@@ -6,9 +7,11 @@ import { base64UrlEncode, readGoogleAuth, type GoogleOAuthFields } from "./_goog
 // send when the household has connected a `gmail` credential;
 // otherwise returns a synthetic sent-id so the full policy →
 // approval → send loop still runs without external dependencies.
-
-const GMAIL_SEND_URL =
-  "https://gmail.googleapis.com/gmail/v1/users/me/messages/send";
+//
+// Uses the @googleapis/gmail SDK. RFC-822 body construction stays
+// hand-rolled — the SDK doesn't help there — but the transport,
+// auth, and error surfacing come from google-auth-library +
+// gaxios.
 
 interface GmailFields extends GoogleOAuthFields {
   readonly from_address?: string;
@@ -71,7 +74,7 @@ const trySendViaGmail = async (
   const auth = await readGoogleAuth<GmailFields>(ctx, "gmail");
   if (!auth) return null;
 
-  const fromAddress = inputs.fromAddress ?? auth.from_address;
+  const fromAddress = inputs.fromAddress ?? auth.credential.from_address;
   if (!fromAddress) {
     ctx.logger?.info("gmail credential missing from_address; skipping live send", {
       credentialId: auth.credentialId,
@@ -81,8 +84,8 @@ const trySendViaGmail = async (
 
   const raw = rfc822Message({
     ...(inputs.fromName !== undefined ? { fromName: inputs.fromName } : {}),
-    ...(auth.from_name !== undefined && inputs.fromName === undefined
-      ? { fromName: auth.from_name }
+    ...(auth.credential.from_name !== undefined && inputs.fromName === undefined
+      ? { fromName: auth.credential.from_name }
       : {}),
     fromAddress,
     toName: inputs.toName,
@@ -94,27 +97,19 @@ const trySendViaGmail = async (
       : {}),
   });
 
-  const res = await fetch(GMAIL_SEND_URL, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${auth.accessToken}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({ raw: base64UrlEncode(raw) }),
+  const gmail = gmailApi.gmail({ version: "v1", auth: auth.client });
+  const res = await gmail.users.messages.send({
+    userId: "me",
+    requestBody: { raw: base64UrlEncode(raw) },
   });
-  if (!res.ok) {
-    const text = await res.text().catch(() => res.statusText);
-    throw new Error(`gmail_${res.status}: ${text.slice(0, 200)}`);
-  }
-  const json = (await res.json()) as { id?: string; threadId?: string };
   ctx.logger?.info("gmail message sent", {
-    messageId: json.id,
+    messageId: res.data.id,
     authorityId: ctx.authorityId,
   });
   return {
     provider: "gmail",
-    sentMessageId: json.id ?? "unknown",
-    threadId: json.threadId,
+    sentMessageId: res.data.id ?? "unknown",
+    threadId: res.data.threadId ?? undefined,
   };
 };
 

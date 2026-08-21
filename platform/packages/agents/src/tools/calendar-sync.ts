@@ -179,7 +179,7 @@ export const syncGoogleCalendar = async (
     };
   }
 
-  const calendarId = auth.calendar_id ?? "primary";
+  const calendarId = auth.credential.calendar_id ?? "primary";
   const cursorStore = opts.cursorStore;
   const existingCursor = cursorStore?.read(ctx.householdId, "google_calendar") ?? null;
 
