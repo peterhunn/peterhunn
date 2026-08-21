@@ -23,15 +23,30 @@ describe("document extractor", () => {
     expect(res.proposed.title?.toLowerCase()).toContain("us passport alex");
   });
 
-  it("falls back to mock when the MIME isn't supported for vision", async () => {
+  it("falls back to mock when the MIME isn't supported (text/plain)", async () => {
     const res = await extractDocumentFields({
       bytes: Buffer.from("dummy"),
+      mime: "text/plain",
+      filename: "notes.txt",
+      apiKey: "test-key",
+    });
+    expect(res.provider).toBe("mock");
+    expect(res.reason).toMatch(/unsupported_mime/);
+  });
+
+  it("PDF path: pdf-parse text goes to a text-only Anthropic call", async () => {
+    // Non-PDF bytes will trip pdf-parse; we test the failure branch
+    // which stamps a pdf_parse reason. Full happy-path requires a
+    // real PDF payload — the extractor is exercised end-to-end in
+    // the API integration test via a shipped fixture there.
+    const res = await extractDocumentFields({
+      bytes: Buffer.from("not a real pdf"),
       mime: "application/pdf",
       filename: "policy.pdf",
       apiKey: "test-key",
     });
     expect(res.provider).toBe("mock");
-    expect(res.reason).toMatch(/unsupported_mime/);
+    expect(res.reason).toMatch(/^pdf_parse:/);
   });
 
   it("calls Anthropic and parses a fenced JSON block", async () => {

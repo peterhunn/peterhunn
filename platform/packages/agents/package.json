@@ -21,9 +21,11 @@
     "@googleapis/calendar": "^9.7.9",
     "@googleapis/gmail": "^9.0.0",
     "google-auth-library": "^9.14.1",
+    "pdf-parse": "^1.1.1",
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@types/pdf-parse": "^1.1.4",
     "typescript": "^5.5.4",
     "vitest": "^2.0.5"
   }

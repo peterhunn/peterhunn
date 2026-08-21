@@ -257,17 +257,19 @@ and audit paths end to end.
     each inbound message opens an inline compose that hits the
     send route.
   - Document field extraction on upload — after a document file
-    lands in the blob store, the API runs a vision call
-    (Anthropic Messages API with an image content block when
-    `ANTHROPIC_API_KEY` is set; deterministic mock otherwise
-    stamped with a visible reason) and returns the proposed
-    fields in the upload response as
-    `extraction: { provider, proposed, reason? }`. The proposal
-    is *not* auto-written — the manager reviews it inline
-    (Accept all / Edit before accepting / Discard) and only an
-    explicit accept PATCH lands the fields on the document node.
-    Supported vision MIMEs: `image/jpeg`, `image/png`,
-    `image/gif`, `image/webp`. Others fall through to mock with
+    lands in the blob store, the API runs a structured extract
+    (Anthropic Messages API when `ANTHROPIC_API_KEY` is set;
+    deterministic mock otherwise, always stamped with a visible
+    reason) and returns the proposed fields in the upload
+    response as `extraction: { provider, proposed, reason? }`.
+    The proposal is *not* auto-written — the manager reviews it
+    inline (Accept all / Edit before accepting / Discard) and
+    only an explicit accept PATCH lands the fields on the
+    document node. Two live paths: PDFs go through `pdf-parse` →
+    text-only LLM call (cheap, no vision tokens; scanned PDFs
+    with no text layer fall to mock with
+    `reason: pdf_no_text_extractable`), and `image/jpeg|png|gif|webp`
+    go through a vision content block. Anything else is
     `reason: unsupported_mime: <mime>`. Extracts `title`,
     `category`, `expiresAt`, `issuer`, `subject`, `notes` — the
     weekly-renewals playbook finally has real expiry dates to
