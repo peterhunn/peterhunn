@@ -250,12 +250,15 @@ and audit paths end to end.
     channels" section on the household page to register phone
     numbers and see recent inbound/outbound traffic.
     Outbound: `POST /households/:id/messaging/send { channel,
-    to, body }` sends via Twilio when a `twilio` credential
-    (`account_sid`, `auth_token`, `from_number` or
-    `messaging_service_sid`) is stored, else falls back to a
-    mock send with a visible reason. Console: Reply button on
-    each inbound message opens an inline compose that hits the
-    send route.
+    to, body }` sends via the official Twilio Node SDK when a
+    `twilio` credential (`account_sid`, `auth_token`,
+    `from_number` or `messaging_service_sid`) is stored, else
+    falls back to a mock send with a visible reason. Inbound
+    signature verification uses the same SDK's
+    `twilio.validateRequest` so a future signature-scheme
+    change lands there, not in our code. Console: Reply button
+    on each inbound message opens an inline compose that hits
+    the send route.
   - Document field extraction on upload — after a document file
     lands in the blob store, the API runs a structured extract
     (Anthropic Messages API when `ANTHROPIC_API_KEY` is set;

@@ -1,6 +1,8 @@
+import twilio from "twilio";
 import type { StoredCredential } from "../types.js";
 
-// Twilio adapter — shared helper for sending SMS + WhatsApp.
+// Twilio adapter — shared helper for sending SMS + WhatsApp via the
+// official Node SDK.
 //
 // Credential shape (stored via credentialRepo as
 // provider="twilio", kind="api_key"):
@@ -9,10 +11,13 @@ import type { StoredCredential } from "../types.js";
 // recommended production path — the messaging service picks a
 // From automatically). Otherwise from_number is used verbatim.
 //
+// Also re-exports the SDK's request-validator so the messaging
+// route can verify incoming X-Twilio-Signature headers with the
+// same auth token, keeping one library on both sides of the wire.
+//
 // Falls back to a deterministic mock send when no credential is
-// stored, stamping provider="mock" so the fallback is never silent.
-
-const TWILIO_BASE = "https://api.twilio.com/2010-04-01";
+// stored or the SDK throws, stamping provider="mock" with a
+// visible reason so nothing is silent.
 
 export interface TwilioSendInput {
   readonly to: string;
@@ -68,66 +73,56 @@ export const sendTwilioMessage = async (
   }
 
   const toAddr = withPrefix(channel, input.to);
-  const form = new URLSearchParams();
-  form.set("To", toAddr);
-  form.set("Body", input.body);
-  if (cred.messaging_service_sid) {
-    form.set("MessagingServiceSid", cred.messaging_service_sid);
-  } else if (cred.from_number) {
-    form.set("From", withPrefix(channel, cred.from_number));
-  }
-
-  const url = `${TWILIO_BASE}/Accounts/${cred.account_sid}/Messages.json`;
-  const auth = Buffer.from(`${cred.account_sid}:${cred.auth_token}`).toString("base64");
-  let res: Response;
+  const client = twilio(cred.account_sid!, cred.auth_token!);
   try {
-    res = await fetch(url, {
-      method: "POST",
-      headers: {
-        authorization: `Basic ${auth}`,
-        "content-type": "application/x-www-form-urlencoded",
-      },
-      body: form.toString(),
+    const message = await client.messages.create({
+      to: toAddr,
+      body: input.body,
+      ...(cred.messaging_service_sid
+        ? { messagingServiceSid: cred.messaging_service_sid }
+        : { from: withPrefix(channel, cred.from_number!) }),
     });
+    return {
+      provider: "twilio",
+      externalMessageId: message.sid,
+      from: message.from ?? cred.from_number ?? "",
+      to: message.to ?? toAddr,
+      ...(message.status ? { status: message.status } : {}),
+    };
   } catch (err) {
-    const mockId = `mock-sms-${Math.random().toString(36).slice(2, 12)}`;
-    opts.logger?.info("twilio send fetch failed — mock fallback", {
-      error: (err as Error).message,
+    const twilioErr = err as { status?: number; code?: number | string; message?: string };
+    const status = twilioErr.status ?? twilioErr.code ?? "err";
+    opts.logger?.info("twilio send failed — mock fallback", {
+      status,
+      message: twilioErr.message?.slice(0, 200),
     });
+    const mockId = `mock-sms-${Math.random().toString(36).slice(2, 12)}`;
     return {
       provider: "mock",
       externalMessageId: mockId,
       from: cred.from_number ?? "atelier-mock",
       to: input.to,
-      reason: `twilio_fetch: ${(err as Error).message}`,
+      reason: `twilio_${status}`,
     };
   }
-  if (!res.ok) {
-    const text = await res.text().catch(() => res.statusText);
-    const mockId = `mock-sms-${Math.random().toString(36).slice(2, 12)}`;
-    opts.logger?.info("twilio send non-2xx — mock fallback", {
-      status: res.status,
-      body: text.slice(0, 200),
-    });
-    return {
-      provider: "mock",
-      externalMessageId: mockId,
-      from: cred.from_number ?? "atelier-mock",
-      to: input.to,
-      reason: `twilio_${res.status}`,
-    };
-  }
-  const json = (await res.json()) as {
-    sid?: string;
-    from?: string;
-    to?: string;
-    status?: string;
-  };
-  return {
-    provider: "twilio",
-    externalMessageId: json.sid ?? "unknown",
-    from: json.from ?? cred.from_number ?? "",
-    to: json.to ?? toAddr,
-    ...(json.status ? { status: json.status } : {}),
-  };
+};
+
+// Signature verification for inbound webhooks. The SDK's
+// validateRequest does the same HMAC-SHA1 the pre-SDK code did
+// (sort form params, concat, sign the full URL + concatenated
+// values), just maintained by Twilio so future signature-scheme
+// changes land here.
+export const verifyTwilioInboundSignature = (input: {
+  authToken: string;
+  fullUrl: string;
+  params: Record<string, string>;
+  signature: string | undefined;
+}): boolean => {
+  if (!input.signature) return false;
+  return twilio.validateRequest(
+    input.authToken,
+    input.signature,
+    input.fullUrl,
+    input.params,
+  );
 };

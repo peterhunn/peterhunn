@@ -22,6 +22,7 @@
     "@googleapis/gmail": "^9.0.0",
     "google-auth-library": "^9.14.1",
     "pdf-parse": "^1.1.1",
+    "twilio": "^5.4.5",
     "zod": "^3.23.8"
   },
   "devDependencies": {

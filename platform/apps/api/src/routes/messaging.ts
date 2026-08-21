@@ -1,4 +1,3 @@
-import { createHmac } from "node:crypto";
 import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { z } from "zod";
 import {
@@ -13,7 +12,7 @@ import {
   type MessagingChannel,
 } from "@atelier/db";
 import type { HouseholdId } from "@atelier/domain";
-import { sendTwilioMessage } from "@atelier/agents";
+import { sendTwilioMessage, verifyTwilioInboundSignature } from "@atelier/agents";
 import { buildGraphView, buildGraphWriter, buildOrchestrator } from "../runtime.js";
 
 // Customer messaging surface.
@@ -68,24 +67,12 @@ interface TwilioForm {
   WaId?: string;
 }
 
-// Twilio computes an HMAC-SHA1 of (fullUrl + sortedFormPairsConcatenated)
-// with the account auth token as the key, base64-encoded. We accept
-// missing signatures only when ATELIER_TWILIO_AUTH_TOKEN is unset
-// (dev mode) — verification is required as soon as a token is
-// configured so a production key can't leak signed requests.
-const verifyTwilioSignature = (
-  fullUrl: string,
-  form: Record<string, string>,
-  signature: string | undefined,
-  authToken: string,
-): boolean => {
-  if (!signature) return false;
-  const keys = Object.keys(form).sort();
-  let signed = fullUrl;
-  for (const k of keys) signed += k + form[k];
-  const expected = createHmac("sha1", authToken).update(signed).digest("base64");
-  return expected === signature;
-};
+// Signature verification delegates to twilio.validateRequest via
+// the shared helper in @atelier/agents — same HMAC-SHA1 scheme,
+// maintained by Twilio so future signature changes land there.
+// We accept missing signatures only when ATELIER_TWILIO_AUTH_TOKEN
+// is unset (dev mode); verification is required as soon as a token
+// is configured so a production key can't leak signed requests.
 
 interface InboundResult {
   outcome: "dispatched" | "deduped" | "verified" | "already_verified" | "unrouted";
@@ -465,7 +452,13 @@ export const messagingRoutes = (db: Db): FastifyPluginAsync => async (app) => {
         const fullUrl = `${proto}://${host}${req.url}`;
         const sig =
           (req.headers["x-twilio-signature"] as string | undefined) ?? undefined;
-        if (!verifyTwilioSignature(fullUrl, raw, sig, authToken)) {
+        const ok = verifyTwilioInboundSignature({
+          authToken,
+          fullUrl,
+          params: raw,
+          ...(sig ? { signature: sig } : {}),
+        });
+        if (!ok) {
           return reply.code(403).send({ error: "invalid_signature" });
         }
       } else {
