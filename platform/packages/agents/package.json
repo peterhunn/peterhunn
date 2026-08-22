@@ -27,6 +27,7 @@
   },
   "devDependencies": {
     "@types/pdf-parse": "^1.1.4",
+    "@vitest/coverage-v8": "^2.0.5",
     "msw": "^2.6.4",
     "typescript": "^5.5.4",
     "vitest": "^2.0.5"

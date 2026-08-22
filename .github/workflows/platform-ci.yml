@@ -21,10 +21,10 @@ defaults:
     working-directory: platform
 
 jobs:
-  typecheck-and-test:
-    name: Typecheck + test
+  build-and-test:
+    name: Typecheck + test + build
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v4
@@ -45,21 +45,50 @@ jobs:
           cache: pnpm
           cache-dependency-path: platform/pnpm-lock.yaml
 
-      # No lockfile is committed yet (early-phase repo). Fall back to a
-      # non-frozen install so the first CI run generates one. Later,
-      # once the lockfile is committed, switch to --frozen-lockfile
-      # so the build is reproducible and drift is a hard failure.
+      # No lockfile committed yet (early-phase repo). Fall back to a
+      # non-frozen install so the first CI run generates one. First
+      # green run should commit pnpm-lock.yaml and flip this flag —
+      # after that, drift is a hard failure (which is what we want).
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
-      # Migrations aren't committed; drizzle-kit emits them from the
-      # authoritative schema. This step must run before test — the
-      # in-memory sqlite in every test file applies these on setup.
+      # Migrations aren't committed either; drizzle-kit emits them
+      # from the authoritative schema. First green run should commit
+      # platform/packages/db/migrations/*.sql and this step becomes
+      # a verification (git diff --exit-code after regenerate).
       - name: Generate DB migrations
         run: pnpm --filter @atelier/db migrate:generate
 
       - name: Typecheck (turbo)
         run: pnpm typecheck
 
-      - name: Test (turbo)
-        run: pnpm test
+      - name: Test with coverage (turbo)
+        env:
+          # Force the extractor onto the mock path in CI. Real
+          # ANTHROPIC_API_KEY exists only in secrets and must never
+          # be exposed to test workflows.
+          ANTHROPIC_API_KEY: ""
+        run: |
+          pnpm test -- \
+            --coverage.enabled \
+            --coverage.provider=v8 \
+            --coverage.reporter=json-summary \
+            --coverage.reporter=text
+
+      # Console build gates SSR-only failures that typecheck + test
+      # miss. Keeps the deploy pipeline honest.
+      - name: Build (turbo)
+        run: pnpm build
+
+      # Coverage summary in the run log so PR reviews can see it
+      # without leaving GitHub. Codecov integration is a follow-up.
+      - name: Coverage summary
+        if: always()
+        run: |
+          echo "### Coverage summary" >> "$GITHUB_STEP_SUMMARY"
+          find . -path '*/coverage/coverage-summary.json' -maxdepth 6 | while read -r f; do
+            pkg=$(dirname "$f" | sed 's|.*platform/||; s|/coverage.*||')
+            echo "**$pkg**" >> "$GITHUB_STEP_SUMMARY"
+            node -e "const d=require('$f').total; console.log(['stmts', 'branches', 'funcs', 'lines'].map(k=>k.padEnd(9)+d[k].pct.toFixed(1)+'%').join('  '))" >> "$GITHUB_STEP_SUMMARY" || true
+          done
+          echo "(coverage-summary.json emitted by vitest when @vitest/coverage-v8 is installed and --coverage is passed)" >> "$GITHUB_STEP_SUMMARY"
