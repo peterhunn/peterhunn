@@ -122,6 +122,67 @@ export const modelCallRepo = (db: Db) => ({
     };
   },
 
+  listByRun(householdId: HouseholdId, runId: string): ModelCallRow[] {
+    return db
+      .select()
+      .from(modelCalls)
+      .where(
+        and(
+          eq(modelCalls.householdId, householdId),
+          eq(modelCalls.triggeringRunId, runId),
+        ),
+      )
+      .orderBy(modelCalls.createdAt)
+      .all();
+  },
+
+  listByTask(householdId: HouseholdId, taskId: string): ModelCallRow[] {
+    return db
+      .select()
+      .from(modelCalls)
+      .where(
+        and(
+          eq(modelCalls.householdId, householdId),
+          eq(modelCalls.triggeringTaskId, taskId),
+        ),
+      )
+      .orderBy(modelCalls.createdAt)
+      .all();
+  },
+
+  // Daily buckets for the cost dashboard. Groups by the YYYY-MM-DD
+  // prefix of createdAt (ISO 8601 sorts lexicographically), broken
+  // down by tier so a stacked bar can render tier composition.
+  dailyBreakdown(
+    householdId: HouseholdId,
+    windowDays = 30,
+  ): Array<{ day: string; tier: string; usd: number; calls: number }> {
+    const start = daysAgoIso(windowDays);
+    const rows = db
+      .select({
+        day: sql<string>`substr(${modelCalls.createdAt}, 1, 10)`,
+        tier: modelCalls.selectedTier,
+        total: sum(modelCalls.costUsdEstimated),
+        n: count(),
+      })
+      .from(modelCalls)
+      .where(
+        and(
+          eq(modelCalls.householdId, householdId),
+          gte(modelCalls.createdAt, start),
+        ),
+      )
+      .groupBy(sql`substr(${modelCalls.createdAt}, 1, 10)`, modelCalls.selectedTier)
+      .orderBy(sql`substr(${modelCalls.createdAt}, 1, 10)`)
+      .all();
+    return rows.map((r) => ({
+      day: r.day,
+      tier: r.tier,
+      usd: Number(r.total ?? 0),
+      calls: Number(r.n ?? 0),
+    }));
+  },
+
   monthlyByHousehold(): Array<{ householdId: string; totalUsd: number; calls: number }> {
     const start = daysAgoIso(30);
     const rows = db

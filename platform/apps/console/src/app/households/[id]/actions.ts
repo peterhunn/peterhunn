@@ -142,6 +142,92 @@ export async function startGoogleOAuth(
   }
 }
 
+export async function fetchTaskModelCalls(
+  householdId: HouseholdId,
+  taskId: string,
+): Promise<
+  | {
+      ok: true;
+      summary: {
+        totalCalls: number;
+        totalUsd: number;
+        totalTokensIn: number;
+        totalTokensOut: number;
+        totalCachedInputTokens: number;
+      };
+      calls: Array<{
+        id: string;
+        createdAt: string;
+        modelId: string;
+        selectedTier: string;
+        taskClass: string;
+        inputTokens: number;
+        outputTokens: number;
+        cachedInputTokens: number;
+        costUsdEstimated: number;
+        latencyMs: number;
+        routerReasons: string[];
+        summary: string;
+      }>;
+    }
+  | { ok: false; message: string }
+> {
+  const token = await getSessionToken();
+  if (!token) return { ok: false, message: "Session expired." };
+  try {
+    const res = await api(token).taskModelCalls(householdId, taskId);
+    return { ok: true, summary: res.summary, calls: res.calls };
+  } catch (err) {
+    if (err instanceof ApiError) return { ok: false, message: err.message };
+    return { ok: false, message: (err as Error).message };
+  }
+}
+
+export async function fetchRunDetail(
+  householdId: HouseholdId,
+  runId: string,
+): Promise<
+  | {
+      ok: true;
+      run: {
+        id: string;
+        intentKind: string;
+        state: string;
+        origin: string;
+        originBy: string;
+        createdAt: string;
+        finishedAt: string | null;
+      };
+      summary: {
+        taskCount: number;
+        modelCallCount: number;
+        actionCount: number;
+        totalUsd: number;
+      };
+      timeline: Array<{
+        at: string;
+        kind: "run" | "task" | "model_call" | "action";
+        summary: string;
+      }>;
+    }
+  | { ok: false; message: string }
+> {
+  const token = await getSessionToken();
+  if (!token) return { ok: false, message: "Session expired." };
+  try {
+    const res = await api(token).runDetail(householdId, runId);
+    return {
+      ok: true,
+      run: res.run,
+      summary: res.summary,
+      timeline: res.timeline,
+    };
+  } catch (err) {
+    if (err instanceof ApiError) return { ok: false, message: err.message };
+    return { ok: false, message: (err as Error).message };
+  }
+}
+
 export type DocumentSubcategory = "identity" | "legal" | "policy" | "record" | "receipt";
 
 // Files are uploaded via a Route Handler proxy at

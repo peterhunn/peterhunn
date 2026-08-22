@@ -315,6 +315,19 @@ and audit paths end to end.
     per-kind sections with inline add/edit/remove. Nothing
     bypasses the graph — every person is a `person.*` node with
     provenance stamped `manager_observed`.
+  - Observability — the ledgers were already recording rich data
+    per model call (tier, tokens, cache hits, latency, cost,
+    router reasons) + per task + per action; three new read
+    endpoints surface it in the console. `GET /households/:id/
+    model-calls/daily` returns bucketed spend by tier for a
+    30-day window (drives a stacked-bar cost chart on the
+    household page). `GET /households/:id/tasks/:taskId/model-
+    calls` returns the T0–T3 calls a specific task made with
+    per-call summary — trace panel expandable on each task card.
+    `GET /households/:id/runs/:runId` returns a chronological
+    timeline of run + task + model_call + action events across
+    the whole orchestrator run — the "what happened after I
+    clicked Run" answer at a glance.
   - Playbooks — packaged autonomy templates. Each one bundles
     a schedule (weekly, monthly, or interval), a domain, and an
     intent shape; enabling one for a household starts a

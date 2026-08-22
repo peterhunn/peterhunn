@@ -161,6 +161,81 @@ export const api = (token: string) => ({
   listModels: () => request<{ models: ModelSpec[] }>(token, "GET", "/models"),
   listTaskClasses: () =>
     request<{ taskClasses: TaskClassSpec[] }>(token, "GET", "/models/task-classes"),
+  modelCallsDaily: (id: HouseholdId, windowDays = 30) =>
+    request<{
+      windowDays: number;
+      days: Array<{
+        day: string;
+        totalUsd: number;
+        totalCalls: number;
+        byTier: Record<string, { usd: number; calls: number }>;
+      }>;
+    }>(
+      token,
+      "GET",
+      `/households/${id}/model-calls/daily?windowDays=${windowDays}`,
+    ),
+  taskModelCalls: (id: HouseholdId, taskId: string) =>
+    request<{
+      task: {
+        id: string;
+        agent: string;
+        kind: string;
+        state: string;
+        decisionSummary: string | null;
+        createdAt: string;
+      };
+      summary: {
+        totalCalls: number;
+        totalUsd: number;
+        totalTokensIn: number;
+        totalTokensOut: number;
+        totalCachedInputTokens: number;
+      };
+      calls: Array<{
+        id: string;
+        createdAt: string;
+        taskClass: string;
+        minTier: string;
+        selectedTier: string;
+        modelId: string;
+        provider: string;
+        inputTokens: number;
+        outputTokens: number;
+        cachedInputTokens: number;
+        cacheWriteInputTokens: number;
+        costUsdEstimated: number;
+        latencyMs: number;
+        finishReason: string;
+        routerReasons: string[];
+        summary: string;
+      }>;
+    }>(token, "GET", `/households/${id}/tasks/${taskId}/model-calls`),
+  runDetail: (id: HouseholdId, runId: string) =>
+    request<{
+      run: {
+        id: string;
+        intentKind: string;
+        intentAttrs: Record<string, unknown>;
+        origin: string;
+        originBy: string;
+        state: string;
+        createdAt: string;
+        finishedAt: string | null;
+      };
+      summary: {
+        taskCount: number;
+        modelCallCount: number;
+        actionCount: number;
+        totalUsd: number;
+      };
+      timeline: Array<{
+        at: string;
+        kind: "run" | "task" | "model_call" | "action";
+        summary: string;
+        detail?: Record<string, unknown>;
+      }>;
+    }>(token, "GET", `/households/${id}/runs/${runId}`),
   inferenceBudget: (id: HouseholdId) =>
     request<{
       totalUsd: number;

@@ -1,4 +1,6 @@
+import type { HouseholdId } from "@atelier/domain";
 import type { TaskSummary } from "@/lib/api";
+import { TaskObservability } from "./task-observability";
 
 // Recent tasks used to be a flat table; this component renders each
 // task with a per-kind body. Everything below the row header is a
@@ -17,7 +19,13 @@ const state = (s: string): string => {
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   v !== null && typeof v === "object" && !Array.isArray(v);
 
-export function TaskCard({ task }: { task: TaskSummary }) {
+export function TaskCard({
+  task,
+  householdId,
+}: {
+  task: TaskSummary;
+  householdId: HouseholdId;
+}) {
   const outputs = isRecord(task.outputs) ? task.outputs : null;
 
   return (
@@ -39,6 +47,12 @@ export function TaskCard({ task }: { task: TaskSummary }) {
       </header>
 
       {outputs ? <TaskBody kind={task.kind} outputs={outputs} /> : null}
+
+      <TaskObservability
+        householdId={householdId}
+        taskId={task.id}
+        runId={task.runId}
+      />
     </article>
   );
 }

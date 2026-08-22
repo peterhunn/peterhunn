@@ -18,6 +18,7 @@ import { PlaybooksPanel } from "./playbooks-panel";
 import { PeoplePanel } from "./people-panel";
 import { AssetsPanel } from "./assets-panel";
 import { DocumentsPanel } from "./documents-panel";
+import { CostDashboard } from "./cost-dashboard";
 
 export default async function HouseholdPage({
   params,
@@ -48,6 +49,7 @@ export default async function HouseholdPage({
     peopleRes,
     assetsRes,
     documentsRes,
+    costDailyRes,
     oauthCfg,
   ] = await Promise.all([
     client.me(),
@@ -93,6 +95,9 @@ export default async function HouseholdPage({
       .catch(() => ({
         documents: { identity: [], legal: [], policy: [], record: [], receipt: [] },
       })),
+    client
+      .modelCallsDaily(id as HouseholdId, 30)
+      .catch(() => ({ windowDays: 30, days: [] })),
     client.oauthConfig().catch(() => ({
       configured: false,
       clientId: false,
@@ -121,6 +126,7 @@ export default async function HouseholdPage({
   const people = peopleRes.people;
   const assets = assetsRes.assets;
   const documents = documentsRes.documents;
+  const costDaily = costDailyRes;
 
   return (
     <>
@@ -171,6 +177,11 @@ export default async function HouseholdPage({
             </div>
           </div>
         ) : null}
+
+        <CostDashboard
+          windowDays={costDaily.windowDays}
+          days={costDaily.days}
+        />
 
         <div className="section-head">
           <h2>Connected accounts</h2>
@@ -277,7 +288,11 @@ export default async function HouseholdPage({
         ) : (
           <div className="tasks-stack">
             {tasks.map((t) => (
-              <TaskCard key={t.id} task={t} />
+              <TaskCard
+                key={t.id}
+                task={t}
+                householdId={hh.id as HouseholdId}
+              />
             ))}
           </div>
         )}

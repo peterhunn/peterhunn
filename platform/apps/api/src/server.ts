@@ -24,6 +24,7 @@ import { assetRoutes } from "./routes/assets.js";
 import { graphByCategoryRoutes } from "./routes/graph-by-category.js";
 import { documentRoutes } from "./routes/documents.js";
 import { documentFileRoutes } from "./routes/document-files.js";
+import { observabilityRoutes } from "./routes/observability.js";
 
 export const buildServer = (db: Db) => {
   // Global body limit — document uploads bump it above Fastify's
@@ -102,6 +103,7 @@ export const buildServer = (db: Db) => {
   app.register(graphByCategoryRoutes(db));
   app.register(documentRoutes(db));
   app.register(documentFileRoutes(db));
+  app.register(observabilityRoutes(db));
 
   return app;
 };

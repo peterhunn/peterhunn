@@ -99,6 +99,31 @@ export const taskRepo = (db: Db) => ({
       .run();
   },
 
+  getRun(householdId: HouseholdId, runId: string): OrchestratorRunRow | null {
+    return (
+      db
+        .select()
+        .from(orchestratorRuns)
+        .where(
+          and(
+            eq(orchestratorRuns.householdId, householdId),
+            eq(orchestratorRuns.id, runId),
+          ),
+        )
+        .get() ?? null
+    );
+  },
+
+  getTask(householdId: HouseholdId, taskId: string): TaskRow | null {
+    return (
+      db
+        .select()
+        .from(tasks)
+        .where(and(eq(tasks.householdId, householdId), eq(tasks.id, taskId)))
+        .get() ?? null
+    );
+  },
+
   listRuns(householdId: HouseholdId, limit = 50): OrchestratorRunRow[] {
     return db
       .select()
