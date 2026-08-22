@@ -417,7 +417,15 @@ and audit paths end to end.
   API for delegated tokens (OAuth, API keys) the platform holds
   on the customer's behalf. List endpoint returns metadata only;
   the raw blob never leaves the server. Tools access credentials
-  through `ToolContext.readCredential(provider)`.
+  through `ToolContext.readCredential(provider)`. Every stored
+  blob is wrapped with AES-256-GCM at rest — master key comes
+  from `ATELIER_CREDENTIAL_KEY` (32 bytes hex, generate with
+  `openssl rand -hex 32`); the credentials repo throws at
+  construction if the key is missing so a misconfigured deploy
+  fails fast. Legacy plaintext rows are read transparently and
+  upgraded on write; `credentialRepo.migrateLegacyRows()` does
+  the bulk upgrade. See SECURITY.md and DEPLOY.md for threat
+  model and rotation.
 - Google OAuth consent flow — one-click "Connect Google" on
   the household page requests Calendar + Gmail scopes in a
   single consent, exchanges the code for tokens on callback,

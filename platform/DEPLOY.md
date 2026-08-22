@@ -23,16 +23,18 @@ fly launch --no-deploy --name atelier-api --region sea --copy-config
 # 2. One SQLite volume, 1GB, in the same region as the app.
 fly volumes create atelier_data --size 1 --region sea
 
-# 3. Set secrets. Only the ones you'll actually use — anything left
-#    unset falls back to the mock adapter with a visible reason.
+# 3. Set secrets. ATELIER_CREDENTIAL_KEY is REQUIRED — the API
+#    refuses to start without it. Everything else is optional
+#    (unset providers fall back to a mock with a visible reason).
 fly secrets set \
+  ATELIER_CREDENTIAL_KEY=$(openssl rand -hex 32) \
+  ATELIER_OAUTH_STATE_SECRET=$(openssl rand -hex 32) \
   ANTHROPIC_API_KEY=... \
   OPENAI_API_KEY=... \
   GOOGLE_API_KEY=... \
   GOOGLE_OAUTH_CLIENT_ID=... \
   GOOGLE_OAUTH_CLIENT_SECRET=... \
   GOOGLE_OAUTH_REDIRECT_URI=https://atelier-api.fly.dev/oauth/google/callback \
-  ATELIER_OAUTH_STATE_SECRET=$(openssl rand -hex 32) \
   ATELIER_TWILIO_AUTH_TOKEN=...
 
 # 4. Deploy.
@@ -68,6 +70,36 @@ pnpm --filter @atelier/db exec tsx ../../scripts/seed.ts
 git push  # CI runs typecheck + test on the branch
 fly deploy  # ships the current HEAD's Dockerfile build
 ```
+
+## Rotating ATELIER_CREDENTIAL_KEY
+
+The master key wraps every stored credential (Google refresh
+tokens, Twilio auth tokens, anything the platform holds on the
+customer's behalf) with AES-256-GCM. Rotate on suspected
+exposure — or on a schedule.
+
+Zero-downtime rotation isn't wired yet. Today rotation looks
+like:
+
+```bash
+# 1. Generate the new key locally, keep the old one handy.
+NEW_KEY=$(openssl rand -hex 32)
+
+# 2. Set NEW_KEY as the primary. The API will fail to decrypt
+#    existing rows — this is a brief outage until step 3 runs.
+fly secrets set ATELIER_CREDENTIAL_KEY=$NEW_KEY
+fly deploy
+
+# 3. Re-encrypt every row with the new key. Bounce into an SSH
+#    console on the machine that holds the OLD key, or ship a
+#    one-shot job that reads OLD_KEY + NEW_KEY. This is a
+#    follow-up — the current migrateLegacyRows() only upgrades
+#    plaintext, not old-encrypted → new-encrypted.
+```
+
+Losing the key = every stored credential becomes
+unrecoverable. Every household re-connects Google, re-enters
+Twilio, etc. Treat it like a database.
 
 ## Notes
 

@@ -93,20 +93,29 @@ production.
 
 ## Current posture — the gaps
 
-### 🔴 Credentials at rest are plaintext
+### 🟢 Credentials at rest are encrypted
 
-- `packages/db/src/schema/credentials.ts` stores the credential
-  blob as JSON in a `text` column. This includes Google refresh
-  tokens, Twilio auth tokens, and any other delegated secret the
-  platform holds.
-- Anyone with read access to the SQLite file (or the Postgres
-  row later) can lift them.
+- Every credential blob is wrapped with AES-256-GCM before it
+  hits the credentials table. Ciphertext lives inside a
+  versioned envelope
+  `{v: 1, cipher: "<iv-b64>:<authTag-b64>:<ct-b64>"}`.
+  Master key comes from `ATELIER_CREDENTIAL_KEY` (32 bytes hex).
+- `credentialRepo` throws at construction if the key is missing
+  or malformed — the API refuses to boot rather than accept
+  plaintext writes.
+- `credentialRepo.getSecret` transparently decrypts on read;
+  `store` and `updateAccessToken` encrypt on write.
+- Legacy plaintext rows (from before this landed) are read
+  transparently and upgraded whenever `updateAccessToken` runs;
+  `credentialRepo.migrateLegacyRows()` does the bulk upgrade
+  ahead of that.
+- Version prefix (`v: 1`) leaves room for a v2 with per-row
+  data keys wrapped by a KMS master key without ambiguity.
 
-**Fix (blocks customer #1):** envelope encryption. Master key
-in `ATELIER_CREDENTIAL_KEY` (32 bytes hex, from env or a KMS),
-per-row data key wrapped by it. AES-256-GCM. `credentialRepo`
-transparently decrypts on `getSecret`, encrypts on `store` and
-`updateAccessToken`. Existing rows migrate on first read.
+**Still open:** the master key lives in the same process's env
+as the DB — a compromised host reads both. KMS-wrapped per-row
+data keys close that gap. Rotation of the master key is manual
+today; see DEPLOY.md.
 
 ### 🔴 Bearer tokens have no expiry, no rotation, no revocation
 
@@ -235,8 +244,11 @@ close a dozen small headers audits.
 - Audit trail integrity (proof of what happened).
 
 **What we're not defending against right now:**
-- A determined attacker with disk access — see the
-  credential-encryption gap.
+- A host compromise that leaks both the DB file and the
+  process env. Credential ciphertext is safe from a disk-only
+  attacker, but the master key lives in-process — see the
+  🟢 credential-encryption entry above for the follow-up
+  (KMS-wrapped per-row data keys).
 - A compromised infrastructure operator (fly.io / AWS
   employee with your keys). Envelope encryption with the
   master key held elsewhere raises the bar; we don't have
