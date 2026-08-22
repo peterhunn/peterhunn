@@ -121,7 +121,12 @@ export const oauthRoutes = (db: Db): FastifyPluginAsync => async (app) => {
 
   app.get(
     "/oauth/google/config",
-    { config: { public: true } },
+    {
+      config: {
+        public: true,
+        rateLimit: { max: 30, timeWindow: "1 minute" },
+      },
+    },
     async () => {
       const clientId = process.env["GOOGLE_OAUTH_CLIENT_ID"];
       const clientSecret = process.env["GOOGLE_OAUTH_CLIENT_SECRET"];
@@ -185,7 +190,15 @@ export const oauthRoutes = (db: Db): FastifyPluginAsync => async (app) => {
   // bearer token; the state HMAC is the trust anchor.
   app.get<{ Querystring: { code?: string; state?: string; error?: string } }>(
     "/oauth/google/callback",
-    { config: { public: true } },
+    {
+      config: {
+        public: true,
+        // Rate limit strictly — the callback verifies an HMAC + hits
+        // Google's token endpoint. Nothing legitimate hits this
+        // more than a few times a minute from one client.
+        rateLimit: { max: 20, timeWindow: "1 minute" },
+      },
+    },
     async (req, reply) => {
       const { code, state, error } = req.query;
       const payload = state ? verifyState(state) : null;

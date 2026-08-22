@@ -18,6 +18,7 @@
     "@atelier/domain": "workspace:*",
     "@atelier/policy": "workspace:*",
     "@atelier/router": "workspace:*",
+    "@fastify/rate-limit": "^10.1.1",
     "fastify": "^5.0.0",
     "fastify-plugin": "^5.0.0",
     "tsx": "^4.19.0",

@@ -413,6 +413,14 @@ and audit paths end to end.
     incremental | up_to_date | cursor_reset` so the console
     surfaces which path ran. Console: Sync Gmail button in the
     inbox section header (dimmed until Gmail is connected).
+- Rate limiting — `@fastify/rate-limit` at boot. Global
+  default 120 req/min per (bearer token OR client IP if no
+  token — tunable via `ATELIER_RATE_LIMIT_MAX` /
+  `_WINDOW`); public webhooks stricter (60/min for
+  `/messaging/inbound/*`, 20-30/min for `/oauth/google/*`);
+  `/healthz` exempt. 429 body carries `{error: "rate_limited",
+  retryAfter}`. In-process only today; distributed store when
+  we scale beyond one machine.
 - Credentials store — a first-class `credentials` table + repo +
   API for delegated tokens (OAuth, API keys) the platform holds
   on the customer's behalf. List endpoint returns metadata only;

@@ -395,7 +395,12 @@ export const messagingRoutes = (db: Db): FastifyPluginAsync => async (app) => {
   // Mock — for local dev and tests. Accepts JSON.
   app.post(
     "/messaging/inbound/mock",
-    { config: { public: true } },
+    {
+      config: {
+        public: true,
+        rateLimit: { max: 60, timeWindow: "1 minute" },
+      },
+    },
     async (req, reply) => {
       const parsed = MockInboundBody.safeParse(req.body);
       if (!parsed.success) {
@@ -434,7 +439,15 @@ export const messagingRoutes = (db: Db): FastifyPluginAsync => async (app) => {
   // one-line warning so it's visible.
   app.post(
     "/messaging/inbound/twilio",
-    { config: { public: true } },
+    {
+      config: {
+        public: true,
+        // Twilio's normal retry cadence is 5 retries over ~1 hour,
+        // so 60/min per IP is generous. A misbehaving source can't
+        // burn the planner's LLM budget by flooding.
+        rateLimit: { max: 60, timeWindow: "1 minute" },
+      },
+    },
     async (req, reply) => {
       const raw = (req.body ?? {}) as Record<string, string>;
       const form: TwilioForm = raw as TwilioForm;

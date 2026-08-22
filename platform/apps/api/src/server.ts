@@ -1,4 +1,5 @@
 import Fastify from "fastify";
+import rateLimit from "@fastify/rate-limit";
 import type { Db } from "@atelier/db";
 import "./types.js";
 import { authPlugin } from "./auth.js";
@@ -33,9 +34,48 @@ export const buildServer = (db: Db) => {
   const maxUploadBytes = Number(
     process.env["ATELIER_MAX_UPLOAD_BYTES"] ?? 25 * 1024 * 1024,
   );
+  // Trust the reverse proxy's x-forwarded-for so rate limiting
+  // keys on the real client IP behind fly.io / a CDN rather than
+  // the proxy hop. Only trust one hop — deeper chains need a
+  // number the operator sets deliberately.
   const app = Fastify({
     logger: { level: process.env["LOG_LEVEL"] ?? "info" },
     bodyLimit: maxUploadBytes,
+    trustProxy: 1,
+  });
+
+  // Rate limits. Two tiers with per-route overrides:
+  //   default: 120 req/min per (bearer-token OR client IP if
+  //     no token). Comfortably above manual console clicks;
+  //     catches a runaway browser tab or script.
+  //   public webhooks: 60 req/min per IP. Enough for Twilio's
+  //     legitimate retries; blocks unauthenticated flooding.
+  //     Set on the specific routes below.
+  // Health endpoint skips the counter — infra probes shouldn't
+  // count against a limit.
+  app.register(rateLimit, {
+    global: true,
+    max: Number(process.env["ATELIER_RATE_LIMIT_MAX"] ?? 120),
+    timeWindow: process.env["ATELIER_RATE_LIMIT_WINDOW"] ?? "1 minute",
+    // Key on the bearer token when present; fall back to IP so
+    // an attacker can't dodge a per-IP limit by not sending a
+    // token. Health path skipped entirely.
+    keyGenerator: (req) => {
+      const auth = req.headers["authorization"];
+      if (typeof auth === "string" && auth.startsWith("Bearer ")) {
+        return `tok:${auth.slice("Bearer ".length)}`;
+      }
+      return `ip:${req.ip}`;
+    },
+    // Skip health checks so uptime probes don't burn the budget.
+    // /healthz is public and cheap; /messaging/inbound/* have
+    // stricter per-route limits set at the route.
+    skip: (req) => req.url === "/healthz",
+    errorResponseBuilder: (_req, ctx) => ({
+      error: "rate_limited",
+      message: `Too many requests. Retry after ${ctx.after}.`,
+      retryAfter: ctx.after,
+    }),
   });
 
   // Twilio webhooks POST application/x-www-form-urlencoded. Fastify

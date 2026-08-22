@@ -132,17 +132,31 @@ key-rotation infrastructure needed. Long-term (b) → passkeys
 (`@simplewebauthn/server`) for managers, phone-verified access
 for customers.
 
-### 🔴 No rate limiting
+### 🟢 Rate limiting
 
-- `/messaging/inbound/twilio` (public), `/messaging/inbound/mock`
-  (public), and every household-scoped route are unthrottled.
-- A misbehaving caller can flood the planner, spend LLM budget,
-  fill the audit log.
+- `@fastify/rate-limit` registered at boot. Global default of
+  120 req/min per (bearer token OR client IP if no token) —
+  tunable via `ATELIER_RATE_LIMIT_MAX` / `_WINDOW`. Key
+  generator hashes the token when present so an attacker can't
+  duck a per-IP limit by dropping the header.
+- Per-route stricter overrides on the public surface:
+  `/messaging/inbound/mock` and `/messaging/inbound/twilio` are
+  60/min per IP; `/oauth/google/callback` is 20/min per IP;
+  `/oauth/google/config` is 30/min per IP.
+- Health endpoint (`/healthz`) is skipped so infra probes
+  don't burn the budget.
+- 429 response body: `{ error: "rate_limited", message,
+  retryAfter }` — the message names the retry window and
+  Fastify sets the standard `Retry-After` header.
+- `trustProxy: 1` on the Fastify app so per-IP keying reads
+  the real client IP from `X-Forwarded-For` behind fly's
+  proxy rather than the proxy hop.
 
-**Fix (before public beta):** `@fastify/rate-limit`. Different
-limits per surface. Public webhooks strict (per source IP), API
-routes moderate (per bearer token), the planner surface stricter
-than reads.
+**Still open:** limits are in-process only (one bucket per
+machine). When we scale to multiple machines, a distributed
+store (Redis) is needed so a caller can't get N× throughput
+by round-robining. Also: a per-actor "planner burst" limit is
+finer-grained than what @fastify/rate-limit does per-route.
 
 ### 🟡 Cost caps are soft
 
