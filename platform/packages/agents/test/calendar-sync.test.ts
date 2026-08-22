@@ -1,4 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
+import { http, HttpResponse } from "msw";
+import { setupServer } from "msw/node";
 import {
   syncGoogleCalendar,
   type CalendarSyncCursor,
@@ -6,11 +8,13 @@ import {
 import type { HouseholdId } from "@atelier/domain";
 import type { StoredCredential } from "../src/types.js";
 
+const CAL = "https://www.googleapis.com/calendar/v3";
 const HH = "hh_test" as HouseholdId;
 
-const stubFetch = (impl: (url: string, init?: RequestInit) => Response) => {
-  vi.stubGlobal("fetch", vi.fn(async (u: string, i?: RequestInit) => impl(u, i)));
-};
+const server = setupServer();
+beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());
 
 const mkCtx = (credential: Record<string, unknown> | null) => ({
   householdId: HH,
@@ -72,13 +76,6 @@ const mkCursor = (): CalendarSyncCursor & {
   };
 };
 
-beforeEach(() => {
-  vi.unstubAllGlobals();
-});
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
-
 describe("Google Calendar incremental sync", () => {
   it("returns consulted:false when no google_calendar credential is stored", async () => {
     const res = await syncGoogleCalendar(mkCtx(null), mkSink(), {});
@@ -87,33 +84,31 @@ describe("Google Calendar incremental sync", () => {
   });
 
   it("does a full pull on the first call and records the nextSyncToken", async () => {
-    stubFetch((url) => {
-      if (url.includes("/calendars/primary/events") && !url.includes("syncToken=")) {
-        return new Response(
-          JSON.stringify({
-            items: [
-              {
-                id: "evt_a",
-                status: "confirmed",
-                summary: "Team standup",
-                start: { dateTime: "2026-08-20T15:00:00Z" },
-                end: { dateTime: "2026-08-20T15:30:00Z" },
-              },
-              {
-                id: "evt_b",
-                status: "tentative",
-                summary: "Coffee with Sam",
-                start: { dateTime: "2026-08-21T17:00:00Z" },
-                end: { dateTime: "2026-08-21T18:00:00Z" },
-              },
-            ],
-            nextSyncToken: "TOK-FULL-1",
-          }),
-          { status: 200 },
-        );
-      }
-      throw new Error(`unexpected: ${url}`);
-    });
+    server.use(
+      http.get(`${CAL}/calendars/primary/events`, ({ request }) => {
+        const url = new URL(request.url);
+        expect(url.searchParams.has("syncToken")).toBe(false);
+        return HttpResponse.json({
+          items: [
+            {
+              id: "evt_a",
+              status: "confirmed",
+              summary: "Team standup",
+              start: { dateTime: "2026-08-20T15:00:00Z" },
+              end: { dateTime: "2026-08-20T15:30:00Z" },
+            },
+            {
+              id: "evt_b",
+              status: "tentative",
+              summary: "Coffee with Sam",
+              start: { dateTime: "2026-08-21T17:00:00Z" },
+              end: { dateTime: "2026-08-21T18:00:00Z" },
+            },
+          ],
+          nextSyncToken: "TOK-FULL-1",
+        });
+      }),
+    );
 
     const sink = mkSink();
     const cursor = mkCursor();
@@ -134,30 +129,25 @@ describe("Google Calendar incremental sync", () => {
   });
 
   it("uses the stored syncToken on subsequent calls and marks cancellations", async () => {
-    stubFetch((url) => {
-      if (url.includes("syncToken=TOK-PRIOR")) {
-        return new Response(
-          JSON.stringify({
-            items: [
-              {
-                id: "evt_a",
-                status: "cancelled",
-              },
-              {
-                id: "evt_c",
-                status: "confirmed",
-                summary: "New event",
-                start: { dateTime: "2026-09-01T14:00:00Z" },
-                end: { dateTime: "2026-09-01T15:00:00Z" },
-              },
-            ],
-            nextSyncToken: "TOK-NEXT",
-          }),
-          { status: 200 },
-        );
-      }
-      throw new Error(`unexpected: ${url}`);
-    });
+    server.use(
+      http.get(`${CAL}/calendars/primary/events`, ({ request }) => {
+        const url = new URL(request.url);
+        expect(url.searchParams.get("syncToken")).toBe("TOK-PRIOR");
+        return HttpResponse.json({
+          items: [
+            { id: "evt_a", status: "cancelled" },
+            {
+              id: "evt_c",
+              status: "confirmed",
+              summary: "New event",
+              start: { dateTime: "2026-09-01T14:00:00Z" },
+              end: { dateTime: "2026-09-01T15:00:00Z" },
+            },
+          ],
+          nextSyncToken: "TOK-NEXT",
+        });
+      }),
+    );
 
     const sink = mkSink();
     const cursor: CalendarSyncCursor = {
@@ -187,15 +177,17 @@ describe("Google Calendar incremental sync", () => {
 
   it("410 on syncToken clears cursor and falls back to a full pull", async () => {
     let call = 0;
-    stubFetch((url) => {
-      call++;
-      if (call === 1 && url.includes("syncToken=STALE")) {
-        return new Response("gone", { status: 410 });
-      }
-      // Full pull after reset — no syncToken in URL.
-      expect(url.includes("syncToken=")).toBe(false);
-      return new Response(
-        JSON.stringify({
+    server.use(
+      http.get(`${CAL}/calendars/primary/events`, ({ request }) => {
+        call++;
+        const url = new URL(request.url);
+        if (call === 1) {
+          expect(url.searchParams.get("syncToken")).toBe("STALE");
+          return HttpResponse.text("gone", { status: 410 });
+        }
+        // Full pull after reset — no syncToken.
+        expect(url.searchParams.has("syncToken")).toBe(false);
+        return HttpResponse.json({
           items: [
             {
               id: "evt_only",
@@ -206,10 +198,9 @@ describe("Google Calendar incremental sync", () => {
             },
           ],
           nextSyncToken: "TOK-AFTER-RESET",
-        }),
-        { status: 200 },
-      );
-    });
+        });
+      }),
+    );
 
     const sink = mkSink();
     const cleared = vi.fn();
@@ -237,15 +228,13 @@ describe("Google Calendar incremental sync", () => {
   });
 
   it("empty incremental page returns up_to_date and advances the token", async () => {
-    stubFetch((url) => {
-      if (url.includes("syncToken=TOK-A")) {
-        return new Response(
-          JSON.stringify({ items: [], nextSyncToken: "TOK-B" }),
-          { status: 200 },
-        );
-      }
-      throw new Error(`unexpected: ${url}`);
-    });
+    server.use(
+      http.get(`${CAL}/calendars/primary/events`, ({ request }) => {
+        const url = new URL(request.url);
+        expect(url.searchParams.get("syncToken")).toBe("TOK-A");
+        return HttpResponse.json({ items: [], nextSyncToken: "TOK-B" });
+      }),
+    );
 
     const sink = mkSink();
     const saved = vi.fn();

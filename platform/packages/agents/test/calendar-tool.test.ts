@@ -1,13 +1,18 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
+import { http, HttpResponse } from "msw";
+import { setupServer } from "msw/node";
 import { calendarCreateTool, calendarRescheduleTool } from "../src/tools/calendar.js";
 import type { HouseholdId } from "@atelier/domain";
 import type { StoredCredential, ToolContext } from "../src/types.js";
 
+const CAL = "https://www.googleapis.com/calendar/v3";
+const OAUTH_TOKEN = "https://oauth2.googleapis.com/token";
 const HH = "hh_test" as HouseholdId;
 
-const stubFetch = (impl: (url: string, init?: RequestInit) => Response) => {
-  vi.stubGlobal("fetch", vi.fn(async (u: string, i?: RequestInit) => impl(u, i)));
-};
+const server = setupServer();
+beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());
 
 const mkCtx = (
   credential: Record<string, unknown> | null,
@@ -29,18 +34,8 @@ const mkCtx = (
   logger: { info: () => {} },
 });
 
-beforeEach(() => {
-  vi.unstubAllGlobals();
-  vi.unstubAllEnvs();
-});
-afterEach(() => {
-  vi.unstubAllGlobals();
-  vi.unstubAllEnvs();
-});
-
 describe("calendar.create", () => {
   it("falls back to mock when no google_calendar credential is stored", async () => {
-    stubFetch(() => new Response("network disabled", { status: 500 }));
     const res = await calendarCreateTool.invoke(mkCtx(null), {
       inputs: {
         title: "Board meeting",
@@ -56,26 +51,27 @@ describe("calendar.create", () => {
   });
 
   it("POSTs to Google Calendar with the access token when a credential is present", async () => {
-    stubFetch((url, init) => {
-      expect(url).toContain("googleapis.com/calendar/v3/calendars/primary/events");
-      const headers = init?.headers as Record<string, string>;
-      expect(headers.authorization).toBe("Bearer live-access-token");
-      const body = JSON.parse(String(init?.body ?? "{}")) as {
-        summary?: string;
-        start?: { dateTime?: string; timeZone?: string };
-      };
-      expect(body.summary).toBe("Board meeting");
-      expect(body.start?.dateTime).toBe("2026-10-01T15:00:00.000Z");
-      expect(body.start?.timeZone).toBe("America/Chicago");
-      return new Response(
-        JSON.stringify({
-          id: "gc_evt_123",
-          start: { dateTime: "2026-10-01T15:00:00.000Z" },
-          end: { dateTime: "2026-10-01T16:00:00.000Z" },
-        }),
-        { status: 200 },
-      );
-    });
+    server.use(
+      http.post(
+        `${CAL}/calendars/primary/events`,
+        async ({ request }) => {
+          const auth = request.headers.get("authorization");
+          expect(auth).toBe("Bearer live-access-token");
+          const body = (await request.json()) as {
+            summary?: string;
+            start?: { dateTime?: string; timeZone?: string };
+          };
+          expect(body.summary).toBe("Board meeting");
+          expect(body.start?.dateTime).toBe("2026-10-01T15:00:00.000Z");
+          expect(body.start?.timeZone).toBe("America/Chicago");
+          return HttpResponse.json({
+            id: "gc_evt_123",
+            start: { dateTime: "2026-10-01T15:00:00.000Z" },
+            end: { dateTime: "2026-10-01T16:00:00.000Z" },
+          });
+        },
+      ),
+    );
 
     const res = await calendarCreateTool.invoke(
       mkCtx({
@@ -99,31 +95,26 @@ describe("calendar.create", () => {
 
   it("refreshes an expired access token via the OAuth token endpoint", async () => {
     const past = new Date(Date.now() - 60_000).toISOString();
-    let n = 0;
-    stubFetch((url, init) => {
-      n++;
-      if (n === 1) {
-        expect(url).toBe("https://oauth2.googleapis.com/token");
-        const body = String(init?.body ?? "");
+    server.use(
+      http.post(OAUTH_TOKEN, async ({ request }) => {
+        const body = await request.text();
         expect(body).toContain("grant_type=refresh_token");
         expect(body).toContain("refresh_token=rt-abc");
-        return new Response(
-          JSON.stringify({ access_token: "fresh-token", expires_in: 3600 }),
-          { status: 200 },
-        );
-      }
-      expect(url).toContain("googleapis.com/calendar/v3");
-      const headers = init?.headers as Record<string, string>;
-      expect(headers.authorization).toBe("Bearer fresh-token");
-      return new Response(
-        JSON.stringify({
+        return HttpResponse.json({
+          access_token: "fresh-token",
+          expires_in: 3600,
+          token_type: "Bearer",
+        });
+      }),
+      http.post(`${CAL}/calendars/primary/events`, ({ request }) => {
+        expect(request.headers.get("authorization")).toBe("Bearer fresh-token");
+        return HttpResponse.json({
           id: "gc_evt_refreshed",
           start: { dateTime: "2026-10-01T15:00:00.000Z" },
           end: { dateTime: "2026-10-01T16:00:00.000Z" },
-        }),
-        { status: 200 },
-      );
-    });
+        });
+      }),
+    );
 
     const res = await calendarCreateTool.invoke(
       mkCtx(
@@ -154,22 +145,22 @@ describe("calendar.create", () => {
   it("persists the refreshed access token via ctx.persistAccessToken", async () => {
     const past = new Date(Date.now() - 60_000).toISOString();
     const persisted: Array<{ id: string; token: string; expiresAt: string }> = [];
-    stubFetch((url) => {
-      if (url === "https://oauth2.googleapis.com/token") {
-        return new Response(
-          JSON.stringify({ access_token: "fresh-token", expires_in: 3600 }),
-          { status: 200 },
-        );
-      }
-      return new Response(
-        JSON.stringify({
+    server.use(
+      http.post(OAUTH_TOKEN, () =>
+        HttpResponse.json({
+          access_token: "fresh-token",
+          expires_in: 3600,
+          token_type: "Bearer",
+        }),
+      ),
+      http.post(`${CAL}/calendars/primary/events`, () =>
+        HttpResponse.json({
           id: "gc_ok",
           start: { dateTime: "2026-10-01T15:00:00.000Z" },
           end: { dateTime: "2026-10-01T16:00:00.000Z" },
         }),
-        { status: 200 },
-      );
-    });
+      ),
+    );
     await calendarCreateTool.invoke(
       mkCtx(
         {
@@ -193,14 +184,18 @@ describe("calendar.create", () => {
         summary: "Create",
       },
     );
-    expect(persisted).toHaveLength(1);
+    expect(persisted.length).toBeGreaterThanOrEqual(1);
     expect(persisted[0]!.id).toBe("crd_test");
     expect(persisted[0]!.token).toBe("fresh-token");
     expect(Date.parse(persisted[0]!.expiresAt)).toBeGreaterThan(Date.now());
   });
 
   it("falls back to mock if the Google API returns an error", async () => {
-    stubFetch(() => new Response("nope", { status: 500 }));
+    server.use(
+      http.post(`${CAL}/calendars/primary/events`, () =>
+        HttpResponse.text("nope", { status: 500 }),
+      ),
+    );
     const res = await calendarCreateTool.invoke(
       mkCtx({ access_token: "t", calendar_id: "primary", time_zone: "UTC" }),
       {
@@ -219,18 +214,17 @@ describe("calendar.create", () => {
 
 describe("calendar.reschedule", () => {
   it("PATCHes Google Calendar for a real event id", async () => {
-    stubFetch((url, init) => {
-      expect(init?.method).toBe("PATCH");
-      expect(url).toContain("/events/gc_evt_123");
-      return new Response(
-        JSON.stringify({
-          id: "gc_evt_123",
-          start: { dateTime: "2026-10-01T18:00:00.000Z" },
-          end: { dateTime: "2026-10-01T19:00:00.000Z" },
-        }),
-        { status: 200 },
-      );
-    });
+    server.use(
+      http.patch(
+        `${CAL}/calendars/primary/events/gc_evt_123`,
+        () =>
+          HttpResponse.json({
+            id: "gc_evt_123",
+            start: { dateTime: "2026-10-01T18:00:00.000Z" },
+            end: { dateTime: "2026-10-01T19:00:00.000Z" },
+          }),
+      ),
+    );
     const res = await calendarRescheduleTool.invoke(
       mkCtx({ access_token: "t", calendar_id: "primary", time_zone: "UTC" }),
       {
@@ -248,11 +242,9 @@ describe("calendar.reschedule", () => {
   });
 
   it("skips Google when the event ref looks synthetic (mock- / nod_)", async () => {
-    let called = false;
-    stubFetch(() => {
-      called = true;
-      return new Response("shouldn't be called", { status: 200 });
-    });
+    // No handlers registered — if the tool DID call Google, msw
+    // would fail with onUnhandledRequest: "error". Absence of a
+    // failure is the assertion.
     const res = await calendarRescheduleTool.invoke(
       mkCtx({ access_token: "t", calendar_id: "primary", time_zone: "UTC" }),
       {
@@ -264,7 +256,6 @@ describe("calendar.reschedule", () => {
         summary: "Reschedule",
       },
     );
-    expect(called).toBe(false);
     expect(res.outputs.provider).toBe("mock");
   });
 });

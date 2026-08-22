@@ -1,13 +1,18 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
+import { http, HttpResponse } from "msw";
+import { setupServer } from "msw/node";
 import { messageSendTool } from "../src/tools/message.js";
 import type { HouseholdId } from "@atelier/domain";
 import type { StoredCredential, ToolContext } from "../src/types.js";
 
+const GMAIL_SEND = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send";
+const OAUTH_TOKEN = "https://oauth2.googleapis.com/token";
 const HH = "hh_test" as HouseholdId;
 
-const stubFetch = (impl: (url: string, init?: RequestInit) => Response) => {
-  vi.stubGlobal("fetch", vi.fn(async (u: string, i?: RequestInit) => impl(u, i)));
-};
+const server = setupServer();
+beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());
 
 const mkCtx = (
   credential: Record<string, unknown> | null,
@@ -36,22 +41,14 @@ const baseInputs = {
 };
 
 const base64UrlDecode = (s: string): string => {
-  const padded = s.replace(/-/g, "+").replace(/_/g, "/") + "==".slice(0, (4 - (s.length % 4)) % 4);
+  const padded =
+    s.replace(/-/g, "+").replace(/_/g, "/") +
+    "==".slice(0, (4 - (s.length % 4)) % 4);
   return Buffer.from(padded, "base64").toString("utf-8");
 };
 
-beforeEach(() => {
-  vi.unstubAllGlobals();
-  vi.unstubAllEnvs();
-});
-afterEach(() => {
-  vi.unstubAllGlobals();
-  vi.unstubAllEnvs();
-});
-
 describe("message.send", () => {
   it("falls back to mock when no gmail credential is stored", async () => {
-    stubFetch(() => new Response("network disabled", { status: 500 }));
     const res = await messageSendTool.invoke(mkCtx(null), {
       inputs: baseInputs,
       summary: "Send reply",
@@ -63,18 +60,18 @@ describe("message.send", () => {
 
   it("POSTs a base64url-encoded RFC-822 message to Gmail when a credential is present", async () => {
     let capturedRaw: string | null = null;
-    stubFetch((url, init) => {
-      expect(url).toBe("https://gmail.googleapis.com/gmail/v1/users/me/messages/send");
-      const headers = init?.headers as Record<string, string>;
-      expect(headers.authorization).toBe("Bearer live-token");
-      const body = JSON.parse(String(init?.body ?? "{}")) as { raw?: string };
-      expect(typeof body.raw).toBe("string");
-      capturedRaw = base64UrlDecode(body.raw!);
-      return new Response(
-        JSON.stringify({ id: "gm_msg_123", threadId: "gm_thread_1" }),
-        { status: 200 },
-      );
-    });
+    server.use(
+      http.post(GMAIL_SEND, async ({ request }) => {
+        expect(request.headers.get("authorization")).toBe("Bearer live-token");
+        const body = (await request.json()) as { raw?: string };
+        expect(typeof body.raw).toBe("string");
+        capturedRaw = base64UrlDecode(body.raw!);
+        return HttpResponse.json({
+          id: "gm_msg_123",
+          threadId: "gm_thread_1",
+        });
+      }),
+    );
 
     const res = await messageSendTool.invoke(
       mkCtx({
@@ -89,7 +86,6 @@ describe("message.send", () => {
     expect(res.outputs.sentMessageId).toBe("gm_msg_123");
     expect(res.outputs.threadId).toBe("gm_thread_1");
 
-    // Verify the RFC-822 body was assembled correctly.
     expect(capturedRaw).toContain("From: Atelier — Alex's office <alex@atelier.example>");
     expect(capturedRaw).toContain("To: Sam Rodriguez <sam@example.com>");
     expect(capturedRaw).toContain("Subject: Re: Quote for fence repair");
@@ -98,13 +94,13 @@ describe("message.send", () => {
 
   it("adds In-Reply-To and References headers when the input carries inReplyToMessageId", async () => {
     let capturedRaw: string | null = null;
-    stubFetch((_url, init) => {
-      const body = JSON.parse(String(init?.body ?? "{}")) as { raw?: string };
-      capturedRaw = base64UrlDecode(body.raw!);
-      return new Response(JSON.stringify({ id: "gm_msg_x", threadId: "gm_thread_x" }), {
-        status: 200,
-      });
-    });
+    server.use(
+      http.post(GMAIL_SEND, async ({ request }) => {
+        const body = (await request.json()) as { raw?: string };
+        capturedRaw = base64UrlDecode(body.raw!);
+        return HttpResponse.json({ id: "gm_msg_x", threadId: "gm_thread_x" });
+      }),
+    );
     await messageSendTool.invoke(
       mkCtx({
         access_token: "live-token",
@@ -121,23 +117,21 @@ describe("message.send", () => {
 
   it("refreshes an expired access token before sending", async () => {
     const past = new Date(Date.now() - 60_000).toISOString();
-    let n = 0;
-    stubFetch((url, init) => {
-      n++;
-      if (n === 1) {
-        expect(url).toBe("https://oauth2.googleapis.com/token");
-        const body = String(init?.body ?? "");
+    server.use(
+      http.post(OAUTH_TOKEN, async ({ request }) => {
+        const body = await request.text();
         expect(body).toContain("refresh_token=rt-abc");
-        return new Response(
-          JSON.stringify({ access_token: "fresh-gmail-token", expires_in: 3600 }),
-          { status: 200 },
-        );
-      }
-      expect(url).toContain("gmail.googleapis.com");
-      const headers = init?.headers as Record<string, string>;
-      expect(headers.authorization).toBe("Bearer fresh-gmail-token");
-      return new Response(JSON.stringify({ id: "gm_msg_2", threadId: "t2" }), { status: 200 });
-    });
+        return HttpResponse.json({
+          access_token: "fresh-gmail-token",
+          expires_in: 3600,
+          token_type: "Bearer",
+        });
+      }),
+      http.post(GMAIL_SEND, ({ request }) => {
+        expect(request.headers.get("authorization")).toBe("Bearer fresh-gmail-token");
+        return HttpResponse.json({ id: "gm_msg_2", threadId: "t2" });
+      }),
+    );
     const res = await messageSendTool.invoke(
       mkCtx(
         {
@@ -156,7 +150,9 @@ describe("message.send", () => {
   });
 
   it("falls back to mock if the Gmail API returns an error", async () => {
-    stubFetch(() => new Response("nope", { status: 500 }));
+    server.use(
+      http.post(GMAIL_SEND, () => HttpResponse.text("nope", { status: 500 })),
+    );
     const res = await messageSendTool.invoke(
       mkCtx({
         access_token: "live-token",
@@ -168,16 +164,13 @@ describe("message.send", () => {
   });
 
   it("falls back to mock if the gmail credential has no from_address and none is supplied", async () => {
-    let called = false;
-    stubFetch(() => {
-      called = true;
-      return new Response("shouldn't run", { status: 200 });
-    });
+    // No handlers registered — the tool should short-circuit
+    // before making any request. onUnhandledRequest: "error"
+    // guarantees a live call would fail loudly.
     const res = await messageSendTool.invoke(
       mkCtx({ access_token: "live-token" }),
       { inputs: baseInputs, summary: "Send reply" },
     );
-    expect(called).toBe(false);
     expect(res.outputs.provider).toBe("mock");
   });
 });

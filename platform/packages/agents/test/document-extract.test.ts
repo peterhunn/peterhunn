@@ -1,12 +1,22 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from "vitest";
+import { http, HttpResponse } from "msw";
+import { setupServer } from "msw/node";
 import { extractDocumentFields } from "../src/tools/document-extract.js";
 
+const ANTHROPIC = "https://api.anthropic.com/v1/messages";
+
+const server = setupServer();
+beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());
+
 beforeEach(() => {
-  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+  // Force the "no key" branch by default. Tests that want the
+  // live path pass apiKey explicitly.
   vi.stubEnv("ANTHROPIC_API_KEY", "");
 });
 afterEach(() => {
-  vi.unstubAllGlobals();
   vi.unstubAllEnvs();
 });
 
@@ -19,7 +29,6 @@ describe("document extractor", () => {
     });
     expect(res.provider).toBe("mock");
     expect(res.reason).toBe("no_anthropic_api_key");
-    // Filename hint turns into a title guess.
     expect(res.proposed.title?.toLowerCase()).toContain("us passport alex");
   });
 
@@ -34,11 +43,7 @@ describe("document extractor", () => {
     expect(res.reason).toMatch(/unsupported_mime/);
   });
 
-  it("PDF path: pdf-parse text goes to a text-only Anthropic call", async () => {
-    // Non-PDF bytes will trip pdf-parse; we test the failure branch
-    // which stamps a pdf_parse reason. Full happy-path requires a
-    // real PDF payload — the extractor is exercised end-to-end in
-    // the API integration test via a shipped fixture there.
+  it("PDF path: pdf-parse failure lands as mock with pdf_parse reason", async () => {
     const res = await extractDocumentFields({
       bytes: Buffer.from("not a real pdf"),
       mime: "application/pdf",
@@ -50,22 +55,17 @@ describe("document extractor", () => {
   });
 
   it("calls Anthropic and parses a fenced JSON block", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string) => {
-        expect(url).toContain("/v1/messages");
-        return new Response(
-          JSON.stringify({
-            content: [
-              {
-                type: "text",
-                text: 'Here you go:\n```json\n{"title": "US Passport", "category": "identity", "expiresAt": "2029-05-01T00:00:00Z"}\n```',
-              },
-            ],
-          }),
-          { status: 200 },
-        );
-      }),
+    server.use(
+      http.post(ANTHROPIC, () =>
+        HttpResponse.json({
+          content: [
+            {
+              type: "text",
+              text: 'Here you go:\n```json\n{"title": "US Passport", "category": "identity", "expiresAt": "2029-05-01T00:00:00Z"}\n```',
+            },
+          ],
+        }),
+      ),
     );
 
     const res = await extractDocumentFields({
@@ -81,9 +81,8 @@ describe("document extractor", () => {
   });
 
   it("Anthropic 4xx falls back to mock with the status in reason", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => new Response("bad", { status: 400 })),
+    server.use(
+      http.post(ANTHROPIC, () => HttpResponse.text("bad", { status: 400 })),
     );
     const res = await extractDocumentFields({
       bytes: Buffer.from([0xff, 0xd8, 0xff]),

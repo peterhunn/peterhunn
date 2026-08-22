@@ -1,4 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll, vi } from "vitest";
+import { http, HttpResponse } from "msw";
+import { setupServer } from "msw/node";
 import {
   Orchestrator,
   ToolRegistry,
@@ -282,14 +284,15 @@ describe("calendar agent", () => {
 });
 
 describe("calendar agent — google calendar conflict detection", () => {
-  beforeEach(() => {
-    vi.unstubAllGlobals();
-    vi.unstubAllEnvs();
-  });
+  const CAL = "https://www.googleapis.com/calendar/v3";
+  const server = setupServer();
+  beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
   afterEach(() => {
+    server.resetHandlers();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
   });
+  afterAll(() => server.close());
 
   const mkCredSource = (): CredentialSource => ({
     read: (_hh, provider) => {
@@ -307,27 +310,19 @@ describe("calendar agent — google calendar conflict detection", () => {
   });
 
   it("detects a conflict from a live Google Calendar event even when the graph is empty", async () => {
-    // Stub the events.list response with one event that overlaps.
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string) => {
-        if (url.includes("/calendar/v3/calendars/primary/events")) {
-          return new Response(
-            JSON.stringify({
-              items: [
-                {
-                  id: "gc_evt_1",
-                  summary: "Team standup",
-                  start: { dateTime: "2026-09-01T15:15:00.000Z" },
-                  end: { dateTime: "2026-09-01T15:45:00.000Z" },
-                },
-              ],
-            }),
-            { status: 200 },
-          );
-        }
-        throw new Error(`unexpected fetch: ${url}`);
-      }),
+    server.use(
+      http.get(`${CAL}/calendars/primary/events`, () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: "gc_evt_1",
+              summary: "Team standup",
+              start: { dateTime: "2026-09-01T15:15:00.000Z" },
+              end: { dateTime: "2026-09-01T15:45:00.000Z" },
+            },
+          ],
+        }),
+      ),
     );
 
     const orch = new Orchestrator({
@@ -359,26 +354,19 @@ describe("calendar agent — google calendar conflict detection", () => {
   });
 
   it("dedupes a Google Calendar event whose eventRef matches an existing graph node", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string) => {
-        if (url.includes("/calendar/v3/calendars/primary/events")) {
-          return new Response(
-            JSON.stringify({
-              items: [
-                {
-                  id: "gc_dup",
-                  summary: "Duplicate",
-                  start: { dateTime: "2026-09-01T14:00:00.000Z" },
-                  end: { dateTime: "2026-09-01T14:30:00.000Z" },
-                },
-              ],
-            }),
-            { status: 200 },
-          );
-        }
-        throw new Error(`unexpected fetch: ${url}`);
-      }),
+    server.use(
+      http.get(`${CAL}/calendars/primary/events`, () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: "gc_dup",
+              summary: "Duplicate",
+              start: { dateTime: "2026-09-01T14:00:00.000Z" },
+              end: { dateTime: "2026-09-01T14:30:00.000Z" },
+            },
+          ],
+        }),
+      ),
     );
     const graphWithSameRef: GraphView = {
       listNodes: (opts) =>
@@ -435,9 +423,10 @@ describe("calendar agent — google calendar conflict detection", () => {
   });
 
   it("falls back to graph-only when the live read fails", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => new Response("boom", { status: 500 })),
+    server.use(
+      http.get(`${CAL}/calendars/primary/events`, () =>
+        HttpResponse.text("boom", { status: 500 }),
+      ),
     );
     const orch = new Orchestrator({
       agents: [calendarAgent],

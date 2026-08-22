@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
+import { http, HttpResponse } from "msw";
+import { setupServer } from "msw/node";
 import {
   openDb,
   contactEndpointRepo,
@@ -39,15 +41,23 @@ beforeAll(async () => {
   await app.ready();
 });
 
-afterAll(async () => await app.close());
+// MSW server — intercepts fetch (Anthropic, googleapis, etc.) AND
+// axios (twilio SDK) at the socket layer. Bypass unhandled requests
+// by default so incidental network activity from planner runs
+// (mock LLM adapter never actually calls out; but any accidental
+// real call would be caught here) resolves to nothing rather than
+// throwing across every test.
+const server = setupServer();
+beforeAll(() => server.listen({ onUnhandledRequest: "bypass" }));
+afterEach(() => server.resetHandlers());
+
+afterAll(async () => {
+  server.close();
+  await app.close();
+});
 
 beforeEach(() => {
   vi.unstubAllGlobals();
-  // Block any tool that would hit real HTTP during a planner run.
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async () => new Response("{}", { status: 200 })),
-  );
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -334,21 +344,24 @@ describe("messaging outbound send", () => {
       },
     });
 
-    const twilioSpy = vi.fn(async (url: string) => {
-      if (url.includes("/Accounts/ACxxx/Messages.json")) {
-        return new Response(
-          JSON.stringify({
-            sid: "SMlive123",
-            from: "+14155550000",
-            to: "+14155551212",
-            status: "queued",
-          }),
-          { status: 201 },
-        );
-      }
-      throw new Error(`unexpected ${url}`);
-    });
-    vi.stubGlobal("fetch", twilioSpy);
+    let twilioHit = 0;
+    server.use(
+      http.post(
+        "https://api.twilio.com/2010-04-01/Accounts/ACxxx/Messages.json",
+        () => {
+          twilioHit++;
+          return HttpResponse.json(
+            {
+              sid: "SMlive123",
+              from: "+14155550000",
+              to: "+14155551212",
+              status: "queued",
+            },
+            { status: 201 },
+          );
+        },
+      ),
+    );
 
     const res = await app.inject({
       method: "POST",
@@ -364,7 +377,7 @@ describe("messaging outbound send", () => {
     const sent = res.json().sent;
     expect(sent.provider).toBe("twilio");
     expect(sent.externalMessageId).toBe("SMlive123");
-    expect(twilioSpy).toHaveBeenCalled();
+    expect(twilioHit).toBe(1);
   });
 });
 

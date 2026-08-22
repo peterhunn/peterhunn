@@ -1,13 +1,27 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach } from "vitest";
+import { http, HttpResponse } from "msw";
+import { setupServer } from "msw/node";
 import { syncGmailInbox, type GmailSyncCursor } from "../src/tools/gmail-sync.js";
 import type { HouseholdId } from "@atelier/domain";
 import type { StoredCredential } from "../src/types.js";
 
+// MSW-based tests. Intercepts at the socket level so gaxios (the
+// transport googleapis uses) hits our mocked responses without any
+// stubbing of fetch. Each test adds its own handlers via
+// server.use(); unhandled requests fail loudly so a missed URL
+// surfaces as a test failure instead of a silent live call.
+
+const GMAIL = "https://gmail.googleapis.com/gmail/v1";
 const HH = "hh_test" as HouseholdId;
 
-const stubFetch = (impl: (url: string, init?: RequestInit) => Response) => {
-  vi.stubGlobal("fetch", vi.fn(async (u: string, i?: RequestInit) => impl(u, i)));
-};
+const server = setupServer();
+
+beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());
+beforeEach(() => {
+  // no-op — handlers scoped per test.
+});
 
 const b64url = (s: string): string =>
   Buffer.from(s, "utf-8")
@@ -56,15 +70,6 @@ const mkSink = (existing: Set<string> = new Set()) => {
   };
 };
 
-beforeEach(() => {
-  vi.unstubAllGlobals();
-  vi.unstubAllEnvs();
-});
-afterEach(() => {
-  vi.unstubAllGlobals();
-  vi.unstubAllEnvs();
-});
-
 describe("syncGmailInbox", () => {
   it("returns consulted:false when the household has not connected Gmail", async () => {
     const sink = mkSink();
@@ -74,67 +79,54 @@ describe("syncGmailInbox", () => {
   });
 
   it("lists unread messages, fetches each one, and upserts to the sink", async () => {
-    stubFetch((url) => {
-      if (url.includes("/users/me/messages?q=")) {
-        return new Response(
-          JSON.stringify({
-            messages: [
-              { id: "gm_1", threadId: "t_1" },
-              { id: "gm_2", threadId: "t_2" },
+    server.use(
+      http.get(`${GMAIL}/users/me/messages`, () =>
+        HttpResponse.json({
+          messages: [
+            { id: "gm_1", threadId: "t_1" },
+            { id: "gm_2", threadId: "t_2" },
+          ],
+        }),
+      ),
+      http.get(`${GMAIL}/users/me/messages/gm_1`, () =>
+        HttpResponse.json({
+          id: "gm_1",
+          threadId: "t_1",
+          internalDate: String(Date.UTC(2026, 8, 1, 15, 0, 0)),
+          payload: {
+            headers: [
+              { name: "From", value: '"Sam Rodriguez" <sam@example.com>' },
+              { name: "Subject", value: "Quote for fence repair" },
+              { name: "Date", value: "Tue, 01 Sep 2026 15:00:00 +0000" },
             ],
-          }),
-          { status: 200 },
-        );
-      }
-      if (url.includes("/users/me/messages/gm_1")) {
-        return new Response(
-          JSON.stringify({
-            id: "gm_1",
-            threadId: "t_1",
-            internalDate: String(Date.UTC(2026, 8, 1, 15, 0, 0)),
-            payload: {
-              headers: [
-                { name: "From", value: '"Sam Rodriguez" <sam@example.com>' },
-                { name: "Subject", value: "Quote for fence repair" },
-                { name: "Date", value: "Tue, 01 Sep 2026 15:00:00 +0000" },
-              ],
-              mimeType: "text/plain",
-              body: { data: b64url("Estimate is $1,850. Please confirm by Friday.") },
-            },
-          }),
-          { status: 200 },
-        );
-      }
-      if (url.includes("/users/me/messages/gm_2")) {
-        return new Response(
-          JSON.stringify({
-            id: "gm_2",
-            threadId: "t_2",
-            internalDate: String(Date.UTC(2026, 8, 1, 16, 0, 0)),
-            payload: {
-              headers: [
-                { name: "From", value: "office@ridgeschool.example" },
-                { name: "Subject", value: "Field trip form" },
-                { name: "Date", value: "Tue, 01 Sep 2026 16:00:00 +0000" },
-              ],
-              mimeType: "multipart/alternative",
-              parts: [
-                {
-                  mimeType: "text/html",
-                  body: { data: b64url("<html><body><p>Please sign & return.</p></body></html>") },
-                },
-                {
-                  mimeType: "text/plain",
-                  body: { data: b64url("Please sign & return.") },
-                },
-              ],
-            },
-          }),
-          { status: 200 },
-        );
-      }
-      throw new Error(`unexpected fetch: ${url}`);
-    });
+            mimeType: "text/plain",
+            body: { data: b64url("Estimate is $1,850. Please confirm by Friday.") },
+          },
+        }),
+      ),
+      http.get(`${GMAIL}/users/me/messages/gm_2`, () =>
+        HttpResponse.json({
+          id: "gm_2",
+          threadId: "t_2",
+          internalDate: String(Date.UTC(2026, 8, 1, 16, 0, 0)),
+          payload: {
+            headers: [
+              { name: "From", value: "office@ridgeschool.example" },
+              { name: "Subject", value: "Field trip form" },
+              { name: "Date", value: "Tue, 01 Sep 2026 16:00:00 +0000" },
+            ],
+            mimeType: "multipart/alternative",
+            parts: [
+              {
+                mimeType: "text/html",
+                body: { data: b64url("<html><body><p>Please sign & return.</p></body></html>") },
+              },
+              { mimeType: "text/plain", body: { data: b64url("Please sign & return.") } },
+            ],
+          },
+        }),
+      ),
+    );
     const sink = mkSink();
     const res = await syncGmailInbox(
       mkCtx({ access_token: "at-abc", from_address: "alex@atelier.example" }),
@@ -152,39 +144,36 @@ describe("syncGmailInbox", () => {
   });
 
   it("counts dedupe skips returned by the sink", async () => {
-    stubFetch((url) => {
-      if (url.includes("/users/me/messages?q=")) {
-        return new Response(JSON.stringify({ messages: [{ id: "dup_1" }] }), { status: 200 });
-      }
-      if (url.includes("/users/me/messages/dup_1")) {
-        return new Response(
-          JSON.stringify({
-            id: "dup_1",
-            payload: {
-              headers: [
-                { name: "From", value: "a@b.com" },
-                { name: "Subject", value: "hi" },
-              ],
-              mimeType: "text/plain",
-              body: { data: b64url("body") },
-            },
-          }),
-          { status: 200 },
-        );
-      }
-      throw new Error(`unexpected fetch: ${url}`);
-    });
-    const sink = mkSink(new Set(["dup_1"]));
-    const res = await syncGmailInbox(
-      mkCtx({ access_token: "at-abc" }),
-      sink,
+    server.use(
+      http.get(`${GMAIL}/users/me/messages`, () =>
+        HttpResponse.json({ messages: [{ id: "dup_1" }] }),
+      ),
+      http.get(`${GMAIL}/users/me/messages/dup_1`, () =>
+        HttpResponse.json({
+          id: "dup_1",
+          payload: {
+            headers: [
+              { name: "From", value: "a@b.com" },
+              { name: "Subject", value: "hi" },
+            ],
+            mimeType: "text/plain",
+            body: { data: b64url("body") },
+          },
+        }),
+      ),
     );
+    const sink = mkSink(new Set(["dup_1"]));
+    const res = await syncGmailInbox(mkCtx({ access_token: "at-abc" }), sink);
     expect(res.inserted).toBe(0);
     expect(res.skippedDuplicates).toBe(1);
   });
 
   it("returns an error field when the list endpoint returns non-2xx", async () => {
-    stubFetch(() => new Response("nope", { status: 500 }));
+    server.use(
+      http.get(`${GMAIL}/users/me/messages`, () =>
+        HttpResponse.text("nope", { status: 500 }),
+      ),
+    );
     const res = await syncGmailInbox(mkCtx({ access_token: "at-abc" }), mkSink());
     expect(res.consulted).toBe(true);
     expect(res.error).toContain("gmail_list_500");
@@ -192,29 +181,25 @@ describe("syncGmailInbox", () => {
   });
 
   it("saves a historyId cursor on the first full pull", async () => {
-    stubFetch((url) => {
-      if (url.includes("/users/me/messages?q=")) {
-        return new Response(JSON.stringify({ messages: [{ id: "gm_A" }] }), { status: 200 });
-      }
-      if (url.includes("/users/me/messages/gm_A")) {
-        return new Response(
-          JSON.stringify({
-            id: "gm_A",
-            historyId: "1000",
-            payload: {
-              headers: [
-                { name: "From", value: "a@b.com" },
-                { name: "Subject", value: "hi" },
-              ],
-              mimeType: "text/plain",
-              body: { data: b64url("body") },
-            },
-          }),
-          { status: 200 },
-        );
-      }
-      throw new Error(`unexpected fetch: ${url}`);
-    });
+    server.use(
+      http.get(`${GMAIL}/users/me/messages`, () =>
+        HttpResponse.json({ messages: [{ id: "gm_A" }] }),
+      ),
+      http.get(`${GMAIL}/users/me/messages/gm_A`, () =>
+        HttpResponse.json({
+          id: "gm_A",
+          historyId: "1000",
+          payload: {
+            headers: [
+              { name: "From", value: "a@b.com" },
+              { name: "Subject", value: "hi" },
+            ],
+            mimeType: "text/plain",
+            body: { data: b64url("body") },
+          },
+        }),
+      ),
+    );
     const saved: Array<{ cursor: { historyId?: string } }> = [];
     const cursor: GmailSyncCursor = {
       read: () => null,
@@ -233,56 +218,50 @@ describe("syncGmailInbox", () => {
   it("uses the History API when a cursor exists and only fetches added INBOX messages", async () => {
     let historyCalls = 0;
     let listCalls = 0;
-    stubFetch((url) => {
-      if (url.includes("/users/me/history")) {
+    server.use(
+      http.get(`${GMAIL}/users/me/history`, ({ request }) => {
         historyCalls++;
-        expect(url).toContain("startHistoryId=1000");
-        expect(url).toContain("historyTypes=messageAdded");
-        return new Response(
-          JSON.stringify({
-            historyId: "1050",
-            history: [
-              {
-                id: "1010",
-                messagesAdded: [
-                  { message: { id: "gm_new", threadId: "t_new", labelIds: ["INBOX", "UNREAD"] } },
-                ],
-              },
-              {
-                // sent-only mail — no INBOX label; must be ignored.
-                id: "1020",
-                messagesAdded: [
-                  { message: { id: "gm_sent", threadId: "t_sent", labelIds: ["SENT"] } },
-                ],
-              },
-            ],
-          }),
-          { status: 200 },
-        );
-      }
-      if (url.includes("/users/me/messages?q=")) {
-        listCalls++;
-        return new Response("shouldn't hit list on incremental", { status: 500 });
-      }
-      if (url.includes("/users/me/messages/gm_new")) {
-        return new Response(
-          JSON.stringify({
-            id: "gm_new",
-            historyId: "1040",
-            payload: {
-              headers: [
-                { name: "From", value: "sam@example.com" },
-                { name: "Subject", value: "Fresh" },
+        const url = new URL(request.url);
+        expect(url.searchParams.get("startHistoryId")).toBe("1000");
+        expect(url.searchParams.getAll("historyTypes")).toContain("messageAdded");
+        return HttpResponse.json({
+          historyId: "1050",
+          history: [
+            {
+              id: "1010",
+              messagesAdded: [
+                { message: { id: "gm_new", threadId: "t_new", labelIds: ["INBOX", "UNREAD"] } },
               ],
-              mimeType: "text/plain",
-              body: { data: b64url("just landed") },
             },
-          }),
-          { status: 200 },
-        );
-      }
-      throw new Error(`unexpected fetch: ${url}`);
-    });
+            {
+              // sent-only mail — no INBOX label; must be ignored.
+              id: "1020",
+              messagesAdded: [
+                { message: { id: "gm_sent", threadId: "t_sent", labelIds: ["SENT"] } },
+              ],
+            },
+          ],
+        });
+      }),
+      http.get(`${GMAIL}/users/me/messages`, () => {
+        listCalls++;
+        return HttpResponse.text("shouldn't hit list on incremental", { status: 500 });
+      }),
+      http.get(`${GMAIL}/users/me/messages/gm_new`, () =>
+        HttpResponse.json({
+          id: "gm_new",
+          historyId: "1040",
+          payload: {
+            headers: [
+              { name: "From", value: "sam@example.com" },
+              { name: "Subject", value: "Fresh" },
+            ],
+            mimeType: "text/plain",
+            body: { data: b64url("just landed") },
+          },
+        }),
+      ),
+    );
     const saved: Array<{ cursor: { historyId?: string } }> = [];
     const cursor: GmailSyncCursor = {
       read: () => ({ historyId: "1000" }),
@@ -304,15 +283,11 @@ describe("syncGmailInbox", () => {
   });
 
   it("returns up_to_date when the history API returns no messagesAdded", async () => {
-    stubFetch((url) => {
-      if (url.includes("/users/me/history")) {
-        return new Response(
-          JSON.stringify({ historyId: "2000", history: [] }),
-          { status: 200 },
-        );
-      }
-      throw new Error(`unexpected fetch: ${url}`);
-    });
+    server.use(
+      http.get(`${GMAIL}/users/me/history`, () =>
+        HttpResponse.json({ historyId: "2000", history: [] }),
+      ),
+    );
     const saved: Array<{ cursor: { historyId?: string } }> = [];
     const cursor: GmailSyncCursor = {
       read: () => ({ historyId: "1500" }),
@@ -329,32 +304,28 @@ describe("syncGmailInbox", () => {
 
   it("resets the cursor and falls back to a full pull on history 404", async () => {
     let cleared = false;
-    stubFetch((url) => {
-      if (url.includes("/users/me/history")) {
-        return new Response("cursor too old", { status: 404 });
-      }
-      if (url.includes("/users/me/messages?q=")) {
-        return new Response(JSON.stringify({ messages: [{ id: "gm_R" }] }), { status: 200 });
-      }
-      if (url.includes("/users/me/messages/gm_R")) {
-        return new Response(
-          JSON.stringify({
-            id: "gm_R",
-            historyId: "9000",
-            payload: {
-              headers: [
-                { name: "From", value: "a@b.com" },
-                { name: "Subject", value: "R" },
-              ],
-              mimeType: "text/plain",
-              body: { data: b64url("R body") },
-            },
-          }),
-          { status: 200 },
-        );
-      }
-      throw new Error(`unexpected fetch: ${url}`);
-    });
+    server.use(
+      http.get(`${GMAIL}/users/me/history`, () =>
+        HttpResponse.text("cursor too old", { status: 404 }),
+      ),
+      http.get(`${GMAIL}/users/me/messages`, () =>
+        HttpResponse.json({ messages: [{ id: "gm_R" }] }),
+      ),
+      http.get(`${GMAIL}/users/me/messages/gm_R`, () =>
+        HttpResponse.json({
+          id: "gm_R",
+          historyId: "9000",
+          payload: {
+            headers: [
+              { name: "From", value: "a@b.com" },
+              { name: "Subject", value: "R" },
+            ],
+            mimeType: "text/plain",
+            body: { data: b64url("R body") },
+          },
+        }),
+      ),
+    );
     const cursor: GmailSyncCursor = {
       read: () => ({ historyId: "1" }),
       save: () => {},
@@ -371,32 +342,27 @@ describe("syncGmailInbox", () => {
   });
 
   it("skips a single message when its detail fetch errors, keeps going with the rest", async () => {
-    stubFetch((url) => {
-      if (url.includes("/users/me/messages?q=")) {
-        return new Response(
-          JSON.stringify({ messages: [{ id: "ok_1" }, { id: "bad_2" }] }),
-          { status: 200 },
-        );
-      }
-      if (url.includes("/users/me/messages/ok_1")) {
-        return new Response(
-          JSON.stringify({
-            id: "ok_1",
-            payload: {
-              headers: [
-                { name: "From", value: "a@b.com" },
-                { name: "Subject", value: "hi" },
-              ],
-              mimeType: "text/plain",
-              body: { data: b64url("ok body") },
-            },
-          }),
-          { status: 200 },
-        );
-      }
-      // bad_2 fails
-      return new Response("nope", { status: 500 });
-    });
+    server.use(
+      http.get(`${GMAIL}/users/me/messages`, () =>
+        HttpResponse.json({ messages: [{ id: "ok_1" }, { id: "bad_2" }] }),
+      ),
+      http.get(`${GMAIL}/users/me/messages/ok_1`, () =>
+        HttpResponse.json({
+          id: "ok_1",
+          payload: {
+            headers: [
+              { name: "From", value: "a@b.com" },
+              { name: "Subject", value: "hi" },
+            ],
+            mimeType: "text/plain",
+            body: { data: b64url("ok body") },
+          },
+        }),
+      ),
+      http.get(`${GMAIL}/users/me/messages/bad_2`, () =>
+        HttpResponse.text("nope", { status: 500 }),
+      ),
+    );
     const sink = mkSink();
     const res = await syncGmailInbox(mkCtx({ access_token: "at-abc" }), sink);
     expect(res.listed).toBe(2);
