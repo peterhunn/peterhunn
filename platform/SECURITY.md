@@ -117,20 +117,35 @@ as the DB — a compromised host reads both. KMS-wrapped per-row
 data keys close that gap. Rotation of the master key is manual
 today; see DEPLOY.md.
 
-### 🔴 Bearer tokens have no expiry, no rotation, no revocation
+### 🟢 Bearer tokens have expiry + rotation + explicit revoke
 
-- `mintToken` returns a token that lives forever. The `revokedAt`
-  column exists but nothing populates it beyond manual admin work.
-- No rotation flow. Compromised token = compromised account until
-  someone notices and hand-revokes.
+- Every `mintToken` now stamps an `expires_at`. Default TTL is
+  90 days; tunable per mint via `ttlSeconds` or an explicit
+  `expiresAt`. Passing `expiresAt: null` opts out (used by the
+  seed script for a 1-year dev token — never in the API path).
+- The auth plugin uses `identity.resolveToken(token)` which
+  returns a discriminated union `{ ok, actor?, reason? }`. 401
+  responses now distinguish `invalid_token` (unknown) /
+  `expired_token` (past `expires_at`) / `revoked_token`
+  (`revoked_at` non-null) so a client can react appropriately.
+- Rotation: `POST /me/tokens/rotate` revokes the caller's
+  current token and mints a fresh one with the same actor +
+  label. Body accepts an optional `ttlSeconds` override.
+  Response returns the plaintext token once — never again.
+- Explicit revoke: `POST /me/tokens/:tokenId/revoke` marks a
+  specific token revoked. A caller may only revoke tokens they
+  own (checked against `listTokens` on the actor).
+- List: `GET /me/tokens` returns metadata for all tokens owned
+  by the actor (id, label, created, expires, lastUsed,
+  revoked). Never leaks the hash or plaintext.
+- Every successful `resolveToken` stamps `last_used_at` so
+  "haven't touched this token in 60 days — safe to revoke?"
+  becomes an answerable question.
 
-**Fix (blocks customer #1):** either (a) short-lived JWTs signed
-by a rotating key with a refresh-token flow, or (b) database-backed
-sessions with expiry + explicit rotation on privilege change.
-Recommendation: (b) — simpler, gives us revocation for free, no
-key-rotation infrastructure needed. Long-term (b) → passkeys
-(`@simplewebauthn/server`) for managers, phone-verified access
-for customers.
+**Still open:** long-term the phase-0 bearer surface gets
+replaced by passkeys (`@simplewebauthn/server`) for managers
+and phone-verified access for customers. Bearer tokens then
+become internal machine-to-machine credentials only.
 
 ### 🟢 Rate limiting
 

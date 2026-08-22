@@ -334,14 +334,18 @@ actions.record({
   summary: "Household onboarded and starter policies applied.",
 });
 
-const { token } = identity.mintToken({
+// Seed script mints a 1-year token so a fresh clone doesn't
+// need to rotate on day 2. Prod flows use the 90-day default
+// and rotate on the console.
+const { token, expiresAt: seedExpiresAt } = identity.mintToken({
   actorType: "manager",
   actorId: manager.id,
   label: "seed",
+  ttlSeconds: 365 * 24 * 60 * 60,
 });
 
 console.log("");
-console.log("bearer token (paste into the console login):");
+console.log(`bearer token (paste into the console login) — expires ${seedExpiresAt}:`);
 console.log(token);
 
 function policy(p: Partial<PolicySpec> & Pick<PolicySpec, "domain" | "actionClass" | "autonomy" | "label">): PolicySpec {

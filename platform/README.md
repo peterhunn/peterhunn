@@ -413,6 +413,15 @@ and audit paths end to end.
     incremental | up_to_date | cursor_reset` so the console
     surfaces which path ran. Console: Sync Gmail button in the
     inbox section header (dimmed until Gmail is connected).
+- Bearer token lifecycle — every mint stamps an `expires_at`
+  (default 90d, tunable per mint via `ttlSeconds`). Auth returns
+  distinct `invalid_token` / `expired_token` / `revoked_token`
+  401s so a client can react. Rotation via
+  `POST /me/tokens/rotate` (revokes caller, mints fresh, same
+  actor + label; plaintext returned once). Explicit revoke via
+  `POST /me/tokens/:id/revoke` (owner-only). List via
+  `GET /me/tokens` (metadata only). `last_used_at` populated on
+  every successful auth.
 - Rate limiting — `@fastify/rate-limit` at boot. Global
   default 120 req/min per (bearer token OR client IP if no
   token — tunable via `ATELIER_RATE_LIMIT_MAX` /

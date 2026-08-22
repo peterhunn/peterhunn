@@ -123,7 +123,7 @@ export const buildServer = (db: Db) => {
   app.register(auditPlugin, { db });
 
   app.register(healthRoutes);
-  app.register(meRoutes);
+  app.register(meRoutes(db));
   app.register(householdRoutes(db));
   app.register(graphRoutes(db));
   app.register(auditRoutes(db));

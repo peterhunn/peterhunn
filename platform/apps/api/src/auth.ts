@@ -27,11 +27,19 @@ const plugin: FastifyPluginAsync<AuthPluginOpts> = async (app, opts) => {
       return reply.code(401).send({ error: "missing_token" });
     }
     const token = header.slice("Bearer ".length).trim();
-    const actor = identity.resolveActor(token);
-    if (!actor) {
-      return reply.code(401).send({ error: "invalid_token" });
+    const resolution = identity.resolveToken(token);
+    if (!resolution.ok) {
+      // Distinguish the three failure modes so a client can react
+      // differently: "invalid" = re-auth, "expired" = rotate,
+      // "revoked" = a session was intentionally killed. Body
+      // shape stays predictable for legacy clients that only
+      // check the `error` string.
+      return reply
+        .code(401)
+        .send({ error: `${resolution.reason}_token` });
     }
-    req.actor = actor;
+    req.actor = resolution.actor;
+    req.tokenId = resolution.tokenId;
 
     const params = req.params as Record<string, string> | undefined;
     const householdId = params?.["householdId"];

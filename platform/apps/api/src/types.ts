@@ -7,5 +7,6 @@ declare module "fastify" {
   interface FastifyRequest {
     actor: Actor;
     householdContext?: HouseholdId;
+    tokenId?: string;
   }
 }
