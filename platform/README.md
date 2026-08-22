@@ -65,6 +65,20 @@ you're inside the console.
 - Route configs (`{ config: { audit: { action, resourceType, sensitive } } }`)
   refine the entry per handler.
 
+## For contributors
+
+Three docs, load-bearing, read them before your first meaningful
+change:
+
+- [`ARCHITECTURE.md`](./ARCHITECTURE.md) — the invariants
+  (tenancy, provenance, policy authority, approval queue, etc.)
+  that every module assumes.
+- [`SECURITY.md`](./SECURITY.md) — what's real today vs the
+  gaps that must close before a paying customer. Threat model.
+- [`CONTRIBUTING.md`](./CONTRIBUTING.md) — recipes for the
+  common changes (add a node type, add an agent, add a tool,
+  change a schema, write a test).
+
 ## Deploy
 
 The API deploys to [fly.io](https://fly.io) via
