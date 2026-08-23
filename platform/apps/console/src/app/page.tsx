@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getSessionToken } from "@/lib/session";
 import { LoginForm } from "./login-form";
+import { PasskeyLogin } from "./passkey-login";
 
 export default async function Home() {
   const token = await getSessionToken();
@@ -10,12 +11,16 @@ export default async function Home() {
     <div className="login-wrap">
       <div className="login-card">
         <h1 className="display">Atelier</h1>
-        <p className="subtitle">Manager Console — sign in with a bearer token.</p>
+        <p className="subtitle">Manager Console — sign in.</p>
+        <PasskeyLogin />
+        <div className="divider">
+          <span>or with a bearer token</span>
+        </div>
         <LoginForm />
         <p className="hint">
-          Don't have a token? Run{" "}
-          <span className="mono">pnpm --filter @atelier/db exec tsx ../../scripts/seed.ts</span>{" "}
-          in the platform directory to mint one.
+          First-time setup? Sign in once with a bearer token, then register a
+          passkey from{" "}
+          <span className="mono">/passkeys</span>.
         </p>
       </div>
     </div>

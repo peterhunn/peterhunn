@@ -5,6 +5,7 @@ export * from "./actions.js";
 export * from "./audit.js";
 export * from "./audit_export.js";
 export * from "./identity.js";
+export * from "./manager_credentials.js";
 export * from "./policies.js";
 export * from "./tasks.js";
 export * from "./approvals.js";

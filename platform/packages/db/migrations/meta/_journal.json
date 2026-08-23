@@ -15,6 +15,13 @@
       "when": 1787457047986,
       "tag": "0001_futuristic_pestilence",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1787489699609,
+      "tag": "0002_orange_lilandra",
+      "breakpoints": true
     }
   ]
 }

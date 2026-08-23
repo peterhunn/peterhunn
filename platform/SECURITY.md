@@ -142,10 +142,52 @@ today; see DEPLOY.md.
   "haven't touched this token in 60 days — safe to revoke?"
   becomes an answerable question.
 
-**Still open:** long-term the phase-0 bearer surface gets
-replaced by passkeys (`@simplewebauthn/server`) for managers
-and phone-verified access for customers. Bearer tokens then
-become internal machine-to-machine credentials only.
+**Still open:** phone-verified access for customers. That's
+the remaining human-facing credential path — customers today
+only reach the system via the Twilio inbound webhook, so
+there's no login surface for them yet, but when the customer
+portal ships it'll want SMS/passkey.
+
+### 🟢 Passkeys (WebAuthn) for managers
+
+- `@simplewebauthn/server` on the API, `@simplewebauthn/browser`
+  on the console. Four routes on the API:
+  `/webauthn/register/options` + `/register/verify` (authenticated
+  — a logged-in manager registers a device), and
+  `/webauthn/login/options` + `/login/verify` (public — the
+  browser gets a challenge, presents a passkey, and receives a
+  freshly-minted 12-hour bearer token on success).
+- The freshly-minted token goes into the same httpOnly session
+  cookie the paste-a-bearer flow uses, so every downstream
+  route treats a passkey login exactly like any other. Bearer
+  tokens stay as the machine-to-machine credential (scripting,
+  CI) — they aren't retired.
+- Challenges are stored in an ephemeral `webauthn_challenges`
+  table keyed by a `wac_<hex>` id we hand back to the browser.
+  Every row is single-use and expires after 5 minutes; a cheap
+  sweep of expired rows runs on every issue so no cleanup
+  timer is needed.
+- Credentials live in `manager_credentials` with the raw
+  credentialId (unique across the RP), public key, signature
+  counter, transports, device label, createdAt, and
+  lastUsedAt. Cross-owner delete is a no-op — a manager can
+  only nuke their own passkeys.
+- User-enumeration hardening: `/webauthn/login/options` for
+  an unknown email still returns a valid options object with
+  `allowCredentials: []` so the timing / response shape is
+  indistinguishable from a registered account.
+- Origin + RP-ID are pinned via `ATELIER_PASSKEY_ORIGIN` and
+  `ATELIER_PASSKEY_RP_ID`. Browsers refuse to complete a
+  ceremony if the calling page's origin doesn't match, so a
+  wrong RP_ID in prod fails closed (nothing works) instead of
+  fails open.
+
+**Still open:** SMS/passkey for customer portal (no portal
+yet, so the credential surface doesn't exist to gate).
+Roaming authenticator UX (device lost / new laptop) is
+handled by "log in from a device with a passkey and register
+the new one from `/passkeys`" — no fallback email link on
+purpose (that would defeat the point).
 
 ### 🟢 Rate limiting
 

@@ -101,8 +101,17 @@ export interface ActionSummary {
   readonly createdAt: string;
 }
 
+export interface PasskeySummary {
+  readonly id: string;
+  readonly deviceLabel: string;
+  readonly createdAt: string;
+  readonly lastUsedAt: string | null;
+}
+
 export const api = (token: string) => ({
   me: () => request<{ actor: Actor }>(token, "GET", "/me"),
+  listPasskeys: () =>
+    request<{ passkeys: PasskeySummary[] }>(token, "GET", "/me/passkeys"),
   listHouseholds: () => request<{ households: Household[] }>(token, "GET", "/households"),
   getHousehold: (id: HouseholdId) =>
     request<{ household: Household }>(token, "GET", `/households/${id}`),

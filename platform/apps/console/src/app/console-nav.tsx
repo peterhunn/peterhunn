@@ -10,6 +10,7 @@ export function ConsoleNav({ managerName }: { managerName: string }) {
       <div className="nav-right">
         <Link href="/dashboard">Households</Link>
         <Link href="/models">Models</Link>
+        <Link href="/passkeys">Passkeys</Link>
         <span>{managerName}</span>
         <form action={logout}>
           <button className="link-btn" type="submit">

@@ -8,6 +8,7 @@ import { authPlugin } from "./auth.js";
 import { auditPlugin } from "./audit.js";
 import { healthRoutes } from "./routes/health.js";
 import { meRoutes } from "./routes/me.js";
+import { webauthnRoutes } from "./routes/webauthn.js";
 import { householdRoutes } from "./routes/households.js";
 import { graphRoutes } from "./routes/graph.js";
 import { auditRoutes } from "./routes/audit.js";
@@ -190,6 +191,7 @@ export const buildServer = (db: Db) => {
 
   app.register(healthRoutes);
   app.register(meRoutes(db));
+  app.register(webauthnRoutes(db));
   app.register(householdRoutes(db));
   app.register(graphRoutes(db));
   app.register(auditRoutes(db));
