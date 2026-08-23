@@ -173,17 +173,27 @@ store (Redis) is needed so a caller can't get N× throughput
 by round-robining. Also: a per-actor "planner burst" limit is
 finer-grained than what @fastify/rate-limit does per-route.
 
-### 🟡 Cost caps are soft
+### 🟢 Cost caps hard-fail at N× the household cap
 
-- The router demotes to the declared min tier when over budget,
-  then keeps running. There's no hard "stop spending" gate.
-- A runaway agent (say, `research.query` that loops fetching URLs)
-  can burn through the T3 daily allotment.
+- Soft over-budget behavior (demote to declared min tier and keep
+  running) is unchanged. That still runs at ratio ≥ 1.0.
+- Once spend passes `ATELIER_BUDGET_HARD_MULTIPLE × cap`
+  (default 1.5×), `callModel` throws `BudgetExceededError`
+  *before* it hits the router or any provider. No fallback, no
+  demote, no retry — a runaway agent can't drain the account.
+- The refusal surface is `inferenceBudgetFor(...).status ===
+  "over_hard"`, which the console budget widget already renders.
+  Manager action: raise the tier cap, wait for the 30-day
+  rollup to slide, or approve a one-off (currently by env — a
+  UI knob is a follow-up).
+- The hard-cap check keys on `householdId`. System-scope calls
+  with no household attribution still run, which is intentional
+  (extractor cron, health checks).
 
-**Fix (before public beta):** hard-fail when over budget + N%
-overshoot. Log and refuse the model call rather than degrade.
-Requires a "budget exceeded, human review needed" surface in
-the console.
+**Still open:** the "approve a one-off overrun" flow is not in
+the UI yet — a manager either bumps the multiple in env or
+waits. Also: the soft/hard thresholds are global; per-household
+overrides land with the pricing model.
 
 ### 🟡 No SIEM / audit export
 
@@ -214,14 +224,27 @@ protection is complementary (catches secrets in commits
 that never touch a workflow) and free for public repos.
 Enable in repo settings once we're ready.
 
-### 🟡 OAuth state secret has no rotation infrastructure
+### 🟢 OAuth state secret supports a rotation window
 
-- If `ATELIER_OAUTH_STATE_SECRET` is rotated, in-flight consent
-  redirects break. Accepted trade-off but there's no dual-secret
-  verification window.
+- `verifyState` tries the current `ATELIER_OAUTH_STATE_SECRET`
+  first (hot path), then falls back to
+  `ATELIER_OAUTH_STATE_SECRET_PREVIOUS` if set. `signState`
+  always uses the current secret — the previous secret is
+  verify-only.
+- Rotation flow:
+  1. Move current → `ATELIER_OAUTH_STATE_SECRET_PREVIOUS`.
+  2. Set fresh → `ATELIER_OAUTH_STATE_SECRET`.
+  3. Restart. In-flight consent redirects verify under the
+     previous secret; new mints sign under the fresh one.
+  4. After the state TTL (15 minutes) passes, unset
+     `ATELIER_OAUTH_STATE_SECRET_PREVIOUS`. Verification
+     loses the fallback and stays strict.
+- Both secrets share the >=16-char length gate. A short or
+  unset previous secret disables the fallback, not the primary.
 
-**Fix (before scaling):** accept the previous secret as a
-fallback for a rotation window. Roll on a schedule.
+**Still open:** the runbook is manual (bump the env, restart).
+Automating it (fly.io secrets rotation on a schedule) closes
+the operational gap without changing the code.
 
 ### 🟢 Security headers
 

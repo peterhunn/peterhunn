@@ -241,7 +241,7 @@ export const api = (token: string) => ({
       totalUsd: number;
       totalCalls: number;
       capUsd: number;
-      status: "under" | "approaching" | "over";
+      status: "under" | "approaching" | "over" | "over_hard";
       byTier: Record<string, { calls: number; usd: number }>;
     }>(token, "GET", `/households/${id}/inference-budget`),
   listInbox: (id: HouseholdId) =>

@@ -70,9 +70,21 @@ export const buildToolRegistry = (): ToolRegistry => {
   return r;
 };
 
-const budgetStatus = (spent: number, cap: number): "under" | "approaching" | "over" => {
+export type BudgetStatus = "under" | "approaching" | "over" | "over_hard";
+
+// Hard-cap multiplier: refuse model calls beyond cap × MULT. Default
+// 1.5 leaves headroom for the "soft over → demote to min tier"
+// phase to run for a bit before we lock. Tune via
+// ATELIER_BUDGET_HARD_MULTIPLE.
+const hardMultiple = (): number => {
+  const raw = Number(process.env["ATELIER_BUDGET_HARD_MULTIPLE"] ?? "1.5");
+  return Number.isFinite(raw) && raw >= 1 ? raw : 1.5;
+};
+
+const budgetStatus = (spent: number, cap: number): BudgetStatus => {
   if (cap <= 0) return "under";
   const ratio = spent / cap;
+  if (ratio >= hardMultiple()) return "over_hard";
   if (ratio >= 1) return "over";
   if (ratio >= 0.8) return "approaching";
   return "under";
@@ -271,7 +283,7 @@ export const buildGraphWriter = (
 export const inferenceBudgetFor = (
   db: Db,
   householdId: HouseholdId,
-): { totalUsd: number; totalCalls: number; capUsd: number; status: "under" | "approaching" | "over"; byTier: Record<string, { calls: number; usd: number }> } => {
+): { totalUsd: number; totalCalls: number; capUsd: number; status: BudgetStatus; byTier: Record<string, { calls: number; usd: number }> } => {
   const households = householdRepo(db);
   const hh = households.get(householdId);
   const cap =

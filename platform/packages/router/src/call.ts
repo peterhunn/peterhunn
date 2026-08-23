@@ -35,9 +35,24 @@ export interface ModelCallRecorder {
   }): { id: string };
 }
 
+export type BudgetStatus =
+  | "under"
+  | "approaching"
+  | "over"
+  | "over_hard";
+
 export interface BudgetSource {
-  status(householdId: HouseholdId): "under" | "approaching" | "over";
+  status(householdId: HouseholdId): BudgetStatus;
   riskTier(householdId: HouseholdId): HouseholdRiskTier;
+}
+
+export class BudgetExceededError extends Error {
+  override readonly name = "BudgetExceededError" as const;
+  constructor(householdId: HouseholdId) {
+    super(
+      `Model call refused: household ${householdId} is over the hard budget cap. Manager review required before further model spend.`,
+    );
+  }
 }
 
 export interface CallModelDeps {
@@ -72,6 +87,16 @@ export const callModel = async (
     ? deps.budget?.status(opts.householdId)
     : undefined;
   const riskTier = opts.householdId ? deps.budget?.riskTier(opts.householdId) : undefined;
+
+  // Hard-fail on runaway spend. The soft "over" path degrades to
+  // min tier and keeps running (accepted phase-0 behavior). The
+  // hard cap is a further multiple (default 1.5×, see runtime.ts)
+  // and refuses to call at all so a stuck agent can't drain the
+  // account. Manager review clears it by raising the cap or
+  // waiting for the 30-day window to slide.
+  if (budgetStatus === "over_hard" && opts.householdId) {
+    throw new BudgetExceededError(opts.householdId);
+  }
 
   const selection = deps.router.select({
     taskClass: call.taskClass,

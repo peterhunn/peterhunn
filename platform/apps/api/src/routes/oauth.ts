@@ -44,6 +44,14 @@ interface StatePayload {
   t: number; // issued at (ms)
 }
 
+// The active secret signs new consent flows; a secondary "previous"
+// secret is accepted during verification only. Rotation flow:
+//   1. Move current secret → ATELIER_OAUTH_STATE_SECRET_PREVIOUS
+//   2. Put fresh secret → ATELIER_OAUTH_STATE_SECRET
+//   3. Restart. In-flight consent redirects verify under the
+//      previous secret; new mints sign under the fresh one.
+//   4. After STATE_TTL_MS (15 minutes) pass, unset the previous
+//      secret. Verification loses the fallback and stays strict.
 const stateSecret = (): string => {
   const s = process.env["ATELIER_OAUTH_STATE_SECRET"];
   if (!s || s.length < 16) {
@@ -54,9 +62,16 @@ const stateSecret = (): string => {
   return s;
 };
 
+const previousStateSecret = (): string | null => {
+  const s = process.env["ATELIER_OAUTH_STATE_SECRET_PREVIOUS"];
+  if (!s || s.length < 16) return null;
+  return s;
+};
+
 const signState = (payload: StatePayload): string => {
   const json = JSON.stringify(payload);
   const body = b64url(json);
+  // Always sign new state with the active (current) secret.
   const sig = b64url(createHmac("sha256", stateSecret()).update(body).digest());
   return `${body}.${sig}`;
 };
@@ -64,8 +79,21 @@ const signState = (payload: StatePayload): string => {
 const verifyState = (state: string): StatePayload | null => {
   const [body, sig] = state.split(".");
   if (!body || !sig) return null;
-  const expected = b64url(createHmac("sha256", stateSecret()).update(body).digest());
-  if (expected !== sig) return null;
+  // Verify against the current secret first (hot path). Fall back
+  // to the previous secret so in-flight consent redirects survive
+  // a fresh rotation — see the block comment at stateSecret().
+  const current = b64url(
+    createHmac("sha256", stateSecret()).update(body).digest(),
+  );
+  let matched = current === sig;
+  if (!matched) {
+    const prev = previousStateSecret();
+    if (prev) {
+      const alt = b64url(createHmac("sha256", prev).update(body).digest());
+      matched = alt === sig;
+    }
+  }
+  if (!matched) return null;
   let payload: StatePayload;
   try {
     payload = JSON.parse(b64urlDecode(body).toString("utf-8")) as StatePayload;

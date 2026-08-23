@@ -3,7 +3,9 @@ import {
   ModelRegistry,
   Router,
   RouterError,
+  BudgetExceededError,
   callModel,
+  type BudgetSource,
   type ModelCallRecorder,
 } from "../src/index.js";
 import type { HouseholdId, HouseholdRiskTier } from "@atelier/domain";
@@ -114,5 +116,43 @@ describe("callModel", () => {
     // T3 rate is materially higher; even a 1-token output costs more.
     const rec = recorder.recorded[0] as { costUsdEstimated: number };
     expect(rec.costUsdEstimated).toBeGreaterThan(0);
+  });
+
+  it("refuses to call at all when the household is over the hard cap", async () => {
+    const recorder = mkRecorder();
+    const budget: BudgetSource = {
+      status: () => "over_hard",
+      riskTier: () => "standard" as HouseholdRiskTier,
+    };
+    await expect(
+      callModel(
+        { router, recorder, budget },
+        {
+          taskClass: "inbox.triage",
+          messages: [{ role: "user", content: "hello" }],
+        },
+        { householdId: "hh_broke" as HouseholdId },
+      ),
+    ).rejects.toBeInstanceOf(BudgetExceededError);
+    // Nothing recorded — refusal happens before selection.
+    expect(recorder.recorded).toHaveLength(0);
+  });
+
+  it("still calls when over_hard without a householdId (system-scope calls)", async () => {
+    const recorder = mkRecorder();
+    const budget: BudgetSource = {
+      status: () => "over_hard",
+      riskTier: () => "standard" as HouseholdRiskTier,
+    };
+    const res = await callModel(
+      { router, recorder, budget },
+      {
+        taskClass: "inbox.triage",
+        messages: [{ role: "user", content: "hello" }],
+      },
+      // no householdId → no attribution, no refusal
+    );
+    expect(res.tier).toBe("T1");
+    expect(recorder.recorded).toHaveLength(1);
   });
 });

@@ -20,7 +20,7 @@ export interface RouterInputs {
   readonly autonomyExecute?: {
     readonly sideEffectClass: SideEffectClass;
   };
-  readonly budgetStatus?: "under" | "approaching" | "over";
+  readonly budgetStatus?: "under" | "approaching" | "over" | "over_hard";
 }
 
 export interface RouterSelection {
@@ -76,7 +76,15 @@ export class Router {
     }
 
     // Budget-driven light demotion — allowed only within declared min.
-    if (inputs.budgetStatus === "over" && TIER_RANK[tier] > TIER_RANK[declaredMin]) {
+    // Both "over" (soft) and "over_hard" (past the hard cap) demote
+    // here; the hard-cap refusal happens in callModel before this
+    // selection runs, so getting here with over_hard means the
+    // caller chose to bypass the refusal (e.g. a manager-approved
+    // one-off) and we still want the cheapest available tier.
+    if (
+      (inputs.budgetStatus === "over" || inputs.budgetStatus === "over_hard") &&
+      TIER_RANK[tier] > TIER_RANK[declaredMin]
+    ) {
       tier = declaredMin;
       reasons.push("budget_over_relaxed_to_declared_min");
     }

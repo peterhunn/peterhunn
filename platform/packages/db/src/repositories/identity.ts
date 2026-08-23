@@ -145,6 +145,7 @@ export const identityRepo = (db: Db) => {
         displayName: input.displayName,
         email: input.email,
         createdAt: nowIso(),
+        archivedAt: null,
       } satisfies typeof managers.$inferInsert;
       db.insert(managers).values(row).run();
       return toManager(row);

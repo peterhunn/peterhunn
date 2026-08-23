@@ -154,4 +154,74 @@ describe("OAuth flow — Google", () => {
     expect(cb.headers.location).toContain("oauth=error");
     expect(cb.headers.location).toContain("invalid_state");
   });
+
+  it("accepts state signed by the previous secret during rotation window", async () => {
+    // Mint a state under the "old" (soon-to-be-rotated) secret.
+    vi.stubEnv("ATELIER_OAUTH_STATE_SECRET", "old-secret-32-chars-long-abcdef01");
+    const start = await app.inject({
+      method: "POST",
+      url: `/households/${hh}/oauth/google/start`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { returnTo: `http://localhost:3000/households/${hh}` },
+    });
+    const state = new URL((start.json() as { authUrl: string }).authUrl).searchParams.get("state")!;
+
+    // Operator rotates: previous secret gets shifted to _PREVIOUS, a
+    // fresh one takes the primary slot. The in-flight redirect still
+    // needs to verify.
+    vi.stubEnv("ATELIER_OAUTH_STATE_SECRET", "new-secret-32-chars-long-abcdef02");
+    vi.stubEnv("ATELIER_OAUTH_STATE_SECRET_PREVIOUS", "old-secret-32-chars-long-abcdef01");
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url === "https://oauth2.googleapis.com/token") {
+          return new Response(
+            JSON.stringify({
+              access_token: "at-rot",
+              refresh_token: "rt-rot",
+              expires_in: 3600,
+              scope: "https://www.googleapis.com/auth/calendar",
+            }),
+            { status: 200 },
+          );
+        }
+        if (url === "https://openidconnect.googleapis.com/v1/userinfo") {
+          return new Response(JSON.stringify({ email: "rot@example.com" }), {
+            status: 200,
+          });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      }),
+    );
+
+    const cb = await app.inject({
+      method: "GET",
+      url: `/oauth/google/callback?code=code-rot&state=${encodeURIComponent(state)}`,
+    });
+    expect(cb.headers.location).toContain("oauth=ok");
+  });
+
+  it("rejects state signed by an old secret once the rotation window is closed", async () => {
+    vi.stubEnv("ATELIER_OAUTH_STATE_SECRET", "old-secret-32-chars-long-abcdef01");
+    const start = await app.inject({
+      method: "POST",
+      url: `/households/${hh}/oauth/google/start`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { returnTo: `http://localhost:3000/households/${hh}` },
+    });
+    const state = new URL((start.json() as { authUrl: string }).authUrl).searchParams.get("state")!;
+
+    // Rotation complete, previous secret unset — the old signature
+    // must be rejected.
+    vi.stubEnv("ATELIER_OAUTH_STATE_SECRET", "new-secret-32-chars-long-abcdef02");
+    vi.stubEnv("ATELIER_OAUTH_STATE_SECRET_PREVIOUS", "");
+
+    const cb = await app.inject({
+      method: "GET",
+      url: `/oauth/google/callback?code=x&state=${encodeURIComponent(state)}`,
+    });
+    expect(cb.headers.location).toContain("oauth=error");
+    expect(cb.headers.location).toContain("invalid_state");
+  });
 });
