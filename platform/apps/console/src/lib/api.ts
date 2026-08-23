@@ -280,6 +280,9 @@ export const api = (token: string) => ({
         principalId: string | null;
         createdAt: string;
         revokedAt: string | null;
+        consentStatus: "unknown" | "opted_in" | "opted_out";
+        consentRecordedAt: string | null;
+        consentSource: string | null;
       }>;
     }>(token, "GET", `/households/${id}/messaging/endpoints`),
   addMessagingEndpoint: (

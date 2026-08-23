@@ -5,6 +5,46 @@ import { addMessagingEndpoint, revokeMessagingEndpoint } from "./actions";
 import type { HouseholdId } from "@atelier/domain";
 import type { Person } from "./invite-customer";
 
+const ConsentBadge = ({
+  status,
+  recordedAt,
+}: {
+  status: "unknown" | "opted_in" | "opted_out";
+  recordedAt: string | null;
+}) => {
+  if (status === "opted_in") {
+    return (
+      <span
+        className="tag"
+        style={{ background: "#dcfce7", color: "#166534" }}
+        title={recordedAt ? `opted in ${new Date(recordedAt).toLocaleString()}` : ""}
+      >
+        opted in
+      </span>
+    );
+  }
+  if (status === "opted_out") {
+    return (
+      <span
+        className="tag"
+        style={{ background: "#fee2e2", color: "#991b1b" }}
+        title={recordedAt ? `opted out ${new Date(recordedAt).toLocaleString()}` : ""}
+      >
+        opted out
+      </span>
+    );
+  }
+  return (
+    <span
+      className="tag"
+      style={{ background: "#fef3c7", color: "#92400e" }}
+      title="No explicit consent recorded. Outbound is technically allowed but operator carries the compliance risk."
+    >
+      consent unknown
+    </span>
+  );
+};
+
 interface Endpoint {
   id: string;
   channel: "sms" | "whatsapp" | "imessage" | "email";
@@ -13,6 +53,9 @@ interface Endpoint {
   principalId: string | null;
   createdAt: string;
   revokedAt: string | null;
+  consentStatus: "unknown" | "opted_in" | "opted_out";
+  consentRecordedAt: string | null;
+  consentSource: string | null;
 }
 
 export function MessagingEndpoints({
@@ -78,6 +121,7 @@ export function MessagingEndpoints({
                   <span className="muted">→ unassigned</span>
                 )}
                 {e.label ? <span className="muted">· {e.label}</span> : null}
+                <ConsentBadge status={e.consentStatus} recordedAt={e.consentRecordedAt} />
                 <button
                   type="button"
                   disabled={isPending}
@@ -129,6 +173,9 @@ export function MessagingEndpoints({
                   principalId: principalId || null,
                   createdAt: new Date().toISOString(),
                   revokedAt: null,
+                  consentStatus: "unknown",
+                  consentRecordedAt: null,
+                  consentSource: "manager_direct",
                 },
               ]);
             }

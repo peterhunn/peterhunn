@@ -105,6 +105,29 @@ export const contactEndpointRepo = (db: Db) => ({
       .where(eq(contactEndpoints.id, id))
       .run();
   },
+
+  // Record a consent transition (opted_in, opted_out, or explicit
+  // reset to unknown). Source names the action that produced this
+  // status — "reply_yes" (customer completed the verification /
+  // texted START), "reply_stop" (STOP keyword), "manager_asserted"
+  // (direct-add path; operator carries compliance responsibility),
+  // "invited" (initial invite send).
+  setConsent(
+    id: string,
+    input: {
+      status: "unknown" | "opted_in" | "opted_out";
+      source: string;
+    },
+  ): void {
+    db.update(contactEndpoints)
+      .set({
+        consentStatus: input.status,
+        consentRecordedAt: nowIso(),
+        consentSource: input.source,
+      })
+      .where(eq(contactEndpoints.id, id))
+      .run();
+  },
 });
 
 export interface RecordMessagingEventInput {

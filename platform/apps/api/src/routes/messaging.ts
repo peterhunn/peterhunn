@@ -159,13 +159,72 @@ const resolveTwilioSender = (
 };
 
 interface InboundResult {
-  outcome: "dispatched" | "deduped" | "verified" | "already_verified" | "unrouted";
+  outcome:
+    | "dispatched"
+    | "deduped"
+    | "verified"
+    | "already_verified"
+    | "opted_out"
+    | "opted_in"
+    | "unrouted";
   householdId?: HouseholdId;
   householdName?: string;
   eventId?: string;
   runId?: string;
   ackMessage?: string;
 }
+
+// TCPA-standard opt-out keywords. Twilio auto-recognises many of
+// these on its side, but we still handle at the application layer
+// so (a) the mock adapter honours them in dev, (b) non-Twilio
+// channels behave the same, and (c) our own consent history is
+// authoritative rather than "check Twilio's console."
+const STOP_KEYWORDS = new Set([
+  "stop",
+  "stopall",
+  "unsubscribe",
+  "cancel",
+  "end",
+  "quit",
+]);
+const START_KEYWORDS = new Set(["start", "unstop", "yes"]);
+
+const detectConsentKeyword = (
+  body: string,
+): "stop" | "start" | null => {
+  const first = body.trim().split(/\s+/)[0]?.toLowerCase();
+  if (!first) return null;
+  if (STOP_KEYWORDS.has(first)) return "stop";
+  if (START_KEYWORDS.has(first)) return "start";
+  return null;
+};
+
+const STOP_CONFIRMATION =
+  "You've been unsubscribed. Reply START to opt back in. Msg&data rates may apply.";
+const START_CONFIRMATION =
+  "You're resubscribed. Reply STOP to opt out at any time.";
+
+// Refuse to send outbound to an endpoint that opted out. Returns
+// null when the send is allowed, or a mock-shaped OutOfBand result
+// carrying the reason when it's blocked. Callers should pass that
+// result through in place of the real sendTwilioMessage response.
+const outboundConsentGate = (
+  db: Db,
+  householdId: HouseholdId,
+  channel: MessagingChannel,
+  toAddress: string,
+): { blocked: true; reason: string } | { blocked: false; endpoint: unknown | null } => {
+  const ep = contactEndpointRepo(db).resolve(channel, toAddress);
+  if (!ep) return { blocked: false, endpoint: null };
+  if (ep.householdId !== householdId) return { blocked: false, endpoint: ep };
+  if (ep.consentStatus === "opted_out") {
+    return {
+      blocked: true,
+      reason: `opted_out_at_${ep.consentRecordedAt ?? "unknown_time"}`,
+    };
+  }
+  return { blocked: false, endpoint: ep };
+};
 
 const dispatchToPlanner = async (
   db: Db,
@@ -280,6 +339,77 @@ const handleInbound = async (
     endpoints.resolve(input.channel, input.from) ??
     endpoints.resolve(input.channel, input.to);
   if (ep) {
+    // Consent keywords fire BEFORE dispatch so an opt-out message
+    // isn't fed into the planner. Also fires before dedupe: the
+    // consent transition is an idempotent state change, safe to
+    // re-apply if Twilio retries the webhook.
+    const consent = detectConsentKeyword(input.body);
+    if (consent) {
+      const status = consent === "stop" ? "opted_out" : "opted_in";
+      endpoints.setConsent(ep.id, {
+        status,
+        source: consent === "stop" ? "reply_stop" : "reply_start",
+      });
+      // Record the inbound message itself so the household's
+      // history shows the STOP arrived. Dedupe on external id
+      // stays honoured — Twilio's retry policy needs this.
+      const rec = events.record({
+        householdId: ep.householdId as HouseholdId,
+        channel: input.channel,
+        direction: "inbound",
+        fromAddress: input.from,
+        toAddress: input.to,
+        body: input.body,
+        provider: input.provider,
+        endpointId: ep.id,
+        ...(input.externalMessageId ? { externalMessageId: input.externalMessageId } : {}),
+      });
+      // Confirmation reply. Bypasses the outbound gate (consent
+      // confirmations are legally required regardless of status).
+      const ack = consent === "stop" ? STOP_CONFIRMATION : START_CONFIRMATION;
+      log.info(
+        {
+          endpointId: ep.id,
+          from: input.from,
+          consent: status,
+        },
+        `consent keyword handled — sending ${consent === "stop" ? "opt-out" : "opt-in"} confirmation`,
+      );
+      return {
+        outcome: consent === "stop" ? "opted_out" : "opted_in",
+        householdId: ep.householdId as HouseholdId,
+        eventId: rec.row.id,
+        ackMessage: ack,
+      };
+    }
+
+    // Refuse to plan on messages from an opted-out endpoint. The
+    // customer explicitly asked us to stop; still record the
+    // inbound event so the audit trail shows they messaged after
+    // opting out, but no reply and no planner dispatch.
+    if (ep.consentStatus === "opted_out") {
+      const rec = events.record({
+        householdId: ep.householdId as HouseholdId,
+        channel: input.channel,
+        direction: "inbound",
+        fromAddress: input.from,
+        toAddress: input.to,
+        body: input.body,
+        provider: input.provider,
+        endpointId: ep.id,
+        ...(input.externalMessageId ? { externalMessageId: input.externalMessageId } : {}),
+      });
+      log.info(
+        { endpointId: ep.id, from: input.from },
+        "inbound from opted-out endpoint — recorded, planner not dispatched",
+      );
+      return {
+        outcome: "opted_out",
+        householdId: ep.householdId as HouseholdId,
+        eventId: rec.row.id,
+      };
+    }
+
     const out = await dispatchToPlanner(db, log, {
       householdId: ep.householdId as HouseholdId,
       channel: input.channel,
@@ -333,6 +463,14 @@ const handleInbound = async (
         });
         endpointId = created.id;
       }
+      // Customer just texted a valid code — that IS the consent
+      // signal. Stamp opted_in with source "reply_yes" so future
+      // outbound to this endpoint is authorized under TCPA-style
+      // rules and the audit trail shows who consented when.
+      endpoints.setConsent(endpointId, {
+        status: "opted_in",
+        source: "reply_yes",
+      });
       verifications.consume(pending.id, normalizedFrom, endpointId);
       // Record the claim itself as an inbound messaging event so
       // the household's traffic view carries a full history.
@@ -457,6 +595,15 @@ export const messagingRoutes = (db: Db): FastifyPluginAsync => async (app) => {
         return reply.code(400).send({ error: "invalid_body", issues: parsed.error.issues });
       }
       const householdId = req.householdContext as HouseholdId;
+      const gate = outboundConsentGate(db, householdId, parsed.data.channel, parsed.data.to);
+      if (gate.blocked) {
+        return reply.code(403).send({
+          error: "recipient_opted_out",
+          message:
+            "This recipient has opted out. Outbound refused. Ask them to reply START to opt back in.",
+          reason: gate.reason,
+        });
+      }
       const sender = resolveTwilioSender(db, householdId);
       const out = await sendTwilioMessage(sender.credential as never, parsed.data, {
         logger: {
@@ -613,6 +760,11 @@ export const messagingRoutes = (db: Db): FastifyPluginAsync => async (app) => {
         ackText = out.ackMessage ?? "Verified.";
       } else if (out.outcome === "already_verified") {
         ackText = out.ackMessage ?? "You're already connected.";
+      } else if (out.outcome === "opted_out" || out.outcome === "opted_in") {
+        // Legally-required confirmation for STOP/START. Bypasses
+        // the outbound consent gate (confirmations must send even
+        // to opted-out endpoints).
+        ackText = out.ackMessage ?? null;
       }
       // "deduped" and "unrouted" both return an empty TwiML — we
       // don't want to double-reply to a retried webhook, and we
@@ -707,6 +859,16 @@ export const messagingRoutes = (db: Db): FastifyPluginAsync => async (app) => {
       const household = householdRepo(db).get(householdId);
       if (!household) return reply.code(404).send({ error: "household_not_found" });
 
+      const gate = outboundConsentGate(db, householdId, parsed.data.channel, parsed.data.address);
+      if (gate.blocked) {
+        return reply.code(403).send({
+          error: "recipient_opted_out",
+          message:
+            "This number opted out and cannot be re-invited via SMS. The customer must text START from that number themselves.",
+          reason: gate.reason,
+        });
+      }
+
       const sender = resolveTwilioSender(db, householdId);
       // No Twilio configured is fine — the send falls to mock (same
       // policy as /messaging/send). The response body's sent.reason
@@ -724,7 +886,7 @@ export const messagingRoutes = (db: Db): FastifyPluginAsync => async (app) => {
 
       const body =
         parsed.data.bodyOverride ??
-        `Atelier: reply with ${pending.code} to connect this number to ${household.name}. Code expires ${new Date(pending.expiresAt).toLocaleString("en-US", { timeZone: "UTC", hour12: false })} UTC.`;
+        `Atelier: reply with ${pending.code} to connect this number to ${household.name}. Code expires ${new Date(pending.expiresAt).toLocaleString("en-US", { timeZone: "UTC", hour12: false })} UTC. Reply STOP to opt out. Msg&data rates may apply.`;
 
       const out = await sendTwilioMessage(
         sender.credential as never,

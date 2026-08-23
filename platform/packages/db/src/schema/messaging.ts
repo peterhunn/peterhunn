@@ -21,6 +21,24 @@ export const contactEndpoints = sqliteTable(
     verifiedAt: text("verified_at"),
     createdAt: text("created_at").notNull(),
     revokedAt: text("revoked_at"),
+    // Consent tracking for TCPA-style compliance. status is one of:
+    //   unknown    — no explicit signal yet (default for manager-
+    //                direct adds; outbound is technically allowed
+    //                but the operator carries the compliance risk)
+    //   opted_in   — the customer took an explicit action (typed
+    //                the invite code, texted in first, replied
+    //                START after opting out)
+    //   opted_out  — the customer texted STOP / UNSUBSCRIBE / etc.
+    //                — outbound is BLOCKED regardless of source
+    // source records which action produced the current status so
+    // an audit later can reconstruct the chain.
+    consentStatus: text("consent_status", {
+      enum: ["unknown", "opted_in", "opted_out"],
+    })
+      .notNull()
+      .default("unknown"),
+    consentRecordedAt: text("consent_recorded_at"),
+    consentSource: text("consent_source"),
   },
   (t) => ({
     householdIdx: index("contact_endpoints_household_idx").on(t.householdId),

@@ -29,6 +29,13 @@
       "when": 1787519378265,
       "tag": "0003_special_blue_blade",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1787523572526,
+      "tag": "0004_lush_franklin_richards",
+      "breakpoints": true
     }
   ]
 }

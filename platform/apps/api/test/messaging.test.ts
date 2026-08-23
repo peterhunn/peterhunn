@@ -413,6 +413,149 @@ describe("shared-line invite", () => {
     expect(out.eventId).toBeTruthy();
   });
 
+  it("STOP keyword flips the endpoint to opted_out and returns the required confirmation", async () => {
+    contactEndpointRepo(db).create({
+      householdId: hh,
+      channel: "sms",
+      address: "+14158675600",
+      label: "Stop test",
+    });
+    // Customer texts STOP
+    const res = await app.inject({
+      method: "POST",
+      url: "/messaging/inbound/mock",
+      payload: {
+        channel: "sms",
+        from: "+14158675600",
+        to: "+15555550100",
+        body: "STOP",
+        externalMessageId: "mock_stop_1",
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    const out = res.json();
+    expect(out.outcome).toBe("opted_out");
+    expect(out.ackMessage).toMatch(/unsubscribed/i);
+    expect(out.ackMessage).toMatch(/START to opt back in/i);
+
+    // Endpoint reflects the new consent status.
+    const ep = contactEndpointRepo(db).resolve("sms", "+14158675600");
+    expect(ep?.consentStatus).toBe("opted_out");
+    expect(ep?.consentSource).toBe("reply_stop");
+    expect(ep?.consentRecordedAt).toBeTruthy();
+  });
+
+  it("further inbound from an opted-out endpoint is recorded but NOT dispatched to the planner", async () => {
+    const ep = contactEndpointRepo(db).create({
+      householdId: hh,
+      channel: "sms",
+      address: "+14158675601",
+    });
+    contactEndpointRepo(db).setConsent(ep.id, {
+      status: "opted_out",
+      source: "reply_stop",
+    });
+    const res = await app.inject({
+      method: "POST",
+      url: "/messaging/inbound/mock",
+      payload: {
+        channel: "sms",
+        from: "+14158675601",
+        to: "+15555550100",
+        body: "Hey are you still there?",
+        externalMessageId: "mock_stopped_hey",
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().outcome).toBe("opted_out");
+    // Recorded in the household event log.
+    const events = messagingEventRepo(db)
+      .list(hh)
+      .filter((e) => e.externalMessageId === "mock_stopped_hey");
+    expect(events).toHaveLength(1);
+    // NO planner run linked — the event stays unlinked.
+    expect(events[0]!.plannerRunId).toBeNull();
+  });
+
+  it("START keyword resubscribes and returns the confirmation", async () => {
+    const ep = contactEndpointRepo(db).create({
+      householdId: hh,
+      channel: "sms",
+      address: "+14158675602",
+    });
+    contactEndpointRepo(db).setConsent(ep.id, {
+      status: "opted_out",
+      source: "reply_stop",
+    });
+    const res = await app.inject({
+      method: "POST",
+      url: "/messaging/inbound/mock",
+      payload: {
+        channel: "sms",
+        from: "+14158675602",
+        to: "+15555550100",
+        body: "START",
+        externalMessageId: "mock_start_1",
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().outcome).toBe("opted_in");
+    expect(res.json().ackMessage).toMatch(/resubscribed/i);
+    const after = contactEndpointRepo(db).resolve("sms", "+14158675602");
+    expect(after?.consentStatus).toBe("opted_in");
+    expect(after?.consentSource).toBe("reply_start");
+  });
+
+  it("outbound send to an opted-out recipient is refused with 403", async () => {
+    const ep = contactEndpointRepo(db).create({
+      householdId: hh,
+      channel: "sms",
+      address: "+14158675603",
+    });
+    contactEndpointRepo(db).setConsent(ep.id, {
+      status: "opted_out",
+      source: "reply_stop",
+    });
+    const res = await app.inject({
+      method: "POST",
+      url: `/households/${hh}/messaging/send`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        channel: "sms",
+        to: "+14158675603",
+        body: "Following up.",
+      },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe("recipient_opted_out");
+  });
+
+  it("verification consumption stamps the endpoint opted_in with source reply_yes", async () => {
+    const pending = pendingVerificationRepo(db).create({
+      householdId: hh,
+      channel: "sms",
+      createdBy: "manager:test",
+      label: "consent test",
+    });
+    const claim = await app.inject({
+      method: "POST",
+      url: "/messaging/inbound/mock",
+      payload: {
+        channel: "sms",
+        from: "+14158675604",
+        to: "+15555550100",
+        body: `Here you go: ${pending.code}`,
+        externalMessageId: "mock_consent_claim",
+      },
+    });
+    expect(claim.statusCode).toBe(200);
+    expect(claim.json().outcome).toBe("verified");
+    const ep = contactEndpointRepo(db).resolve("sms", "+14158675604");
+    expect(ep?.consentStatus).toBe("opted_in");
+    expect(ep?.consentSource).toBe("reply_yes");
+    expect(ep?.consentRecordedAt).toBeTruthy();
+  });
+
   it("invite → verify round trip binds the from-address to the invited profile", async () => {
     // Seed a person.principal so the invite can point at a profile.
     const principal = graphRepo(db).createNode(hh, {
