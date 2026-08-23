@@ -5,6 +5,7 @@ import {
   openDb,
   contactEndpointRepo,
   credentialRepo,
+  graphRepo,
   householdRepo,
   identityRepo,
   messagingEventRepo,
@@ -410,6 +411,77 @@ describe("shared-line invite", () => {
     const out = res.json();
     expect(["dispatched", "deduped"]).toContain(out.outcome);
     expect(out.eventId).toBeTruthy();
+  });
+
+  it("invite → verify round trip binds the from-address to the invited profile", async () => {
+    // Seed a person.principal so the invite can point at a profile.
+    const principal = graphRepo(db).createNode(hh, {
+      type: "person.principal",
+      data: { fullName: "Ada Lovelace" },
+      provenance: {
+        source: "manager_direct",
+        assertedBy: "test",
+        assertedAt: new Date().toISOString(),
+        confidence: 1,
+        status: "confirmed",
+      },
+    });
+
+    // Manager sends an invite explicitly linked to Ada.
+    const invite = await app.inject({
+      method: "POST",
+      url: `/households/${hh}/messaging/invite`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        channel: "sms",
+        address: "+14158675400",
+        principalId: principal.id,
+        label: "Ada's iPhone",
+      },
+    });
+    expect(invite.statusCode).toBe(201);
+    const code = invite.json().invite.code;
+
+    // Customer texts the code from the invited number to the
+    // concierge line. handleInbound's verification-claim branch
+    // creates the endpoint AND carries the principalId over.
+    const claim = await app.inject({
+      method: "POST",
+      url: "/messaging/inbound/mock",
+      payload: {
+        channel: "sms",
+        from: "+14158675400",
+        to: "+15555550100",
+        body: `Here's my code: ${code}`,
+        externalMessageId: "mock_ada_claim",
+      },
+    });
+    expect(claim.statusCode).toBe(200);
+    expect(claim.json().outcome).toBe("verified");
+
+    // The new endpoint carries the principalId.
+    const ep = contactEndpointRepo(db)
+      .list(hh)
+      .find((e) => e.address === "+14158675400");
+    expect(ep?.principalId).toBe(principal.id);
+
+    // A subsequent text from Ada's number now routes AND
+    // identifies Ada (verified indirectly — no crash, event
+    // recorded, no dedup this time because externalMessageId
+    // is fresh).
+    const followup = await app.inject({
+      method: "POST",
+      url: "/messaging/inbound/mock",
+      payload: {
+        channel: "sms",
+        from: "+14158675400",
+        to: "+15555550100",
+        body: "One more thing",
+        externalMessageId: "mock_ada_followup",
+      },
+    });
+    expect(followup.statusCode).toBe(200);
+    expect(["dispatched", "deduped"]).toContain(followup.json().outcome);
   });
 });
 

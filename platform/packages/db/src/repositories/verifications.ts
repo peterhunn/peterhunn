@@ -23,6 +23,10 @@ export interface CreateVerificationInput {
   readonly createdBy: string;
   readonly ttlSeconds?: number;
   readonly label?: string;
+  // Optional profile the resulting endpoint should be bound to.
+  // Carried on the pending_verifications row and copied onto the
+  // contact_endpoints row when the code is consumed.
+  readonly principalId?: string;
 }
 
 const DEFAULT_TTL_SECONDS = 15 * 60;
@@ -60,6 +64,7 @@ export const pendingVerificationRepo = (db: Db) => ({
           createdAt: nowIso(),
           expiresAt,
           label: input.label ?? null,
+          principalId: input.principalId ?? null,
         })
         .run();
       const row = db

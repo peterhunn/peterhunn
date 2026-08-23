@@ -205,12 +205,14 @@ export default async function HouseholdPage({
         <MessagingEndpoints
           householdId={hh.id as HouseholdId}
           initialEndpoints={messagingEndpoints}
+          people={people}
         />
 
         <InviteCustomer
           householdId={hh.id as HouseholdId}
           conciergeNumber={messagingCfg.conciergeNumber}
           sharedLineActive={messagingCfg.sharedLineActive}
+          people={people}
         />
 
         <VerifyEndpoint

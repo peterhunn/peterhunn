@@ -22,6 +22,13 @@
       "when": 1787489699609,
       "tag": "0002_orange_lilandra",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1787519378265,
+      "tag": "0003_special_blue_blade",
+      "breakpoints": true
     }
   ]
 }

@@ -288,6 +288,7 @@ export const api = (token: string) => ({
       channel: "sms" | "whatsapp" | "imessage" | "email";
       address: string;
       label?: string;
+      principalId?: string;
     },
   ) =>
     request<{ endpoint: { id: string } }>(
@@ -472,6 +473,7 @@ export const api = (token: string) => ({
       channel: "sms" | "whatsapp";
       address: string;
       label?: string;
+      principalId?: string;
       ttlSeconds?: number;
       bodyOverride?: string;
     },

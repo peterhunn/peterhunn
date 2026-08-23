@@ -25,6 +25,13 @@ export const pendingVerifications = sqliteTable(
     consumedFromAddress: text("consumed_from_address"),
     consumedEndpointId: text("consumed_endpoint_id"),
     label: text("label"),
+    // Optional profile the resulting endpoint should be bound to.
+    // A person.principal / .member / .staff / .contact node id from
+    // the same household. When set, the endpoint created on
+    // successful verification inherits this principal_id and every
+    // inbound message from that number identifies the sender as
+    // this person to the planner.
+    principalId: text("principal_id"),
   },
   (t) => ({
     codeIdx: index("pending_verifications_code_idx").on(t.code),

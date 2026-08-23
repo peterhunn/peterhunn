@@ -4,6 +4,7 @@ import {
   contactEndpointRepo,
   credentialRepo,
   extractVerificationCode,
+  graphRepo,
   householdRepo,
   messagingEventRepo,
   normalizeAddress,
@@ -11,7 +12,7 @@ import {
   type Db,
   type MessagingChannel,
 } from "@atelier/db";
-import type { HouseholdId } from "@atelier/domain";
+import type { HouseholdId, NodeId } from "@atelier/domain";
 import { sendTwilioMessage, verifyTwilioInboundSignature } from "@atelier/agents";
 import { buildGraphView, buildGraphWriter, buildOrchestrator } from "../runtime.js";
 import { stripUndefined } from "../util.js";
@@ -48,6 +49,7 @@ const CreateVerificationBody = z.object({
   channel: z.enum(["sms", "whatsapp", "imessage", "email"]).default("sms"),
   ttlSeconds: z.number().int().positive().max(24 * 60 * 60).optional(),
   label: z.string().optional(),
+  principalId: z.string().optional(),
 });
 
 const InviteCustomerBody = z.object({
@@ -58,6 +60,11 @@ const InviteCustomerBody = z.object({
   // Optional override — the default message names the household
   // and the code, which is usually what you want.
   bodyOverride: z.string().max(320).optional(),
+  // Optional person.* node id — the profile this number belongs
+  // to. When set, every inbound message from that number carries
+  // this principal into the planner so the run "knows who's
+  // talking," not just which household.
+  principalId: z.string().optional(),
 });
 
 const MockInboundBody = z.object({
@@ -172,6 +179,7 @@ const dispatchToPlanner = async (
     provider: string;
     externalMessageId?: string;
     endpointId?: string;
+    principalId?: string;
   },
 ): Promise<{ eventId: string; deduped: boolean; runId?: string }> => {
   const events = messagingEventRepo(db);
@@ -192,14 +200,36 @@ const dispatchToPlanner = async (
     return { eventId: row.id, deduped: true };
   }
 
+  // If the endpoint is bound to a person node (person.principal
+  // / .member / .staff / .contact), tell the planner who's
+  // talking — not just which household. `fullName` is the shape
+  // used by the people extractor + the person nodes; missing =
+  // fall back to the from-address as before.
+  let actorId = input.from;
+  let actorDisplay = input.from;
+  if (input.principalId) {
+    const node = graphRepo(db).getNode(input.householdId, input.principalId as NodeId);
+    if (node) {
+      const data = node.data as { fullName?: string; name?: string };
+      const name = data.fullName ?? data.name;
+      actorId = node.id;
+      if (name) actorDisplay = name;
+    } else {
+      log.info(
+        { endpointId: input.endpointId, principalId: input.principalId },
+        "endpoint principal points at a missing/superseded node — falling back to from-address",
+      );
+    }
+  }
+
   try {
     const orch = buildOrchestrator(db);
     const result = await orch.planAndRun({
       householdId: input.householdId,
       actor: {
         type: "customer",
-        id: input.from,
-        displayName: input.from,
+        id: actorId,
+        displayName: actorDisplay,
       },
       graph: buildGraphView(db, input.householdId),
       writer: buildGraphWriter(
@@ -259,6 +289,7 @@ const handleInbound = async (
       provider: input.provider,
       ...(input.externalMessageId ? { externalMessageId: input.externalMessageId } : {}),
       endpointId: ep.id,
+      ...(ep.principalId ? { principalId: ep.principalId } : {}),
     });
     return {
       outcome: out.deduped ? "deduped" : "dispatched",
@@ -298,6 +329,7 @@ const handleInbound = async (
           channel: input.channel,
           address: normalizedFrom,
           ...(pending.label && { label: pending.label }),
+          ...(pending.principalId && { principalId: pending.principalId }),
         });
         endpointId = created.id;
       }
@@ -635,6 +667,7 @@ export const messagingRoutes = (db: Db): FastifyPluginAsync => async (app) => {
         createdBy: `${req.actor.type}:${req.actor.id}`,
         ...(parsed.data.ttlSeconds ? { ttlSeconds: parsed.data.ttlSeconds } : {}),
         ...(parsed.data.label ? { label: parsed.data.label } : {}),
+        ...(parsed.data.principalId ? { principalId: parsed.data.principalId } : {}),
       });
       return reply.code(201).send({
         verification: {
@@ -686,6 +719,7 @@ export const messagingRoutes = (db: Db): FastifyPluginAsync => async (app) => {
         createdBy: `${req.actor.type}:${req.actor.id}`,
         ...(parsed.data.ttlSeconds ? { ttlSeconds: parsed.data.ttlSeconds } : {}),
         ...(parsed.data.label ? { label: parsed.data.label } : {}),
+        ...(parsed.data.principalId ? { principalId: parsed.data.principalId } : {}),
       });
 
       const body =

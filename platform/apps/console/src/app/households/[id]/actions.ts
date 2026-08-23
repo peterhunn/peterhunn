@@ -467,6 +467,7 @@ export async function inviteCustomer(
     channel: "sms" | "whatsapp";
     address: string;
     label?: string;
+    principalId?: string;
   },
 ): Promise<{ message: string; code?: string }> {
   const token = await getSessionToken();
@@ -518,6 +519,7 @@ export async function addMessagingEndpoint(
     channel: "sms" | "whatsapp" | "imessage" | "email";
     address: string;
     label?: string;
+    principalId?: string;
   },
 ): Promise<{ message: string }> {
   const token = await getSessionToken();

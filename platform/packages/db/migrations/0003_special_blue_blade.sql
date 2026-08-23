@@ -1,0 +1,1 @@
+ALTER TABLE `pending_verifications` ADD `principal_id` text;

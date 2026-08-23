@@ -176,6 +176,18 @@ Cycles across these layers are bugs. Don't import agents from db.
   `{ conciergeNumber, sharedLineActive }` so the console
   header can display the number a manager should tell
   customers to text.
+- **Number → profile → household.** `contact_endpoints` carries
+  an optional `principalId` pointing at a `person.principal`
+  / `person.member` / `person.staff` / `person.contact` node
+  in the same household. Set at endpoint creation (direct add)
+  or at invite time (carried through `pending_verifications`
+  and copied onto the endpoint when the code is consumed).
+  `dispatchToPlanner` reads the endpoint's `principalId`,
+  looks up the node in the graph, and uses its `fullName` +
+  node id as the planner actor's `displayName` + `id`. That's
+  how the system knows **who** is texting, not just which
+  household. Endpoints without a principal fall back to the
+  from-address as the actor — same behavior as before.
 
 ## Storage shape
 
