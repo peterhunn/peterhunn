@@ -196,13 +196,23 @@ an external store (S3 with object-lock, or a WORM-configured
 bucket). Also a real-time hook that pushes to a customer's own
 SIEM if they ask.
 
-### 🟡 No secret scanning on commits
+### 🟢 Secret scanning on commits
 
-- Nothing scans commits for accidentally-committed API keys.
+- `.github/workflows/secret-scan.yml` runs `gitleaks-action`
+  on every push, PR, weekly schedule, and manual dispatch.
+  Uses `.gitleaks.toml` at the repo root with the built-in
+  default rules plus ATELIER-specific patterns
+  (`atl_<32>` bearer tokens, 64-hex `ATELIER_CREDENTIAL_KEY`).
+- Allowlist covers the deterministic test key in
+  `vitest.setup.ts` and known-fake fixture strings so real
+  hits aren't drowned in noise.
+- PR runs comment on the offending commit; branch pushes
+  fail the workflow.
 
-**Fix (cheap, do now):** enable GitHub's built-in secret
-scanning + push protection on the repo. Add a `.gitleaks.toml`
-that runs in CI.
+**Still open:** GitHub's native secret scanning + push
+protection is complementary (catches secrets in commits
+that never touch a workflow) and free for public repos.
+Enable in repo settings once we're ready.
 
 ### 🟡 OAuth state secret has no rotation infrastructure
 
@@ -213,21 +223,30 @@ that runs in CI.
 **Fix (before scaling):** accept the previous secret as a
 fallback for a rotation window. Roll on a schedule.
 
-### 🟡 No HSTS, no CSP, no security headers
+### 🟢 Security headers
 
-- Fastify serves plain HTTP responses. Nothing enforces HTTPS,
-  frame-ancestors, content-type-sniffing, etc.
+- `@fastify/helmet` registered globally with API-appropriate
+  defaults on every response:
+  - `Strict-Transport-Security: max-age=15552000; includeSubDomains`
+  - `X-Content-Type-Options: nosniff`
+  - `X-Frame-Options: DENY`
+  - `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`
+    (API doesn't serve HTML so the lockdown is total)
+  - `Referrer-Policy: no-referrer`
+- COEP/COOP relaxed (they can break OAuth popup flows;
+  API-only doesn't need them).
 
-**Fix (before public):** `@fastify/helmet`. Sensible defaults
-close a dozen small headers audits.
+### 🟢 CORS allowlist
 
-### 🟡 CORS wide-open
-
-- No CORS policy declared. The API accepts requests from any
-  origin.
-
-**Fix (before public browser use beyond localhost):**
-`@fastify/cors` with an explicit origin allowlist.
+- `@fastify/cors` registered with an explicit origin allowlist
+  from `ATELIER_CORS_ORIGINS` (comma-separated). Falls back to
+  `ATELIER_CONSOLE_URL` (or `http://localhost:3000` in dev)
+  when unset.
+- `credentials: true` means the browser sends cookies;
+  @fastify/cors refuses to combine that with a wildcard, so an
+  origin must be an exact match — no accidental full-open.
+- Server-to-server callers (Twilio webhook, Google OAuth
+  callback) are unaffected; CORS gates browsers, not curl.
 
 ### 🟢 Documented but accepted phase-0 posture
 

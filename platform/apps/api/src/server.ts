@@ -1,5 +1,7 @@
 import Fastify from "fastify";
 import rateLimit from "@fastify/rate-limit";
+import helmet from "@fastify/helmet";
+import cors from "@fastify/cors";
 import type { Db } from "@atelier/db";
 import "./types.js";
 import { authPlugin } from "./auth.js";
@@ -118,6 +120,62 @@ export const buildServer = (db: Db) => {
   ]) {
     app.addContentTypeParser(mime, { parseAs: "buffer" }, rawBinaryParser as never);
   }
+
+  // Security headers (helmet) + CORS. Both must land before any
+  // route handlers, so register them right after the body parsers
+  // and before auth.
+  //
+  // Helmet defaults: X-Content-Type-Options nosniff, X-Frame-
+  // Options DENY, Strict-Transport-Security (HSTS) with a 6-month
+  // max-age + subdomains, Referrer-Policy no-referrer, and a
+  // strict Content-Security-Policy that forbids inline scripts.
+  // The API doesn't serve HTML, so CSP is API-appropriate (no
+  // sources for anything).
+  //
+  // Behind a reverse proxy that already terminates TLS (fly.io,
+  // Cloudflare), HSTS still helps because the browser follows the
+  // header from the first HTTPS response.
+  app.register(helmet, {
+    global: true,
+    // API-shaped CSP: no HTML rendering surface, so lock everything.
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'none'"],
+        frameAncestors: ["'none'"],
+      },
+    },
+    // Strict-Transport-Security — 6-month max-age with subdomains.
+    // includeSubDomains is safe for atelier-api.fly.dev today; if
+    // we ever host non-HTTPS content on a subdomain, set to false.
+    strictTransportSecurity: {
+      maxAge: 15_552_000,
+      includeSubDomains: true,
+      preload: false,
+    },
+    // Cross-origin resource sharing headers separately handled by
+    // @fastify/cors below; helmet's default COEP/COOP are strict
+    // and can break OAuth popup flows, so relax them here.
+    crossOriginEmbedderPolicy: false,
+    crossOriginOpenerPolicy: false,
+    crossOriginResourcePolicy: false,
+  });
+
+  // CORS — explicit origin allowlist. Comma-separated in
+  // ATELIER_CORS_ORIGINS; falls back to the console URL for dev
+  // convenience. Credentials never allowed with a wildcard.
+  const originsEnv = process.env["ATELIER_CORS_ORIGINS"];
+  const consoleUrl = process.env["ATELIER_CONSOLE_URL"] ?? "http://localhost:3000";
+  const originAllowlist = originsEnv
+    ? originsEnv.split(",").map((s) => s.trim()).filter(Boolean)
+    : [consoleUrl];
+  app.register(cors, {
+    origin: originAllowlist,
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    // Public webhooks (Twilio, Google OAuth callback) are hit
+    // server-to-server, not from a browser, so they don't need
+    // CORS to work. Leaving them in the same policy is fine.
+  });
 
   app.register(authPlugin, { db });
   app.register(auditPlugin, { db });
