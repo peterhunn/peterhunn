@@ -195,16 +195,43 @@ the UI yet — a manager either bumps the multiple in env or
 waits. Also: the soft/hard thresholds are global; per-household
 overrides land with the pricing model.
 
-### 🟡 No SIEM / audit export
+### 🟢 SIEM / audit export
 
-- Audit events live in `audit_events` inside the app database.
-  No streaming to an external system.
-- If the DB is compromised, the audit trail is compromised.
+- Every `audit_events` row is streamed through a pluggable
+  `AuditExportSink` on a periodic tick (default 60s, tunable
+  via `ATELIER_AUDIT_EXPORT_INTERVAL_SECONDS`). Cursor lives
+  in `audit_export_state` keyed by sink name; the exporter
+  advances the cursor only after the sink resolves. A sink
+  outage stalls the export but never drops an event — the
+  next tick retries the same window.
+- **Phase-0 sink: file.** `fileSink({ dir })` writes each
+  batch as one `.ndjson` file under `<dir>/<yyyy>/<mm>/<dd>/`
+  with fsync-before-close. Paired with an out-of-band job
+  (`rclone`, `aws s3 sync`, a Fly volume snapshot) that moves
+  those shard directories into WORM storage — the app process
+  itself never needs cloud credentials for the compliance
+  path.
+- **S3 direct sink** and **webhook sink** (real-time push into
+  a customer's own SIEM) are declared but not implemented
+  yet: `ATELIER_AUDIT_EXPORT_SINK=s3` or `=webhook` logs a
+  clear "not implemented — export DISABLED" line rather than
+  silently doing nothing.
+- Batch objects are named `<iso-timestamp>_<hex>.ndjson`; the
+  timestamp is the tick's `nowIso()`, the hex is 4 random
+  bytes. Batches are content-addressable-adjacent — a
+  reprocessor can order files by name to walk history.
+- `exportAuditBatch` is testable in isolation — the
+  `AuditExportSink` interface takes `writeBatch(batch)` and
+  nothing else. `packages/db/test/audit-export.test.ts` runs
+  it end-to-end with a spy sink (cursor advance, dedup on
+  re-run, chunking, sink-failure rollback) and with the real
+  file sink (round-trip through ndjson on disk).
 
-**Fix (before compliance conversation):** append-only export to
-an external store (S3 with object-lock, or a WORM-configured
-bucket). Also a real-time hook that pushes to a customer's own
-SIEM if they ask.
+**Still open:** the S3 and webhook sinks. Wiring
+`@aws-sdk/client-s3` behind the S3 sink is one commit; a
+customer-configurable webhook sink (HMAC-signed, retries,
+DLQ on 4xx) is a second. Neither changes the exporter core
+or the cursor model.
 
 ### 🟢 Secret scanning on commits
 

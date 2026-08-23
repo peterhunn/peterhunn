@@ -3,6 +3,7 @@ import { buildServer } from "./server.js";
 import { buildScheduler } from "./scheduler.js";
 import { buildAutopilot } from "./autopilot.js";
 import { buildPlaybookRunner } from "./playbook-runner.js";
+import { buildAuditExporter } from "./audit-export.js";
 
 const port = Number(process.env["PORT"] ?? 3001);
 const host = process.env["HOST"] ?? "0.0.0.0";
@@ -33,9 +34,14 @@ const scheduler = buildScheduler(db, {
   ...(playbookRunner ? { playbookRunner } : {}),
 });
 
+const auditExporterPromise = buildAuditExporter(db, {
+  logger: schedulerLogger,
+});
+
 const shutdown = async (signal: string) => {
   app.log.info({ signal }, "atelier api shutting down");
   scheduler.stop();
+  (await auditExporterPromise).stop();
   try {
     await app.close();
   } finally {
@@ -47,9 +53,10 @@ process.on("SIGINT", () => void shutdown("SIGINT"));
 
 app
   .listen({ port, host })
-  .then((address) => {
+  .then(async (address) => {
     app.log.info({ address }, "atelier api listening");
     scheduler.start();
+    (await auditExporterPromise).start();
   })
   .catch((err) => {
     app.log.error(err);

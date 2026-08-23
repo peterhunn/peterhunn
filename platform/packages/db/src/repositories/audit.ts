@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, gt, or } from "drizzle-orm";
 import {
   nowIso,
   type Actor,
@@ -63,6 +63,41 @@ export const auditRepo = (db: Db) => ({
         ),
       )
       .orderBy(desc(auditEvents.at))
+      .limit(limit)
+      .all();
+  },
+
+  // Streaming read for the audit exporter.
+  // Returns rows strictly after the cursor (at, id) in insert
+  // order — (at ASC, id ASC) — so the exporter can advance a
+  // (at, id) cursor without missing or double-sending an event
+  // that shares a timestamp with the cursor's tail. `at` is
+  // nowIso() precision (ms) so ties happen; the id secondary
+  // sort resolves them deterministically.
+  //
+  // When cursor is null (first-ever run) every event qualifies.
+  listAfter(
+    cursor: { lastExportedAt: string | null; lastExportedEventId: string | null },
+    limit: number,
+  ): AuditEventRow[] {
+    const q = db.select().from(auditEvents);
+    if (cursor.lastExportedAt !== null && cursor.lastExportedEventId !== null) {
+      return q
+        .where(
+          or(
+            gt(auditEvents.at, cursor.lastExportedAt),
+            and(
+              eq(auditEvents.at, cursor.lastExportedAt),
+              gt(auditEvents.id, cursor.lastExportedEventId),
+            ),
+          ),
+        )
+        .orderBy(asc(auditEvents.at), asc(auditEvents.id))
+        .limit(limit)
+        .all();
+    }
+    return q
+      .orderBy(asc(auditEvents.at), asc(auditEvents.id))
       .limit(limit)
       .all();
   },

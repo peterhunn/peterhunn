@@ -4,6 +4,8 @@ export * from "./repositories/households.js";
 export * from "./repositories/graph.js";
 export * from "./repositories/identity.js";
 export * from "./repositories/audit.js";
+export * from "./repositories/audit-export.js";
+export * from "./audit-export/index.js";
 export * from "./repositories/policies.js";
 export * from "./repositories/actions.js";
 export * from "./repositories/tasks.js";
