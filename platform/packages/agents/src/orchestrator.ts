@@ -187,6 +187,17 @@ export interface PlanAndRunOptions {
   readonly writer: AgentGraphWriter;
   readonly prompt: string;
   readonly origin: Intent["origin"];
+  // Prior turns in the same rolling conversation, oldest first.
+  // Fed into the planner as chat context so multi-turn intents
+  // ("book a car" / "actually make it 7pm") read as one thread
+  // instead of two disconnected first-messages. Roles: "customer"
+  // maps to the model's user turn, "agent" to assistant. Callers
+  // can pass an empty array or omit entirely — the planner falls
+  // back to prompt-only behaviour.
+  readonly priorTurns?: readonly {
+    readonly role: "customer" | "agent";
+    readonly content: string;
+  }[];
 }
 
 export interface PlanAndRunResult {
@@ -199,13 +210,18 @@ export class Orchestrator {
   constructor(private readonly deps: OrchestratorDeps) {}
 
   async planAndRun(opts: PlanAndRunOptions): Promise<PlanAndRunResult> {
-    const { householdId, actor, graph, writer, prompt, origin } = opts;
+    const { householdId, actor, graph, writer, prompt, origin, priorTurns } = opts;
     const logger = this.deps.logger ?? { info: () => {} };
 
     const plannerRun = this.deps.ledger.startRun({
       householdId,
       intentKind: "orchestrator.plan",
-      intentAttrs: { prompt },
+      intentAttrs: {
+        prompt,
+        ...(priorTurns && priorTurns.length > 0
+          ? { priorTurns: priorTurns.length }
+          : {}),
+      },
       origin: origin.source,
       originBy: origin.by,
     });
@@ -219,6 +235,17 @@ export class Orchestrator {
     });
 
     const plannerTaskClass = pickPlannerTaskClass(prompt);
+    // Fold prior turns into the chat messages, oldest first, then
+    // the current prompt. customer → user, agent → assistant.
+    // Empty / missing priorTurns falls back to the classic
+    // system+user pair.
+    const priorChatMessages =
+      priorTurns?.map((t) => ({
+        role: (t.role === "customer" ? "user" : "assistant") as
+          | "user"
+          | "assistant",
+        content: t.content,
+      })) ?? [];
     let plan: Plan;
     try {
       const modelResponse = await this.deps.models.callModel(
@@ -234,6 +261,7 @@ export class Orchestrator {
             // OpenAI's automatic prefix caching benefits regardless;
             // other providers ignore the marker.
             { role: "system", content: plannerSystemPrompt(), cache: true },
+            ...priorChatMessages,
             { role: "user", content: prompt },
           ],
           maxOutputTokens: 800,

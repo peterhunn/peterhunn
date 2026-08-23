@@ -2,6 +2,7 @@ import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { z } from "zod";
 import {
   contactEndpointRepo,
+  conversationSessionRepo,
   credentialRepo,
   extractVerificationCode,
   graphRepo,
@@ -239,6 +240,8 @@ const dispatchToPlanner = async (
     externalMessageId?: string;
     endpointId?: string;
     principalId?: string;
+    sessionId?: string;
+    priorTurns?: readonly { role: "customer" | "agent"; content: string }[];
   },
 ): Promise<{ eventId: string; deduped: boolean; runId?: string }> => {
   const events = messagingEventRepo(db);
@@ -252,6 +255,7 @@ const dispatchToPlanner = async (
     provider: input.provider,
     ...(input.externalMessageId ? { externalMessageId: input.externalMessageId } : {}),
     ...(input.endpointId ? { endpointId: input.endpointId } : {}),
+    ...(input.sessionId ? { sessionId: input.sessionId } : {}),
   };
   const { inserted, row } = events.record(eventInput);
   if (!inserted) {
@@ -298,6 +302,9 @@ const dispatchToPlanner = async (
       ),
       prompt: input.body,
       origin: { source: "customer", by: `${input.channel}:${input.from}` },
+      ...(input.priorTurns && input.priorTurns.length > 0
+        ? { priorTurns: input.priorTurns }
+        : {}),
     });
     const firstRun = result.runs[0]?.runId;
     if (firstRun) events.linkRun(row.id, firstRun);
@@ -410,6 +417,29 @@ const handleInbound = async (
       };
     }
 
+    // Conversation memory: open/resume the rolling session for
+    // this endpoint. Recent turns become planner context — the
+    // difference between "brand-new intent every message" and "a
+    // conversation." Idle window (30m by default) closes stale
+    // sessions automatically without a cleanup job.
+    const sessions = conversationSessionRepo(db);
+    const { session } = sessions.openOrResume({
+      householdId: ep.householdId as HouseholdId,
+      endpointId: ep.id,
+      ...(ep.principalId ? { principalId: ep.principalId } : {}),
+    });
+    // Recent turns, oldest first. Filter deduped rows out (they'd
+    // add noise), and cap body length so a pathological long
+    // message doesn't blow the prompt window.
+    const priorTurns = events
+      .listBySession(session.id, 20)
+      .map((e) => ({
+        role: (e.direction === "inbound" ? "customer" : "agent") as
+          | "customer"
+          | "agent",
+        content: e.body.length > 1000 ? `${e.body.slice(0, 1000)}…` : e.body,
+      }));
+
     const out = await dispatchToPlanner(db, log, {
       householdId: ep.householdId as HouseholdId,
       channel: input.channel,
@@ -420,6 +450,8 @@ const handleInbound = async (
       ...(input.externalMessageId ? { externalMessageId: input.externalMessageId } : {}),
       endpointId: ep.id,
       ...(ep.principalId ? { principalId: ep.principalId } : {}),
+      sessionId: session.id,
+      ...(priorTurns.length > 0 ? { priorTurns } : {}),
     });
     return {
       outcome: out.deduped ? "deduped" : "dispatched",
@@ -610,6 +642,18 @@ export const messagingRoutes = (db: Db): FastifyPluginAsync => async (app) => {
           info: (msg, ctx) => req.log.info({ ...(ctx as object) }, msg),
         },
       });
+      // If the recipient endpoint has an open session, tag the
+      // outbound with its id so the reply lands in the running
+      // conversation history — the next inbound turn will see it
+      // as prior agent context.
+      const recipEp =
+        (gate.blocked === false ? gate.endpoint as { id: string } | null : null) ??
+        contactEndpointRepo(db).resolve(parsed.data.channel, parsed.data.to);
+      let outboundSessionId: string | undefined;
+      if (recipEp) {
+        const openSessions = conversationSessionRepo(db).listOpenForEndpoint(recipEp.id);
+        outboundSessionId = openSessions[0]?.id;
+      }
       const record = events.record({
         householdId,
         direction: "outbound",
@@ -619,6 +663,7 @@ export const messagingRoutes = (db: Db): FastifyPluginAsync => async (app) => {
         fromAddress: out.from,
         toAddress: out.to,
         body: parsed.data.body,
+        ...(outboundSessionId ? { sessionId: outboundSessionId } : {}),
       });
       return {
         sent: {
@@ -922,6 +967,46 @@ export const messagingRoutes = (db: Db): FastifyPluginAsync => async (app) => {
           ...(out.reason ? { reason: out.reason } : {}),
         },
       });
+    },
+  );
+
+  // Rolling conversations. One row per open session, most-recent
+  // activity first. Includes the last turn so the console can
+  // preview it without a second fetch.
+  app.get<{ Params: { householdId: string } }>(
+    "/households/:householdId/messaging/sessions",
+    {
+      config: {
+        audit: { action: "messaging.sessions.list", resourceType: "conversation_session" },
+      },
+    },
+    async (req) => {
+      const householdId = req.householdContext as HouseholdId;
+      const sessions = conversationSessionRepo(db);
+      const endpoints = contactEndpointRepo(db);
+      const open = endpoints
+        .list(householdId)
+        .flatMap((ep) => sessions.listOpenForEndpoint(ep.id));
+      const list = open.map((s) => {
+        const turns = events.listBySession(s.id, 50);
+        const last = turns[turns.length - 1];
+        return {
+          id: s.id,
+          endpointId: s.endpointId,
+          principalId: s.principalId,
+          startedAt: s.startedAt,
+          lastActivityAt: s.lastActivityAt,
+          turnCount: turns.length,
+          ...(last ? {
+            lastTurn: {
+              direction: last.direction,
+              body: last.body.length > 200 ? `${last.body.slice(0, 200)}…` : last.body,
+              at: last.receivedAt,
+            },
+          } : {}),
+        };
+      });
+      return { sessions: list };
     },
   );
 

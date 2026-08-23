@@ -4,6 +4,7 @@ import { setupServer } from "msw/node";
 import {
   openDb,
   contactEndpointRepo,
+  conversationSessionRepo,
   credentialRepo,
   graphRepo,
   householdRepo,
@@ -554,6 +555,145 @@ describe("shared-line invite", () => {
     expect(ep?.consentStatus).toBe("opted_in");
     expect(ep?.consentSource).toBe("reply_yes");
     expect(ep?.consentRecordedAt).toBeTruthy();
+  });
+
+  it("consecutive inbound messages from the same endpoint share a session; a fresh outbound joins it", async () => {
+    const ep = contactEndpointRepo(db).create({
+      householdId: hh,
+      channel: "sms",
+      address: "+14158675700",
+    });
+
+    // First inbound → opens a session.
+    const r1 = await app.inject({
+      method: "POST",
+      url: "/messaging/inbound/mock",
+      payload: {
+        channel: "sms",
+        from: "+14158675700",
+        to: "+15555550100",
+        body: "book me a car",
+        externalMessageId: "mock_ses_1",
+      },
+    });
+    expect(r1.statusCode).toBe(200);
+    const sessions1 = conversationSessionRepo(db).listOpenForEndpoint(ep.id);
+    expect(sessions1).toHaveLength(1);
+    const sessionId = sessions1[0]!.id;
+
+    // Second inbound → same session (still within idle window).
+    const r2 = await app.inject({
+      method: "POST",
+      url: "/messaging/inbound/mock",
+      payload: {
+        channel: "sms",
+        from: "+14158675700",
+        to: "+15555550100",
+        body: "actually make it 7pm",
+        externalMessageId: "mock_ses_2",
+      },
+    });
+    expect(r2.statusCode).toBe(200);
+    const sessions2 = conversationSessionRepo(db).listOpenForEndpoint(ep.id);
+    // Still one open session — resumed, not replaced.
+    expect(sessions2).toHaveLength(1);
+    expect(sessions2[0]!.id).toBe(sessionId);
+
+    // Both events tagged with the session id.
+    const evs = messagingEventRepo(db).listBySession(sessionId);
+    expect(evs).toHaveLength(2);
+    expect(evs.map((e) => e.body)).toEqual([
+      "book me a car",
+      "actually make it 7pm",
+    ]);
+
+    // Manager sends an outbound reply → should attach to the same
+    // session because there's an open one for that endpoint.
+    const send = await app.inject({
+      method: "POST",
+      url: `/households/${hh}/messaging/send`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        channel: "sms",
+        to: "+14158675700",
+        body: "Confirmed for 7pm.",
+      },
+    });
+    expect(send.statusCode).toBe(200);
+    const withOutbound = messagingEventRepo(db).listBySession(sessionId);
+    expect(withOutbound).toHaveLength(3);
+    expect(withOutbound[2]!.direction).toBe("outbound");
+    expect(withOutbound[2]!.body).toBe("Confirmed for 7pm.");
+  });
+
+  it("STOP does NOT get tagged with a session — opt-outs stand alone from the conversation", async () => {
+    const ep = contactEndpointRepo(db).create({
+      householdId: hh,
+      channel: "sms",
+      address: "+14158675701",
+    });
+    // Start a conversation.
+    await app.inject({
+      method: "POST",
+      url: "/messaging/inbound/mock",
+      payload: {
+        channel: "sms",
+        from: "+14158675701",
+        to: "+15555550100",
+        body: "hi",
+        externalMessageId: "mock_ses_stop_1",
+      },
+    });
+    // STOP arrives — fires the consent branch, not the session
+    // branch. Event goes into messaging_events unsessioned.
+    await app.inject({
+      method: "POST",
+      url: "/messaging/inbound/mock",
+      payload: {
+        channel: "sms",
+        from: "+14158675701",
+        to: "+15555550100",
+        body: "STOP",
+        externalMessageId: "mock_ses_stop_2",
+      },
+    });
+    const openSessions = conversationSessionRepo(db).listOpenForEndpoint(ep.id);
+    expect(openSessions).toHaveLength(1);
+    const inSession = messagingEventRepo(db).listBySession(openSessions[0]!.id);
+    // Only the first "hi" is in the session; the STOP is not.
+    expect(inSession).toHaveLength(1);
+    expect(inSession[0]!.body).toBe("hi");
+  });
+
+  it("GET /messaging/sessions lists open conversations with turn counts", async () => {
+    contactEndpointRepo(db).create({
+      householdId: hh,
+      channel: "sms",
+      address: "+14158675702",
+    });
+    await app.inject({
+      method: "POST",
+      url: "/messaging/inbound/mock",
+      payload: {
+        channel: "sms",
+        from: "+14158675702",
+        to: "+15555550100",
+        body: "one turn",
+        externalMessageId: "mock_ses_list_1",
+      },
+    });
+    const list = await app.inject({
+      method: "GET",
+      url: `/households/${hh}/messaging/sessions`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(list.statusCode).toBe(200);
+    const found = list.json().sessions.find((s: { lastTurn?: { body: string } }) =>
+      s.lastTurn?.body === "one turn",
+    );
+    expect(found).toBeTruthy();
+    expect(found.turnCount).toBe(1);
+    expect(found.lastTurn.direction).toBe("inbound");
   });
 
   it("invite → verify round trip binds the from-address to the invited profile", async () => {

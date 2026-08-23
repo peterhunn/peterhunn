@@ -73,6 +73,10 @@ export const messagingEvents = sqliteTable(
     receivedAt: text("received_at").notNull(),
     plannerRunId: text("planner_run_id"),
     createdAt: text("created_at").notNull(),
+    // Groups this event into a rolling conversation with the same
+    // endpoint. Nullable so events unrelated to a conversation (a
+    // STOP, an unrouted probe, a legacy row) don't need one.
+    sessionId: text("session_id"),
   },
   (t) => ({
     householdIdx: index("messaging_events_household_idx").on(t.householdId),
@@ -84,8 +88,39 @@ export const messagingEvents = sqliteTable(
       t.householdId,
       t.receivedAt,
     ),
+    sessionIdx: index("messaging_events_session_idx").on(t.sessionId),
+  }),
+);
+
+// A rolling conversation with one endpoint. Opened on the first
+// inbound after the idle window, closed by idle timeout or an
+// explicit end. Every event that lands during an open session
+// carries its id — that's what the planner reads back as prior
+// turns. The window heuristic lives in the repo (30 min today);
+// this table just persists the boundary decisions.
+export const conversationSessions = sqliteTable(
+  "conversation_sessions",
+  {
+    id: text("id").primaryKey(),
+    householdId: text("household_id")
+      .notNull()
+      .references(() => households.id, { onDelete: "cascade" }),
+    endpointId: text("endpoint_id").notNull(),
+    principalId: text("principal_id"),
+    startedAt: text("started_at").notNull(),
+    lastActivityAt: text("last_activity_at").notNull(),
+    closedAt: text("closed_at"),
+    topic: text("topic"),
+  },
+  (t) => ({
+    householdIdx: index("conversation_sessions_household_idx").on(t.householdId),
+    endpointOpenIdx: index("conversation_sessions_endpoint_open_idx").on(
+      t.endpointId,
+      t.closedAt,
+    ),
   }),
 );
 
 export type ContactEndpointRow = typeof contactEndpoints.$inferSelect;
 export type MessagingEventRow = typeof messagingEvents.$inferSelect;
+export type ConversationSessionRow = typeof conversationSessions.$inferSelect;

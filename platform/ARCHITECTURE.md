@@ -188,6 +188,28 @@ Cycles across these layers are bugs. Don't import agents from db.
   how the system knows **who** is texting, not just which
   household. Endpoints without a principal fall back to the
   from-address as the actor — same behavior as before.
+- **Consent tracking.** Every endpoint has a
+  `consentStatus` (`unknown` | `opted_in` | `opted_out`) plus
+  `consentRecordedAt` + `consentSource`. STOP / UNSUBSCRIBE /
+  CANCEL / END / QUIT keywords flip it opted_out and return the
+  mandated confirmation; START / UNSTOP / YES resubscribes. The
+  outbound consent gate refuses `/messaging/send` and
+  `/messaging/invite` to an opted-out recipient with 403. Verify
+  consumption stamps opted_in / source `reply_yes` — the
+  customer's explicit action IS the consent signal. Invite
+  message body includes the required TCPA language.
+- **Conversation memory.** Every known-endpoint inbound opens
+  or resumes a `conversation_sessions` row keyed on the
+  endpoint. Sessions auto-close after `CONVERSATION_IDLE_MS`
+  (30 min today) — no cleanup job. `handleInbound` reads the
+  last 20 events on the active session and passes them as
+  `priorTurns` into `planAndRun`; the orchestrator interleaves
+  them into the planner chat as user (customer) / assistant
+  (agent) messages before the current prompt. Outbound sends
+  (`/messaging/send`) auto-tag themselves onto the recipient's
+  open session so agent replies land in the running history.
+  STOP messages deliberately DON'T get tagged with a session —
+  opt-outs stand outside the conversation.
 
 ## Storage shape
 
