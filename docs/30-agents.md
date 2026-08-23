@@ -2,9 +2,9 @@
 
 Agents are the execution layer. They read from and write to the Life
 Graph, call tools, and produce actions. They do not decide their own
-authority — the policy engine (`permissions.md`) does that. They do
+authority — the policy engine ([`33-permissions-and-autonomy.md`](./33-permissions-and-autonomy.md)) does that. They do
 not decide their own quality bar — the manager console
-(`manager-console.md`) does that.
+([`31-manager-console.md`](./31-manager-console.md)) does that.
 
 ## Design commitments
 
@@ -204,7 +204,7 @@ makes it obvious when an agent is over-reaching its domain.
 
 - Modify policy. Ever. Policy changes require a human path.
 - Write `confirmed` facts to the graph without going through the
-  learning promotion rules (see `knowledge-graph.md`).
+  learning promotion rules (see [`22-knowledge-graph.md`](./22-knowledge-graph.md)).
 - Call other agents directly.
 - Send anything to the customer or to a third party without the
   policy engine's clearance.

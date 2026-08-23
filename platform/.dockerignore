@@ -33,5 +33,5 @@
 **/*.test.ts
 **/*.spec.ts
 
-# (Sibling directories like ../atelier and ../life-management sit
-# outside the build context and never make it in.)
+# (Sibling directories like ../atelier and ../docs sit outside
+# the build context and never make it in.)

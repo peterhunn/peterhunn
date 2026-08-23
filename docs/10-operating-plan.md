@@ -348,12 +348,12 @@ Life-tier customer:
   at $75k fully-loaded per month per manager including benefits and
   overhead — round numbers for illustration).
 - Inference cost: ~$25 / month at the tiering and self-host mix in
-  `models.md`.
+  [`24-model-routing.md`](./24-model-routing.md).
 - Third-party tooling per household: ~$15 / month.
 - Gross contribution before shared overhead: ~$280 / month, ~55%.
 
 The lever is not price. The lever is households-per-manager, and it
-is only allowed to go up when the metrics in `manager-console.md`
+is only allowed to go up when the metrics in [`31-manager-console.md`](./31-manager-console.md)
 say the service quality is holding.
 
 Two things about this model to be honest about:
@@ -394,7 +394,7 @@ Mitigation: replay-delta and edit-distance metrics; automatic
 demotion of misbehaving task classes; QA sampling.
 
 **A single security incident.** Kills the company. Mitigation: the
-data model in `data-model.md`; a real security engineer engaged
+data model in [`23-data-model.md`](./23-data-model.md); a real security engineer engaged
 before Phase 2; a rehearsed incident-response plan; encryption and
 audit invariants that make the blast radius small even in a bad case.
 
@@ -405,7 +405,7 @@ manager can't take the graph, and the graph is the reason the service
 is what it is.
 
 **AI-vendor policy change.** Mitigation: model tiering and
-vendor-independence checklist in `models.md`.
+vendor-independence checklist in [`24-model-routing.md`](./24-model-routing.md).
 
 **"AI" positioning creep.** Kills the brand. Mitigation: brand
 guidelines that treat "AI assistant" language as forbidden externally,

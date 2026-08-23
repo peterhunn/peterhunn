@@ -165,7 +165,7 @@ export const BUILTIN_MODELS: ModelSpec[] = [
 ];
 
 // Task class registry — per-agent-task minimum tier.
-// See ../life-management/models.md §"Agent-to-tier baseline".
+// See docs/24-model-routing.md §"Agent-to-tier baseline".
 export const BUILTIN_TASK_CLASSES: TaskClassSpec[] = [
   { id: "inbox.triage", minTier: "T1", description: "Triage classification" },
   { id: "inbox.extract", minTier: "T1", description: "Entity/obligation extraction" },

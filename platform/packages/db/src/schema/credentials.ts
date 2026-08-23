@@ -3,7 +3,7 @@ import { households } from "./households.js";
 
 // Delegated credentials — OAuth tokens and other secrets the platform
 // holds on the customer's behalf. Encrypted-at-rest per household in
-// production (see ../life-management/data-model.md §Keys and
+// production (see docs/23-data-model.md §Keys and
 // encryption); phase 0 stores tokens in plaintext SQLite for local
 // dev velocity — do NOT ship this to production without wrapping
 // `credential` in a KMS-backed envelope.

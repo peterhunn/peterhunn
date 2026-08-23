@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { HouseholdId, PolicyId, ActionId, PrincipalId, ManagerId } from "./ids.js";
 import { Provenance } from "./provenance.js";
 
-// See ../life-management/permissions.md — authority is data, not code.
+// See docs/33-permissions-and-autonomy.md — authority is data, not code.
 
 export const AutonomyRung = z.enum([
   "observe",

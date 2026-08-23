@@ -126,7 +126,7 @@ Cycles across these layers are bugs. Don't import agents from db.
 - Tools access credentials through `ToolContext.readCredential`
   and `readGoogleAuth`, both of which live on the server.
 - **Phase-0 gap:** credentials are stored plaintext in SQLite.
-  See SECURITY.md — this must be fixed before any real customer.
+  See 40-security.md — this must be fixed before any real customer.
 
 ### 9. Never silent — fallbacks stamp a reason
 
@@ -264,7 +264,7 @@ Cycles across these layers are bugs. Don't import agents from db.
 
 ## Where phase 0 ends
 
-Read SECURITY.md for the security-shaped gaps. Beyond those:
+Read 40-security.md for the security-shaped gaps. Beyond those:
 
 - **SQLite in prod.** Portable schema; swap the client factory
   in `packages/db/src/client.ts` to `drizzle-orm/postgres-js`

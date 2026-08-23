@@ -2,7 +2,7 @@ import { sqliteTable, text, index } from "drizzle-orm/sqlite-core";
 import { households } from "./households.js";
 
 // Inbox messages are stored here, NOT in the Life Graph. Per
-// ../life-management/knowledge-graph.md §"What is NOT stored in the
+// docs/22-knowledge-graph.md §"What is NOT stored in the
 // graph": raw email bodies do not enter the graph. Structured facts
 // extracted from a message land in the graph as candidates; pointers
 // back to the message live via the message id in an extracted node's

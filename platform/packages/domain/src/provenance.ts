@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 // Every fact in the Life Graph carries provenance and confidence.
-// See ../life-management/knowledge-graph.md — this is the load-bearing
+// See docs/22-knowledge-graph.md — this is the load-bearing
 // invariant that lets us learn from action outcomes without silently
 // promoting single observations to truth.
 

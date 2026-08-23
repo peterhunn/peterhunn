@@ -2,7 +2,7 @@
 
 This document specifies how the Life Graph, the action ledger, the
 credential vault, and everything else are stored, isolated, secured,
-and recovered. The ontology in `knowledge-graph.md` is the *what*;
+and recovered. The ontology in [`22-knowledge-graph.md`](./22-knowledge-graph.md) is the *what*;
 this is the *how*.
 
 ## Design commitments

@@ -72,7 +72,7 @@ export class OntologyError extends Error {
   override readonly name = "OntologyError" as const;
 }
 
-// Household — the tenancy boundary. See ../life-management/data-model.md.
+// Household — the tenancy boundary. See docs/23-data-model.md.
 export interface Household {
   readonly id: HouseholdId;
   readonly name: string;
@@ -88,7 +88,7 @@ export const HouseholdRiskTier = z.enum(["standard", "elevated", "hnw"]);
 export type HouseholdRiskTier = z.infer<typeof HouseholdRiskTier>;
 
 // Action ledger — every material action, with its authority trail.
-// See ../life-management/permissions.md §"Audit".
+// See docs/33-permissions-and-autonomy.md §"Audit".
 export interface ActionRecord {
   readonly id: ActionId;
   readonly householdId: HouseholdId;

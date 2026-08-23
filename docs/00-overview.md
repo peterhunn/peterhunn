@@ -12,14 +12,18 @@ area — those are addressed in separate documents.
 
 | Doc | Scope |
 | --- | --- |
-| `SPEC.md` (this file) | System overview, glossary, invariants, build order. |
-| `knowledge-graph.md` | The Life Graph: entities, relationships, provenance, learning. |
-| `agents.md` | Orchestrator + specialist agents, tool contracts, task lifecycle. |
-| `permissions.md` | Autonomy ladder, policy DSL, approvals, spend limits, audit. |
-| `manager-console.md` | Human Life Manager console: queues, exceptions, quality, capacity. |
-| `data-model.md` | Storage, identity, encryption, tenancy, retention, portability. |
-| `models.md` | Model tiering, router, self-hosting policy, evals, cost controls. |
-| `operating-plan.md` | Phased operating plan: first 25 customers, hiring, SOPs, pricing, milestones. |
+| `00-overview.md` (this file) | System overview, glossary, invariants, build order. |
+| [`22-knowledge-graph.md`](./22-knowledge-graph.md) | The Life Graph: entities, relationships, provenance, learning. |
+| [`30-agents.md`](./30-agents.md) | Orchestrator + specialist agents, tool contracts, task lifecycle. |
+| [`33-permissions-and-autonomy.md`](./33-permissions-and-autonomy.md) | Autonomy ladder, policy DSL, approvals, spend limits, audit. |
+| [`31-manager-console.md`](./31-manager-console.md) | Human Life Manager console: queues, exceptions, quality, capacity. |
+| [`32-customer-messaging.md`](./32-customer-messaging.md) | Concierge line: onboarding, profile linkage, TCPA consent, conversation memory. |
+| [`23-data-model.md`](./23-data-model.md) | Storage, identity, encryption, tenancy, retention, portability. |
+| [`24-model-routing.md`](./24-model-routing.md) | Model tiering, router, self-hosting policy, evals, cost controls. |
+| [`10-operating-plan.md`](./10-operating-plan.md) | Phased operating plan: first 25 customers, hiring, SOPs, milestones. |
+| [`11-business-model.md`](./11-business-model.md) | Tiers, pricing rules, unit economics, defensibility. |
+| [`20-architecture.md`](./20-architecture.md) | Load-bearing engineering invariants — the code-level counterpart of this doc. |
+| [`40-security.md`](./40-security.md) | Threat model + gap tracking, color-coded per surface. |
 
 ## System overview
 
@@ -70,7 +74,7 @@ convention:
    for anything that isn't atomic at the tool boundary.
 4. **Nothing is silently learned from a single event.** Preference and
    policy updates written back to the graph require either (a) a
-   confirmed pattern (see `knowledge-graph.md` on learning) or (b)
+   confirmed pattern (see [`22-knowledge-graph.md`](./22-knowledge-graph.md) on learning) or (b)
    explicit manager confirmation. One-shot inferences are stored as
    candidates, not as truth.
 5. **Two identities, always distinct.** Actions taken *on behalf of*
@@ -137,7 +141,7 @@ calendar, travel, household, and family are individually reliable.
 
 No phase begins until the prior phase's autonomous completion rate,
 approval rate, and manager intervention rate meet targets defined in
-`manager-console.md`.
+[`31-manager-console.md`](./31-manager-console.md).
 
 ## Non-goals (for now)
 

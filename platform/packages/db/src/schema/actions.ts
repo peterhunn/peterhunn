@@ -4,7 +4,7 @@ import { households } from "./households.js";
 // The action ledger. Append-only in intent — no update path is exposed
 // from the repository layer except a narrow completion path that sets
 // outcome + outputs_hash on a previously-planned action.
-// See ../life-management/permissions.md §"Audit".
+// See docs/33-permissions-and-autonomy.md §"Audit".
 export const actions = sqliteTable(
   "actions",
   {

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-// Model tiering — see ../life-management/models.md.
+// Model tiering — see docs/24-model-routing.md.
 // T0 is not an LLM; it exists so the tier axis extends to deterministic
 // code and the router can report "no LLM needed" as a first-class
 // decision.

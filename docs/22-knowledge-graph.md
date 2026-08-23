@@ -21,7 +21,7 @@ back to it, and every future action reads from it.
    and a status: `candidate`, `confirmed`, `retired`. Agents write
    `candidate`; managers or repeated confirmation promote to
    `confirmed`; contradictory evidence retires.
-5. **Policies live in the graph.** Authority (see `permissions.md`)
+5. **Policies live in the graph.** Authority (see [`33-permissions-and-autonomy.md`](./33-permissions-and-autonomy.md))
    is a set of nodes and edges, not application config. This is what
    lets the same authorization engine run for every household.
 6. **The graph is portable.** Everything a household has entered or
@@ -90,7 +90,7 @@ added by extending the ontology, not by overloading existing types.
 - `decision` — a customer choice that establishes precedent.
 
 ### Authority
-- `policy` — a stored authorization rule (see `permissions.md`).
+- `policy` — a stored authorization rule (see [`33-permissions-and-autonomy.md`](./33-permissions-and-autonomy.md)).
 - `permission` — a granted access to an external system.
 
 ## Core relationship types
@@ -160,7 +160,7 @@ source retires the older fact.
 
 - Raw email/message bodies. The graph stores structured facts
   extracted from them and pointers into the mail store; not copies.
-- Credentials. Ever. See `data-model.md` on the credential vault.
+- Credentials. Ever. See [`23-data-model.md`](./23-data-model.md) on the credential vault.
 - Financial account balances or transaction detail beyond what is
   strictly needed for a scheduled task. If a bill agent needs to know
   a card is on file at vendor X, that fact lives here; the card number
@@ -192,7 +192,7 @@ The schema exists to serve these queries cheaply:
 
 The storage decision (graph DB vs. relational-with-graph-views vs.
 hybrid) is deferred; the ontology and the query patterns are the
-commitment. See `data-model.md`.
+commitment. See [`23-data-model.md`](./23-data-model.md).
 
 ## Ontology governance
 

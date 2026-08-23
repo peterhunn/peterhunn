@@ -3,7 +3,7 @@ import { households } from "./households.js";
 
 // Access log across the graph, content, credential, and console layers.
 // Sensitive reads land here too, not just writes. See
-// ../life-management/data-model.md §"Audit".
+// docs/23-data-model.md §"Audit".
 export const auditEvents = sqliteTable(
   "audit_events",
   {

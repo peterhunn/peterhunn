@@ -1,6 +1,6 @@
 # Contributing
 
-Read `ARCHITECTURE.md` first — every recipe below assumes those
+Read `20-architecture.md` first — every recipe below assumes those
 invariants. Then pick the change you're making:
 
 - Adding a node type to the ontology → §1
@@ -180,7 +180,7 @@ Node types are a closed set registered in
 - Body: what changed, why, and what the caveats are.
 - If tests are added: name what they cover.
 - If a security-shaped invariant is touched: cross-reference
-  the SECURITY.md item.
+  the 40-security.md item.
 - Never commit secrets. If you accidentally do,
   `git rm --cached` isn't enough — rotate the secret, then
   amend the history.

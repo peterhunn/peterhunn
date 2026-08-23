@@ -1,8 +1,8 @@
 import { z } from "zod";
 import type { ManagerId, HouseholdId } from "./ids.js";
 
-// The three identity types that call the API. See ../life-management/
-// data-model.md §"Identity". A fourth type (delegated) exists on the
+// The three identity types that call the API. See
+// docs/23-data-model.md §"Identity". A fourth type (delegated) exists on the
 // tool boundary when acting on the customer's behalf against third
 // parties — it does not authenticate to our own API.
 export const ActorType = z.enum(["customer", "manager", "agent", "system"]);

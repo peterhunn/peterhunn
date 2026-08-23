@@ -1,8 +1,8 @@
 import { z } from "zod";
 
 // Edge (relationship) types. Directional and versioned. Attributes on
-// edges are typed per relationship. See ../life-management/knowledge-
-// graph.md §"Core relationship types".
+// edges are typed per relationship. See docs/22-knowledge-graph.md
+// §"Core relationship types".
 
 export const EdgeType = z.enum([
   // person → person

@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { Agent, AgentContext, AgentTaskOutput, Intent } from "../types.js";
 
 // Travel agent — the "London for two weeks in October" workflow from
-// life-management/models.md and agents.md. Handles the specifically-
+// docs/24-model-routing.md and agents.md. Handles the specifically-
 // travel piece: flights, hotels, ground, and document checks. Broader
 // coordination (calendar, household, family, inbox) happens at the
 // planner level — the planner decomposes a trip prompt into a mix of

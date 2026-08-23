@@ -158,7 +158,7 @@ export interface GraphView {
 // only type + data + confidence + status. Nodes written this way are
 // `candidate` unless the agent explicitly promotes them to `confirmed`
 // on the back of a successful action outcome (see the promotion rules
-// in ../life-management/knowledge-graph.md §"Learning").
+// in docs/22-knowledge-graph.md §"Learning").
 export interface AgentGraphWriter {
   writeNode(input: {
     type: string;

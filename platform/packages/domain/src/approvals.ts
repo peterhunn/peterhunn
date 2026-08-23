@@ -3,7 +3,7 @@ import type { HouseholdId, PolicyId } from "./ids.js";
 
 // Approval queue items — the persistent representation of a proposed
 // action that the policy engine demoted to draft (manager_review) or
-// ask (customer_approval). See ../life-management/permissions.md
+// ask (customer_approval). See docs/33-permissions-and-autonomy.md
 // §"Approvals".
 
 export const ApprovalKind = z.enum(["manager_review", "customer_approval"]);

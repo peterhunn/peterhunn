@@ -100,7 +100,7 @@ const plannerPlan = (
   // Trip prompts get decomposed across travel + calendar + household +
   // family so a single natural-language ask exercises the whole
   // orchestrator surface. This is the "London for two weeks in
-  // October" bench from ../life-management/models.md.
+  // October" bench from docs/24-model-routing.md.
   const trip = detectTrip(prompt);
   if (trip) {
     intents.push({

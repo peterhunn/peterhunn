@@ -14,7 +14,7 @@ import { buildPlaybookRegistry, computeNextFireAt } from "@atelier/agents";
 
 // Development seed: creates one manager, one household, primary grant,
 // bearer token, and the onboarding starting policy set from
-// ../life-management/permissions.md §"Onboarding starting posture".
+// docs/33-permissions-and-autonomy.md §"Onboarding starting posture".
 //
 // Run with:  pnpm --filter @atelier/db exec tsx ../../scripts/seed.ts
 
