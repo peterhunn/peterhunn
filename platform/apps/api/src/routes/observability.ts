@@ -162,12 +162,12 @@ export const observabilityRoutes = (db: Db): FastifyPluginAsync => async (app) =
 
       // Actions don't carry a run/task id today. Correlate by
       // window: any action recorded between run.createdAt and
-      // (run.finishedAt ?? now) is a plausible sibling. Not
+      // (run.completedAt ?? now) is a plausible sibling. Not
       // perfectly precise but good enough to show the manager
       // "here's what fired around this run."
       const startMs = Date.parse(run.createdAt);
-      const endMs = run.finishedAt
-        ? Date.parse(run.finishedAt)
+      const endMs = run.completedAt
+        ? Date.parse(run.completedAt)
         : Date.now();
       // Small padding to catch actions that landed just after
       // finishRun stamped the run finished.
@@ -229,9 +229,9 @@ export const observabilityRoutes = (db: Db): FastifyPluginAsync => async (app) =
           },
         })),
       ];
-      if (run.finishedAt) {
+      if (run.completedAt) {
         timeline.push({
-          at: run.finishedAt,
+          at: run.completedAt,
           kind: "run",
           summary: `Run finished · ${run.state}`,
         });
@@ -248,7 +248,7 @@ export const observabilityRoutes = (db: Db): FastifyPluginAsync => async (app) =
           originBy: run.originBy,
           state: run.state,
           createdAt: run.createdAt,
-          finishedAt: run.finishedAt,
+          finishedAt: run.completedAt,
         },
         summary: {
           taskCount: runTasks.length,

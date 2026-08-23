@@ -195,7 +195,7 @@ export const generateCto = (): string => {
   for (const cat of ["participant", "asset", "concept", "event", "transaction"] as const) {
     if (byCategory[cat].length === 0) continue;
     sections.push(
-      `// ─── ${cat}s ${"─".repeat(60 - cat.length)}\n\n${byCategory[cat].join("\n")}`,
+      `// ──── ${cat}s ${"─".repeat(60 - cat.length)}\n\n${byCategory[cat].join("\n")}`,
     );
   }
 

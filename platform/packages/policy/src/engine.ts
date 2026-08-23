@@ -1,7 +1,6 @@
 import {
   AUTONOMY_RANK,
   nowIso,
-  rungAtLeast,
   type ActionRequest,
   type AutonomyRung,
   type EscalationCondition,
@@ -141,9 +140,17 @@ export const evaluate = (
 
   // Determine final rung: base autonomy possibly demoted by an
   // escalation condition on the authority's approval config.
+  // Escalation caps the rung at "ask" — if the policy would have
+  // executed, the trigger forces a human in the loop; if it was
+  // already ask/draft/observe, escalation leaves it alone. Using
+  // min-rank here (not `rungAtLeast`, which would pick execute
+  // over ask by rank) is what makes an escalation demote rather
+  // than no-op.
   const escalated = escalationTriggered(authority.spec.approval.conditions, input.request);
   const finalRung: AutonomyRung = escalated
-    ? rungAtLeast(authority.spec.autonomy, "ask")
+    ? AUTONOMY_RANK[authority.spec.autonomy] > AUTONOMY_RANK.ask
+      ? "ask"
+      : authority.spec.autonomy
     : authority.spec.autonomy;
 
   // Draft/Ask never truly auto-execute — they route to a human. Even if

@@ -8,6 +8,7 @@ import {
 } from "@atelier/db";
 import type { HouseholdId } from "@atelier/domain";
 import { syncGmailInbox, type GmailSyncCursor } from "@atelier/agents";
+import { stripUndefined } from "../util.js";
 
 const CreateInboxMessageBody = z.object({
   fromName: z.string().min(1),
@@ -69,7 +70,7 @@ export const inboxRoutes = (db: Db): FastifyPluginAsync => async (app) => {
       }
       const msg = inbox.create({
         householdId: req.householdContext as HouseholdId,
-        ...parsed.data,
+        ...stripUndefined(parsed.data),
       });
       return reply.code(201).send({ message: msg });
     },
@@ -102,7 +103,7 @@ export const inboxRoutes = (db: Db): FastifyPluginAsync => async (app) => {
         {
           upsertMessage: (i) => inbox.upsertExternal(i),
         },
-        { ...body.data, cursorStore: gmailCursor },
+        { ...stripUndefined(body.data), cursorStore: gmailCursor },
       );
 
       if (!result.consulted) {

@@ -29,7 +29,7 @@ const request = async <T>(
       "content-type": "application/json",
       authorization: `Bearer ${token}`,
     },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    ...(body !== undefined && { body: JSON.stringify(body) }),
     cache: "no-store",
   });
   if (!res.ok) {

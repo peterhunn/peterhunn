@@ -3,6 +3,7 @@ import { z } from "zod";
 import { householdRepo } from "@atelier/db";
 import { HouseholdTier, HouseholdRiskTier, type HouseholdId } from "@atelier/domain";
 import type { Db } from "@atelier/db";
+import { stripUndefined } from "../util.js";
 
 const CreateHouseholdBody = z.object({
   name: z.string().min(1),
@@ -39,7 +40,7 @@ export const householdRoutes = (db: Db): FastifyPluginAsync => async (app) => {
     if (!body.success) {
       return reply.code(400).send({ error: "invalid_body", issues: body.error.issues });
     }
-    const household = repo.create(body.data);
+    const household = repo.create(stripUndefined(body.data));
     return reply.code(201).send({ household });
   });
 

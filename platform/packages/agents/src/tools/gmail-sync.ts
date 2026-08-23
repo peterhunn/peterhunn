@@ -165,17 +165,20 @@ const fetchAndParse = async (
     }
   | null
 > => {
-  let res: Awaited<ReturnType<gmail_v1.Gmail["users"]["messages"]["get"]>>;
+  // The SDK's return type unions in the callback-overload `void`;
+  // in the awaited/promise path the shape is always a GaxiosResponse
+  // whose `data` is a Schema$Message.
+  let msg: gmail_v1.Schema$Message;
   try {
-    res = await gmail.users.messages.get({
+    const res = (await gmail.users.messages.get({
       userId: "me",
       id,
       format: "full",
-    });
+    })) as { data: gmail_v1.Schema$Message };
+    msg = res.data;
   } catch {
     return null;
   }
-  const msg = res.data;
   const headers = msg.payload?.headers ?? [];
   const fromRaw = headerValue(headers, "From");
   const subject = headerValue(headers, "Subject") || "(no subject)";

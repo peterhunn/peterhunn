@@ -116,7 +116,7 @@ export const verifyTwilioInboundSignature = (input: {
   authToken: string;
   fullUrl: string;
   params: Record<string, string>;
-  signature: string | undefined;
+  signature?: string;
 }): boolean => {
   if (!input.signature) return false;
   return twilio.validateRequest(

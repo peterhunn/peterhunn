@@ -127,11 +127,19 @@ export const policyRoutes = (db: Db): FastifyPluginAsync => async (app) => {
       if (!body.success) {
         return reply.code(400).send({ error: "invalid_body", issues: body.error.issues });
       }
+      const { subjectPrincipalId, outputsHash, amountUsd, policyIdAuthorizing, approverId, approvalChannel, ...rest } = body.data;
       const row = actions.record({
         householdId: req.householdContext as HouseholdId,
-        ...body.data,
-        policyIdAuthorizing: body.data.policyIdAuthorizing as PolicyId | undefined,
+        ...rest,
         domain: body.data.domain as never,
+        ...(subjectPrincipalId !== undefined && { subjectPrincipalId }),
+        ...(outputsHash !== undefined && { outputsHash }),
+        ...(amountUsd !== undefined && { amountUsd }),
+        ...(policyIdAuthorizing !== undefined && {
+          policyIdAuthorizing: policyIdAuthorizing as PolicyId,
+        }),
+        ...(approverId !== undefined && { approverId }),
+        ...(approvalChannel !== undefined && { approvalChannel }),
       });
       return reply.code(201).send({ action: row });
     },

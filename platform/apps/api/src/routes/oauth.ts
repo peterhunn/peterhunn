@@ -270,7 +270,15 @@ export const oauthRoutes = (db: Db): FastifyPluginAsync => async (app) => {
       if (!tokens.access_token) {
         return reply.redirect(errRedirect(returnTo, "no_access_token"));
       }
-      oauth2Client.setCredentials(tokens);
+      // SDK's Credentials type uses required-but-non-null fields
+      // under exactOptionalPropertyTypes; only pass keys whose value
+      // is a real string / number, not null / undefined.
+      oauth2Client.setCredentials({
+        access_token: tokens.access_token,
+        ...(tokens.refresh_token && { refresh_token: tokens.refresh_token }),
+        ...(tokens.expiry_date != null && { expiry_date: tokens.expiry_date }),
+        ...(tokens.scope && { scope: tokens.scope }),
+      });
 
       // Fetch userinfo for from_address / from_name. Fetch stays raw
       // (googleapis has a userinfo endpoint but it lives in a

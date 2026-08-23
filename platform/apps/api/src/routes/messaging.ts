@@ -14,6 +14,7 @@ import {
 import type { HouseholdId } from "@atelier/domain";
 import { sendTwilioMessage, verifyTwilioInboundSignature } from "@atelier/agents";
 import { buildGraphView, buildGraphWriter, buildOrchestrator } from "../runtime.js";
+import { stripUndefined } from "../util.js";
 
 // Customer messaging surface.
 //
@@ -220,7 +221,7 @@ const handleInbound = async (
           householdId: pending.householdId as HouseholdId,
           channel: input.channel,
           address: normalizedFrom,
-          label: pending.label ?? undefined,
+          ...(pending.label && { label: pending.label }),
         });
         endpointId = created.id;
       }
@@ -296,7 +297,7 @@ export const messagingRoutes = (db: Db): FastifyPluginAsync => async (app) => {
       try {
         const row = endpoints.create({
           householdId: req.householdContext as HouseholdId,
-          ...parsed.data,
+          ...stripUndefined(parsed.data),
         });
         return reply.code(201).send({ endpoint: row });
       } catch (err) {

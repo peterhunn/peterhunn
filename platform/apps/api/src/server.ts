@@ -43,7 +43,12 @@ export const buildServer = (db: Db) => {
   const app = Fastify({
     logger: { level: process.env["LOG_LEVEL"] ?? "info" },
     bodyLimit: maxUploadBytes,
-    trustProxy: 1,
+    // Trust one reverse-proxy hop so rate-limit keys off the real
+    // client IP behind fly.io / a CDN rather than the proxy's own
+    // address. Fastify's typing wants the numeric hop count as a
+    // string via its options bag; the underlying `proxy-addr`
+    // accepts either.
+    trustProxy: "1",
   });
 
   // Rate limits. Two tiers with per-route overrides:
@@ -72,7 +77,7 @@ export const buildServer = (db: Db) => {
     // Skip health checks so uptime probes don't burn the budget.
     // /healthz is public and cheap; /messaging/inbound/* have
     // stricter per-route limits set at the route.
-    skip: (req) => req.url === "/healthz",
+    allowList: (req) => req.url === "/healthz",
     errorResponseBuilder: (_req, ctx) => ({
       error: "rate_limited",
       message: `Too many requests. Retry after ${ctx.after}.`,
@@ -144,6 +149,9 @@ export const buildServer = (db: Db) => {
         frameAncestors: ["'none'"],
       },
     },
+    // API surface never gets framed anywhere; DENY is stricter
+    // than helmet's SAMEORIGIN default and appropriate here.
+    xFrameOptions: { action: "deny" },
     // Strict-Transport-Security — 6-month max-age with subdomains.
     // includeSubDomains is safe for atelier-api.fly.dev today; if
     // we ever host non-HTTPS content on a subdomain, set to false.

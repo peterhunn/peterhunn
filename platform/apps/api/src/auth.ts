@@ -45,8 +45,8 @@ const plugin: FastifyPluginAsync<AuthPluginOpts> = async (app, opts) => {
     const householdId = params?.["householdId"];
     if (householdId) {
       if (
-        actor.type === "manager" &&
-        !actor.householdIds.includes(householdId as HouseholdId)
+        resolution.actor.type === "manager" &&
+        !resolution.actor.householdIds.includes(householdId as HouseholdId)
       ) {
         return reply.code(403).send({ error: "household_forbidden" });
       }

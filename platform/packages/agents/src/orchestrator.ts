@@ -23,6 +23,7 @@ import type {
   HouseholdId,
   ModelCall,
   ModelResponse,
+  ModelToolCall,
   PolicyDecision,
   PolicyId,
   SideEffectClass,
@@ -488,7 +489,8 @@ export class Orchestrator {
         householdId: input.householdId,
         authorityId: decision.authorityId,
         proposedBy: { actor: input.agent.name, version: input.agent.version },
-        readCredential: (provider) => this.deps.credentials?.read(input.householdId, provider) ?? null,
+        readCredential: (provider: string) =>
+          this.deps.credentials?.read(input.householdId, provider) ?? null,
         ...(this.deps.credentials?.updateAccessToken && {
           persistAccessToken: this.deps.credentials.updateAccessToken.bind(this.deps.credentials),
         }),

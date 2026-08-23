@@ -46,7 +46,7 @@ export const vendorScheduleTool: Tool<VendorScheduleInputs, VendorScheduleOutput
       outputs: { bookingRef, scheduledFor },
       outcome: "succeeded",
       summary: `Scheduled ${inputs.serviceType} with vendor ${short(inputs.vendorNodeId)} for ${scheduledFor}`,
-      amountUsd: invocation.amountUsd,
+      ...(invocation.amountUsd !== undefined && { amountUsd: invocation.amountUsd }),
     };
   },
 };

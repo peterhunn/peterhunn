@@ -58,8 +58,8 @@ export const readGoogleAuth = async <T extends GoogleOAuthFields>(
 
   const client = new OAuth2Client(cred.client_id, cred.client_secret);
   client.setCredentials({
-    access_token: cred.access_token,
-    refresh_token: cred.refresh_token,
+    ...(cred.access_token && { access_token: cred.access_token }),
+    ...(cred.refresh_token && { refresh_token: cred.refresh_token }),
     ...(raw.expiresAt ? { expiry_date: Date.parse(raw.expiresAt) } : {}),
   });
 

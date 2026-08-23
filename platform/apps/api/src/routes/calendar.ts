@@ -8,6 +8,7 @@ import {
 } from "@atelier/db";
 import type { HouseholdId } from "@atelier/domain";
 import { syncGoogleCalendar, type CalendarSyncCursor } from "@atelier/agents";
+import { stripUndefined } from "../util.js";
 
 const SyncBody = z
   .object({
@@ -49,7 +50,7 @@ export const calendarRoutes = (db: Db): FastifyPluginAsync => async (app) => {
         return reply.code(400).send({ error: "invalid_query", issues: q.error.issues });
       }
       return {
-        events: events.list(req.householdContext as HouseholdId, q.data),
+        events: events.list(req.householdContext as HouseholdId, stripUndefined(q.data)),
       };
     },
   );
@@ -81,7 +82,7 @@ export const calendarRoutes = (db: Db): FastifyPluginAsync => async (app) => {
           },
         },
         { upsertEvent: (e) => events.upsertExternal(e) },
-        { ...body.data, cursorStore: cursor },
+        { ...stripUndefined(body.data), cursorStore: cursor },
       );
 
       if (!result.consulted) {

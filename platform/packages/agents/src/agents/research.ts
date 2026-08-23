@@ -110,7 +110,7 @@ export const researchAgent: Agent = {
               input,
               summary: `fetched ${url} via ${page.provider}`,
             });
-            return page;
+            return { ...page };
           }
           return { error: `unknown_tool:${name}` };
         },

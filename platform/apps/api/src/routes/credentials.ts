@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { credentialRepo, type Db } from "@atelier/db";
 import type { HouseholdId } from "@atelier/domain";
+import { stripUndefined } from "../util.js";
 
 const StoreCredentialBody = z.object({
   provider: z.string().min(1),
@@ -44,7 +45,7 @@ export const credentialRoutes = (db: Db): FastifyPluginAsync => async (app) => {
       }
       const stored = repo.store({
         householdId: req.householdContext as HouseholdId,
-        ...body.data,
+        ...stripUndefined(body.data),
       });
       return reply.code(201).send({ credential: stored });
     },
