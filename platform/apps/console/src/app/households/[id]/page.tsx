@@ -14,6 +14,7 @@ import { AutopilotToggle } from "./autopilot-toggle";
 import { MessagingEndpoints } from "./messaging-endpoints";
 import { MessagingEvents } from "./messaging-events";
 import { VerifyEndpoint } from "./verify-endpoint";
+import { InviteCustomer } from "./invite-customer";
 import { PlaybooksPanel } from "./playbooks-panel";
 import { PeoplePanel } from "./people-panel";
 import { AssetsPanel } from "./assets-panel";
@@ -108,6 +109,12 @@ export default async function HouseholdPage({
     })),
   ]);
 
+  const messagingCfg = await client.messagingConfig().catch(() => ({
+    conciergeNumber: null,
+    conciergeMessagingServiceSid: null,
+    sharedLineActive: false,
+  }));
+
   if (!hhRes) notFound();
   const hh = hhRes.household;
   const nodes = nodesRes.nodes;
@@ -198,6 +205,12 @@ export default async function HouseholdPage({
         <MessagingEndpoints
           householdId={hh.id as HouseholdId}
           initialEndpoints={messagingEndpoints}
+        />
+
+        <InviteCustomer
+          householdId={hh.id as HouseholdId}
+          conciergeNumber={messagingCfg.conciergeNumber}
+          sharedLineActive={messagingCfg.sharedLineActive}
         />
 
         <VerifyEndpoint

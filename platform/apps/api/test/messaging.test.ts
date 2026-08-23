@@ -145,7 +145,9 @@ describe("messaging inbound", () => {
         "From=%2B14155551212&To=%2B19999999999&Body=who&MessageSid=SM_test_unrouted",
     });
     expect(res.statusCode).toBe(200);
-    expect(res.body).toContain("<Response/>");
+    // Either shape is a valid empty TwiML response; XML serialisers
+    // choose one or the other and Twilio doesn't care.
+    expect(res.body).toMatch(/<Response\s*\/>|<Response><\/Response>/);
   });
 });
 
@@ -303,6 +305,111 @@ describe("verification loop", () => {
     const v = res.json().verification;
     expect(v.code).toMatch(/^\d{6}$/);
     expect(new Date(v.expiresAt).getTime()).toBeGreaterThan(Date.now());
+  });
+});
+
+describe("shared-line invite", () => {
+  beforeEach(() => {
+    vi.stubEnv("ATELIER_TWILIO_ACCOUNT_SID", "");
+    vi.stubEnv("ATELIER_TWILIO_AUTH_TOKEN", "");
+    vi.stubEnv("ATELIER_TWILIO_FROM_NUMBER", "");
+  });
+
+  it("GET /messaging/config reports sharedLineActive: false when unconfigured", async () => {
+    const res = await app.inject({ method: "GET", url: "/messaging/config" });
+    expect(res.statusCode).toBe(200);
+    const cfg = res.json();
+    expect(cfg.sharedLineActive).toBe(false);
+    expect(cfg.conciergeNumber).toBe(null);
+  });
+
+  it("GET /messaging/config reflects the concierge env vars", async () => {
+    vi.stubEnv("ATELIER_TWILIO_ACCOUNT_SID", "AC_test");
+    vi.stubEnv("ATELIER_TWILIO_AUTH_TOKEN", "auth-tok");
+    vi.stubEnv("ATELIER_TWILIO_FROM_NUMBER", "+15555550100");
+    const res = await app.inject({ method: "GET", url: "/messaging/config" });
+    expect(res.json()).toMatchObject({
+      sharedLineActive: true,
+      conciergeNumber: "+15555550100",
+    });
+  });
+
+  it("POST /messaging/invite creates a verification AND sends the invite SMS in one call", async () => {
+    // With no concierge env AND no per-household twilio credential,
+    // the send falls back to the mock provider — enough to prove
+    // the end-to-end wiring without touching real Twilio.
+    const res = await app.inject({
+      method: "POST",
+      url: `/households/${hh}/messaging/invite`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        channel: "sms",
+        address: "+14158675309",
+        label: "Alex's phone",
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const body = res.json();
+    // Verification was minted.
+    expect(body.invite.code).toMatch(/^\d{6}$/);
+    expect(new Date(body.invite.expiresAt).getTime()).toBeGreaterThan(Date.now());
+    expect(body.invite.senderSource).toBe("none");
+    // Outbound was recorded even in mock mode.
+    expect(body.sent.provider).toBe("mock");
+    expect(body.sent.to).toBe("+14158675309");
+    // And the pending verification is discoverable via the code.
+    const live = pendingVerificationRepo(db).findLiveByCode("sms", body.invite.code);
+    expect(live?.householdId).toBe(hh);
+    // Outbound message event landed.
+    const outbound = messagingEventRepo(db)
+      .list(hh)
+      .filter((e) => e.direction === "outbound");
+    expect(outbound.some((e) => e.body?.includes(body.invite.code))).toBe(true);
+  });
+
+  it("POST /messaging/invite marks senderSource: 'concierge' when the platform line is set", async () => {
+    vi.stubEnv("ATELIER_TWILIO_ACCOUNT_SID", "AC_test");
+    vi.stubEnv("ATELIER_TWILIO_AUTH_TOKEN", "auth-tok");
+    vi.stubEnv("ATELIER_TWILIO_FROM_NUMBER", "+15555550100");
+    // Twilio SDK will try to hit the API — msw catches it as
+    // bypass and the send falls to Twilio's own error path. We
+    // only care about senderSource resolution here, which is
+    // decided before the network call.
+    const res = await app.inject({
+      method: "POST",
+      url: `/households/${hh}/messaging/invite`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { channel: "sms", address: "+14158675310" },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().invite.senderSource).toBe("concierge");
+  });
+
+  it("shared-line inbound: an inbound from a known customer number routes to their household", async () => {
+    // Bind a customer number to this household via the direct-
+    // add path (no verification needed — manager knew who).
+    contactEndpointRepo(db).create({
+      householdId: hh,
+      channel: "sms",
+      address: "+14158675311",
+      label: "Alex",
+    });
+    // Customer texts the concierge line; server resolves by FROM.
+    const res = await app.inject({
+      method: "POST",
+      url: "/messaging/inbound/mock",
+      payload: {
+        channel: "sms",
+        from: "+14158675311",
+        to: "+15555550100",
+        body: "Book me a car for 6pm please",
+        externalMessageId: "mock_shared_1",
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    const out = res.json();
+    expect(["dispatched", "deduped"]).toContain(out.outcome);
+    expect(out.eventId).toBeTruthy();
   });
 });
 

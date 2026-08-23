@@ -50,6 +50,16 @@ const CreateVerificationBody = z.object({
   label: z.string().optional(),
 });
 
+const InviteCustomerBody = z.object({
+  channel: z.enum(["sms", "whatsapp"]).default("sms"),
+  address: z.string().min(3),
+  label: z.string().optional(),
+  ttlSeconds: z.number().int().positive().max(24 * 60 * 60).optional(),
+  // Optional override — the default message names the household
+  // and the code, which is usually what you want.
+  bodyOverride: z.string().max(320).optional(),
+});
+
 const MockInboundBody = z.object({
   channel: z.enum(["sms", "whatsapp", "imessage", "email"]).default("sms"),
   from: z.string().min(3),
@@ -74,6 +84,72 @@ interface TwilioForm {
 // We accept missing signatures only when ATELIER_TWILIO_AUTH_TOKEN
 // is unset (dev mode); verification is required as soon as a token
 // is configured so a production key can't leak signed requests.
+
+// Shared concierge line configuration — the "one number for
+// every customer" posture. When any of the ATELIER_TWILIO_*
+// env vars are set, sends fall back to this platform-level
+// credential if the household hasn't stored its own (dedicated
+// line for an enterprise customer). Per-household credentials
+// still take precedence so the same code path handles both
+// shared and dedicated deploys.
+interface ResolvedTwilio {
+  readonly credential: {
+    id?: string;
+    credential: {
+      account_sid?: string;
+      auth_token?: string;
+      from_number?: string;
+      messaging_service_sid?: string;
+    };
+    expiresAt?: string;
+  } | null;
+  readonly source: "household" | "concierge" | "none";
+  readonly conciergeNumber: string | null;
+}
+
+const platformConciergeCredential = (): ResolvedTwilio["credential"] => {
+  const account_sid = process.env["ATELIER_TWILIO_ACCOUNT_SID"];
+  const auth_token = process.env["ATELIER_TWILIO_AUTH_TOKEN"];
+  const from_number = process.env["ATELIER_TWILIO_FROM_NUMBER"];
+  const messaging_service_sid = process.env["ATELIER_TWILIO_MESSAGING_SERVICE_SID"];
+  if (!account_sid || !auth_token) return null;
+  if (!from_number && !messaging_service_sid) return null;
+  return {
+    credential: {
+      account_sid,
+      auth_token,
+      ...(from_number && { from_number }),
+      ...(messaging_service_sid && { messaging_service_sid }),
+    },
+  };
+};
+
+const resolveTwilioSender = (
+  db: Db,
+  householdId: HouseholdId,
+): ResolvedTwilio => {
+  const conciergeNumber = process.env["ATELIER_TWILIO_FROM_NUMBER"] ?? null;
+  const perHousehold = credentialRepo(db).getSecret(householdId, "twilio");
+  const looksComplete = (raw: { credential?: unknown } | null): boolean => {
+    if (!raw) return false;
+    const c = (raw.credential ?? {}) as Record<string, unknown>;
+    return Boolean(
+      c["account_sid"] &&
+        c["auth_token"] &&
+        (c["messaging_service_sid"] || c["from_number"]),
+    );
+  };
+  if (looksComplete(perHousehold)) {
+    return {
+      credential: perHousehold as never,
+      source: "household",
+      conciergeNumber,
+    };
+  }
+  const platform = platformConciergeCredential();
+  if (platform) return { credential: platform, source: "concierge", conciergeNumber };
+  return { credential: null, source: "none", conciergeNumber };
+};
 
 interface InboundResult {
   outcome: "dispatched" | "deduped" | "verified" | "already_verified" | "unrouted";
@@ -349,9 +425,8 @@ export const messagingRoutes = (db: Db): FastifyPluginAsync => async (app) => {
         return reply.code(400).send({ error: "invalid_body", issues: parsed.error.issues });
       }
       const householdId = req.householdContext as HouseholdId;
-      const credentials = credentialRepo(db);
-      const twilioCred = credentials.getSecret(householdId, "twilio");
-      const out = await sendTwilioMessage(twilioCred, parsed.data, {
+      const sender = resolveTwilioSender(db, householdId);
+      const out = await sendTwilioMessage(sender.credential as never, parsed.data, {
         logger: {
           info: (msg, ctx) => req.log.info({ ...(ctx as object) }, msg),
         },
@@ -570,6 +645,110 @@ export const messagingRoutes = (db: Db): FastifyPluginAsync => async (app) => {
           label: created.label,
         },
       });
+    },
+  );
+
+  // Shared-line customer onboarding — mint a verification code
+  // AND send the invite SMS from the concierge line in one step.
+  // Replaces the manual "create the code, tell the customer by
+  // hand what to text" flow. The customer just replies with the
+  // code to +concierge and the inbound webhook binds their number
+  // to this household.
+  app.post<{ Params: { householdId: string } }>(
+    "/households/:householdId/messaging/invite",
+    {
+      config: {
+        audit: {
+          action: "messaging.invite",
+          resourceType: "pending_verification",
+          sensitive: true,
+        },
+      },
+    },
+    async (req, reply) => {
+      const parsed = InviteCustomerBody.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: "invalid_body", issues: parsed.error.issues });
+      }
+      const householdId = req.householdContext as HouseholdId;
+      const household = householdRepo(db).get(householdId);
+      if (!household) return reply.code(404).send({ error: "household_not_found" });
+
+      const sender = resolveTwilioSender(db, householdId);
+      // No Twilio configured is fine — the send falls to mock (same
+      // policy as /messaging/send). The response body's sent.reason
+      // carries the "no_twilio_credential" note so the console can
+      // surface it.
+
+      const pending = verifications.create({
+        householdId,
+        channel: parsed.data.channel,
+        createdBy: `${req.actor.type}:${req.actor.id}`,
+        ...(parsed.data.ttlSeconds ? { ttlSeconds: parsed.data.ttlSeconds } : {}),
+        ...(parsed.data.label ? { label: parsed.data.label } : {}),
+      });
+
+      const body =
+        parsed.data.bodyOverride ??
+        `Atelier: reply with ${pending.code} to connect this number to ${household.name}. Code expires ${new Date(pending.expiresAt).toLocaleString("en-US", { timeZone: "UTC", hour12: false })} UTC.`;
+
+      const out = await sendTwilioMessage(
+        sender.credential as never,
+        { channel: parsed.data.channel, to: parsed.data.address, body },
+        { logger: { info: (msg, ctx) => req.log.info({ ...(ctx as object) }, msg) } },
+      );
+
+      const recorded = events.record({
+        householdId,
+        direction: "outbound",
+        channel: parsed.data.channel,
+        provider: out.provider,
+        externalMessageId: out.externalMessageId,
+        fromAddress: out.from,
+        toAddress: out.to,
+        body,
+      });
+
+      return reply.code(201).send({
+        invite: {
+          verificationId: pending.id,
+          code: pending.code,
+          expiresAt: pending.expiresAt,
+          senderSource: sender.source,
+        },
+        sent: {
+          provider: out.provider,
+          externalMessageId: out.externalMessageId,
+          from: out.from,
+          to: out.to,
+          eventId: recorded.row.id,
+          ...(out.status ? { status: out.status } : {}),
+          ...(out.reason ? { reason: out.reason } : {}),
+        },
+      });
+    },
+  );
+
+  // Public — the console (or an operator's status page) can read
+  // this without auth to see whether shared-line is live and which
+  // number to tell customers to text.
+  app.get(
+    "/messaging/config",
+    {
+      config: {
+        public: true,
+        rateLimit: { max: 60, timeWindow: "1 minute" },
+      },
+    },
+    async () => {
+      const concierge = platformConciergeCredential();
+      const from = process.env["ATELIER_TWILIO_FROM_NUMBER"];
+      const svc = process.env["ATELIER_TWILIO_MESSAGING_SERVICE_SID"];
+      return {
+        conciergeNumber: from && from.length > 0 ? from : null,
+        conciergeMessagingServiceSid: svc && svc.length > 0 ? svc : null,
+        sharedLineActive: Boolean(concierge),
+      };
     },
   );
 };

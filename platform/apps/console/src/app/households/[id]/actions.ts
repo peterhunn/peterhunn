@@ -461,6 +461,36 @@ export async function createVerification(
   }
 }
 
+export async function inviteCustomer(
+  householdId: HouseholdId,
+  input: {
+    channel: "sms" | "whatsapp";
+    address: string;
+    label?: string;
+  },
+): Promise<{ message: string; code?: string }> {
+  const token = await getSessionToken();
+  if (!token) return { message: "Session expired." };
+  try {
+    const res = await api(token).inviteCustomer(householdId, input);
+    const p = res.sent.provider;
+    const source = res.invite.senderSource;
+    const suffix =
+      p === "twilio"
+        ? source === "concierge"
+          ? "from the platform concierge line"
+          : "from the household's own Twilio number"
+        : `via mock — ${res.sent.reason ?? "no live credential"}`;
+    return {
+      message: `Invite sent ${suffix}. Code ${res.invite.code} expires ${new Date(res.invite.expiresAt).toLocaleTimeString()}. Customer replies with the code to bind their number.`,
+      code: res.invite.code,
+    };
+  } catch (err) {
+    if (err instanceof ApiError) return { message: `Error: ${err.message}` };
+    return { message: `Error: ${(err as Error).message}` };
+  }
+}
+
 export async function sendMessage(
   householdId: HouseholdId,
   input: { channel: "sms" | "whatsapp"; to: string; body: string },

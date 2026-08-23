@@ -466,6 +466,39 @@ export const api = (token: string) => ({
         label: string | null;
       };
     }>(token, "POST", `/households/${id}/messaging/verifications`, input),
+  inviteCustomer: (
+    id: HouseholdId,
+    input: {
+      channel: "sms" | "whatsapp";
+      address: string;
+      label?: string;
+      ttlSeconds?: number;
+      bodyOverride?: string;
+    },
+  ) =>
+    request<{
+      invite: {
+        verificationId: string;
+        code: string;
+        expiresAt: string;
+        senderSource: "household" | "concierge" | "none";
+      };
+      sent: {
+        provider: "twilio" | "mock";
+        externalMessageId: string;
+        from: string;
+        to: string;
+        eventId: string;
+        status?: string;
+        reason?: string;
+      };
+    }>(token, "POST", `/households/${id}/messaging/invite`, input),
+  messagingConfig: () =>
+    request<{
+      conciergeNumber: string | null;
+      conciergeMessagingServiceSid: string | null;
+      sharedLineActive: boolean;
+    }>(token, "GET", "/messaging/config"),
   sendMessage: (
     id: HouseholdId,
     input: { channel: "sms" | "whatsapp"; to: string; body: string },

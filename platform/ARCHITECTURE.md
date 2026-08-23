@@ -147,6 +147,36 @@ Cycles across these layers are bugs. Don't import agents from db.
 - The mock inbound endpoint returns 404 with detail — for dev
   visibility only; not exposed in production.
 
+### 11. One concierge line for every customer
+
+- **Product posture:** one shared phone number for every
+  household in a tenant. A customer texts +CONCIERGE from
+  their own number; the inbound webhook resolves the customer
+  by (channel, from-address) — unique per person — and routes
+  to their household. The same webhook code path also handles
+  dedicated-line deploys (customer texts a household's own
+  number) by falling back to (channel, to-address) resolution.
+- **Outbound:** `resolveTwilioSender(householdId)` in
+  `apps/api/src/routes/messaging.ts` prefers a per-household
+  `twilio` credential when stored, otherwise falls back to
+  the platform-level concierge credential from
+  `ATELIER_TWILIO_ACCOUNT_SID` / `_AUTH_TOKEN` /
+  `_FROM_NUMBER`. Every outbound (agent-initiated sends,
+  invite SMS, direct manager sends) goes through the same
+  resolver.
+- **Onboarding:** `POST /households/:id/messaging/invite`
+  mints a 6-digit verification code AND sends "reply CODE to
+  +CONCIERGE" from the concierge line in one call. When the
+  customer replies, the inbound webhook's verification-claim
+  branch binds their from-address to the household and marks
+  the code consumed. If the from-address is already bound to
+  a different household, the claim is refused — no cross-
+  household hijacking.
+- **Config surface:** public `GET /messaging/config` returns
+  `{ conciergeNumber, sharedLineActive }` so the console
+  header can display the number a manager should tell
+  customers to text.
+
 ## Storage shape
 
 - `households` — tenancy root. `autopilotEnabled` gates the
