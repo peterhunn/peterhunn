@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import {
   exportAuditBatch,
   fileSink,
+  s3Sink,
   type AuditExportSink,
   type Db,
 } from "@atelier/db";
@@ -19,18 +20,20 @@ import {
 //
 // Env:
 //   ATELIER_AUDIT_EXPORT_ENABLED=1|0   (default: on if a sink resolves)
-//   ATELIER_AUDIT_EXPORT_SINK=file     (only sink implemented today;
-//                                       s3/webhook are follow-ups)
-//   ATELIER_AUDIT_EXPORT_DIR=./data/audit-export
+//   ATELIER_AUDIT_EXPORT_SINK=file|s3  (webhook is a follow-up)
+//   ATELIER_AUDIT_EXPORT_DIR=./data/audit-export     (file sink)
+//   ATELIER_AUDIT_EXPORT_S3_BUCKET=my-audit-bucket    (s3 sink)
+//   ATELIER_AUDIT_EXPORT_S3_PREFIX=atelier/audit
+//   ATELIER_AUDIT_EXPORT_S3_REGION=us-east-1
 //   ATELIER_AUDIT_EXPORT_INTERVAL_SECONDS=60
 //   ATELIER_AUDIT_EXPORT_BATCH_SIZE=500
 //
 // The file sink is designed to pair with an out-of-band job
 // (rclone, `aws s3 sync`, a Fly volume backup) that moves the
-// per-day shard directories into WORM storage. That split keeps
-// AWS credentials off the app process while still giving the
-// compliance surface the required "external, append-only,
-// unmodifiable" trail.
+// per-day shard directories into WORM storage. Prefer the s3
+// sink when the app already has AWS credentials (IAM role on
+// fly/EC2/ECS, or explicit AWS_* env) — it writes directly to a
+// bucket with Object Lock enabled and skips the mover job.
 
 export interface AuditExporter {
   start(): void;
@@ -67,7 +70,28 @@ const resolveSink = async (
       logger.info("audit export sink resolved", { kind, dir });
       return fileSink({ dir });
     }
-    case "s3":
+    case "s3": {
+      const bucket = process.env["ATELIER_AUDIT_EXPORT_S3_BUCKET"];
+      if (!bucket) {
+        logger.error(
+          "audit export sink 's3' selected but ATELIER_AUDIT_EXPORT_S3_BUCKET is unset — audit export DISABLED",
+        );
+        return null;
+      }
+      const prefix = process.env["ATELIER_AUDIT_EXPORT_S3_PREFIX"];
+      const region = process.env["ATELIER_AUDIT_EXPORT_S3_REGION"];
+      logger.info("audit export sink resolved", {
+        kind,
+        bucket,
+        prefix,
+        region,
+      });
+      return s3Sink({
+        bucket,
+        ...(prefix !== undefined && { prefix }),
+        ...(region !== undefined && { region }),
+      });
+    }
     case "webhook":
       logger.error(
         `audit export sink '${kind}' is not implemented yet — audit export DISABLED`,

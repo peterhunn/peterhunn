@@ -211,11 +211,21 @@ overrides land with the pricing model.
   those shard directories into WORM storage — the app process
   itself never needs cloud credentials for the compliance
   path.
-- **S3 direct sink** and **webhook sink** (real-time push into
-  a customer's own SIEM) are declared but not implemented
-  yet: `ATELIER_AUDIT_EXPORT_SINK=s3` or `=webhook` logs a
-  clear "not implemented — export DISABLED" line rather than
-  silently doing nothing.
+- **S3 sink** ships as of this commit. `s3Sink({ bucket,
+  prefix?, region? })` PUTs each batch as an ndjson object
+  under `<prefix>/<yyyy>/<mm>/<dd>/<batchId>.ndjson` with
+  `ServerSideEncryption: AES256`. Pair it with a bucket that
+  has Object Lock in COMPLIANCE mode + a matching retention
+  rule and the app-side path can't tamper with what's been
+  shipped — that split is the point. Credentials resolve
+  through the standard AWS SDK chain (env → IAM role →
+  `~/.aws/config`), so an operator can rotate them without
+  touching the app.
+- **Webhook sink** (real-time push into a customer's own
+  SIEM) is still declared-not-implemented:
+  `ATELIER_AUDIT_EXPORT_SINK=webhook` logs a clear "not
+  implemented — export DISABLED" line rather than silently
+  doing nothing.
 - Batch objects are named `<iso-timestamp>_<hex>.ndjson`; the
   timestamp is the tick's `nowIso()`, the hex is 4 random
   bytes. Batches are content-addressable-adjacent — a
@@ -227,11 +237,10 @@ overrides land with the pricing model.
   re-run, chunking, sink-failure rollback) and with the real
   file sink (round-trip through ndjson on disk).
 
-**Still open:** the S3 and webhook sinks. Wiring
-`@aws-sdk/client-s3` behind the S3 sink is one commit; a
-customer-configurable webhook sink (HMAC-signed, retries,
-DLQ on 4xx) is a second. Neither changes the exporter core
-or the cursor model.
+**Still open:** the webhook sink (HMAC-signed, retries, DLQ
+on 4xx). One commit and it drops into `AuditExportSink`
+alongside file / s3 without touching the exporter core or
+the cursor model.
 
 ### 🟢 Secret scanning on commits
 
