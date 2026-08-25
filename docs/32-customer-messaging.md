@@ -333,6 +333,32 @@ confidence 0.7 and status `candidate`. Titles are guessed from
 the MIME type (`Photo — <hash>`, `PDF — <hash>`, `Voice memo —
 <hash>`, `Video — <hash>`, else `Attachment — <hash>`).
 
+## Console — conversation view
+
+The household page renders one thread card per contact endpoint,
+ordered by most-recent activity (revoked endpoints sink to the
+bottom). Each card carries:
+
+- **Header**: profile name (from the endpoint's `principalId` →
+  person-node `fullName`), the raw address, the channel tag, a
+  consent pill (opted in / opted out / consent unknown), and a
+  `revoked` tag if applicable.
+- **Bubbles**: chronological (oldest at top). Inbound
+  left-aligned in gray, outbound right-aligned in blue. Session
+  boundaries render as "— new session —" separators so it's
+  obvious when the 30-min idle window rolled over.
+- **Bubble meta**: timestamp, delivery pill on outbound
+  (delivered / read → green, sent / queued → indigo, failed →
+  red with error code), and a shortened planner-run link on
+  inbound rows that triggered a run.
+- **Composer**: one textarea per thread at the bottom that
+  posts to `/messaging/send` via the existing `sendMessage`
+  server action. Disabled when the endpoint is opted-out or
+  revoked with a clear inline explanation.
+
+The old flat "Recent messages" list is preserved behind a
+collapsed `<details>` for raw-event triage.
+
 ## Delivery status
 
 Every outbound row on `messaging_events` grows three columns

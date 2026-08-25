@@ -13,6 +13,7 @@ import { SyncInboxButton } from "./sync-inbox-button";
 import { AutopilotToggle } from "./autopilot-toggle";
 import { MessagingEndpoints } from "./messaging-endpoints";
 import { MessagingEvents } from "./messaging-events";
+import { ConversationThreads } from "./conversation-threads";
 import { VerifyEndpoint } from "./verify-endpoint";
 import { InviteCustomer } from "./invite-customer";
 import { PlaybooksPanel } from "./playbooks-panel";
@@ -240,10 +241,20 @@ export default async function HouseholdPage({
           initialPlaybooks={playbooks}
         />
 
-        <MessagingEvents
+        <ConversationThreads
           householdId={hh.id as HouseholdId}
           events={messagingEvents}
+          endpoints={messagingEndpoints}
+          people={people}
         />
+
+        <details className="raw-events-details">
+          <summary>Raw messaging events ({messagingEvents.length})</summary>
+          <MessagingEvents
+            householdId={hh.id as HouseholdId}
+            events={messagingEvents}
+          />
+        </details>
 
         {pendingApprovals.length > 0 ? (
           <>

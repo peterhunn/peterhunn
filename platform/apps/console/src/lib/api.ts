@@ -531,6 +531,8 @@ export const api = (token: string) => ({
         body: string;
         receivedAt: string;
         plannerRunId: string | null;
+        endpointId: string | null;
+        sessionId: string | null;
         deliveryStatus: string | null;
         deliveryStatusAt: string | null;
         deliveryErrorCode: string | null;
