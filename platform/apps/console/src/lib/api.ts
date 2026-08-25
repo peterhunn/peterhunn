@@ -531,6 +531,9 @@ export const api = (token: string) => ({
         body: string;
         receivedAt: string;
         plannerRunId: string | null;
+        deliveryStatus: string | null;
+        deliveryStatusAt: string | null;
+        deliveryErrorCode: string | null;
       }>;
     }>(token, "GET", `/households/${id}/messaging/events`),
   setAutopilot: (id: HouseholdId, enabled: boolean) =>

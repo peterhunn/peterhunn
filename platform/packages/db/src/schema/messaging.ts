@@ -77,6 +77,18 @@ export const messagingEvents = sqliteTable(
     // endpoint. Nullable so events unrelated to a conversation (a
     // STOP, an unrouted probe, a legacy row) don't need one.
     sessionId: text("session_id"),
+    // Delivery status from the provider's async callback. For
+    // Twilio: queued → sent → delivered → (read for WhatsApp);
+    // failed / undelivered on error paths. Null on inbound rows
+    // (delivery status is a receipt concept, not applicable to
+    // messages the customer sent us) and on outbound rows until
+    // the status webhook lands. deliveryStatusAt is the last
+    // transition timestamp; deliveryErrorCode is Twilio's
+    // numeric code on failure (30003 unreachable, 30005 unknown
+    // destination, 30006 landline, etc.).
+    deliveryStatus: text("delivery_status"),
+    deliveryStatusAt: text("delivery_status_at"),
+    deliveryErrorCode: text("delivery_error_code"),
   },
   (t) => ({
     householdIdx: index("messaging_events_household_idx").on(t.householdId),

@@ -1014,6 +1014,72 @@ export const messagingRoutes = (db: Db): FastifyPluginAsync => async (app) => {
     },
   );
 
+  // Twilio delivery-status callback. Fires for each outbound we
+  // send with statusCallback set (see ATELIER_TWILIO_STATUS_
+  // CALLBACK_URL in messaging-outbound.ts). Public + signature-
+  // verified with the same auth token as the inbound webhook.
+  // Idempotent: retried callbacks for the same MessageSid + status
+  // just re-set the same row values.
+  app.post(
+    "/messaging/status/twilio",
+    {
+      config: {
+        public: true,
+        rateLimit: { max: 120, timeWindow: "1 minute" },
+      },
+    },
+    async (req, reply) => {
+      const raw = (req.body ?? {}) as Record<string, string>;
+      const authToken = process.env["ATELIER_TWILIO_AUTH_TOKEN"];
+      if (authToken) {
+        const proto =
+          (req.headers["x-forwarded-proto"] as string | undefined) ??
+          (req.protocol as string);
+        const host =
+          (req.headers["x-forwarded-host"] as string | undefined) ??
+          (req.headers["host"] as string | undefined) ??
+          "";
+        const fullUrl = `${proto}://${host}${req.url}`;
+        const sig =
+          (req.headers["x-twilio-signature"] as string | undefined) ?? undefined;
+        const ok = verifyTwilioInboundSignature({
+          authToken,
+          fullUrl,
+          params: raw,
+          ...(sig ? { signature: sig } : {}),
+        });
+        if (!ok) return reply.code(403).send({ error: "invalid_signature" });
+      } else {
+        req.log.info("twilio status callback accepted without verification (auth token unset)");
+      }
+
+      const messageSid = raw["MessageSid"] ?? raw["SmsSid"];
+      const status = raw["MessageStatus"] ?? raw["SmsStatus"];
+      const errorCode = raw["ErrorCode"];
+      if (!messageSid || !status) {
+        return reply.code(400).send({ error: "missing_fields" });
+      }
+
+      const res = messagingEventRepo(db).updateDeliveryStatus({
+        provider: "twilio",
+        externalMessageId: messageSid,
+        status,
+        ...(errorCode ? { errorCode } : {}),
+      });
+      if (res.updated === 0) {
+        // Callback for a message we don't have on file — most
+        // often a retry after we already trimmed the outbound.
+        // Ack 200 so Twilio doesn't retry forever; log for
+        // triage.
+        req.log.info(
+          { messageSid, status },
+          "twilio status callback for unknown message — acked",
+        );
+      }
+      return reply.code(200).send({ ok: true });
+    },
+  );
+
   // ── Verifications (manager-scoped) ─────────────────────────────
   const verifications = pendingVerificationRepo(db);
 

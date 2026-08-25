@@ -23,6 +23,12 @@ export interface TwilioSendInput {
   readonly to: string;
   readonly body: string;
   readonly channel?: "sms" | "whatsapp";
+  // If set, Twilio POSTs delivery-status updates (queued → sent
+  // → delivered / undelivered → failed / read) to this URL. Must
+  // be publicly reachable and signature-verified on receipt.
+  // Callers pass it in explicitly rather than reading env inside
+  // this helper — keeps the adapter free of env coupling.
+  readonly statusCallback?: string;
 }
 
 export interface TwilioSendOutput {
@@ -81,6 +87,7 @@ export const sendTwilioMessage = async (
       ...(cred.messaging_service_sid
         ? { messagingServiceSid: cred.messaging_service_sid }
         : { from: withPrefix(channel, cred.from_number!) }),
+      ...(input.statusCallback ? { statusCallback: input.statusCallback } : {}),
     });
     return {
       provider: "twilio",

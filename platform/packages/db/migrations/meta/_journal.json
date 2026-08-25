@@ -43,6 +43,13 @@
       "when": 1787523951779,
       "tag": "0005_sad_angel",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1787699126041,
+      "tag": "0006_magical_vertigo",
+      "breakpoints": true
     }
   ]
 }

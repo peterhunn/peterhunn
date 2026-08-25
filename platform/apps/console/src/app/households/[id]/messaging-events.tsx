@@ -14,7 +14,43 @@ interface MessagingEvent {
   body: string;
   receivedAt: string;
   plannerRunId: string | null;
+  deliveryStatus: string | null;
+  deliveryStatusAt: string | null;
+  deliveryErrorCode: string | null;
 }
+
+// Small badge for Twilio-shaped delivery statuses. Only rendered
+// on outbound rows — inbound is a delivery receipt for the
+// customer, not for us.
+const DeliveryBadge = ({
+  status,
+  at,
+  errorCode,
+}: {
+  status: string | null;
+  at: string | null;
+  errorCode: string | null;
+}) => {
+  if (!status) return null;
+  const cls =
+    status === "delivered" || status === "read"
+      ? { background: "#dcfce7", color: "#166534" }
+      : status === "sent" || status === "queued" || status === "accepted"
+        ? { background: "#e0e7ff", color: "#3730a3" }
+        : { background: "#fee2e2", color: "#991b1b" };
+  const title = [
+    at ? `at ${new Date(at).toLocaleString()}` : null,
+    errorCode ? `error ${errorCode}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <span className="tag" style={cls} title={title || undefined}>
+      {status}
+      {errorCode ? ` (${errorCode})` : ""}
+    </span>
+  );
+};
 
 export function MessagingEvents({
   householdId,
@@ -45,6 +81,13 @@ export function MessagingEvents({
               <span className="mono">{new Date(e.receivedAt).toLocaleString()}</span>
               {e.plannerRunId ? (
                 <span className="mono muted">run {e.plannerRunId.slice(0, 10)}</span>
+              ) : null}
+              {e.direction === "outbound" ? (
+                <DeliveryBadge
+                  status={e.deliveryStatus}
+                  at={e.deliveryStatusAt}
+                  errorCode={e.deliveryErrorCode}
+                />
               ) : null}
             </div>
             <div className="messaging-addresses">

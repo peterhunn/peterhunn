@@ -220,6 +220,35 @@ export const messagingEventRepo = (db: Db) => ({
       .run();
   },
 
+  // Update delivery status from an async provider callback.
+  // Idempotent — the same status can arrive twice on retry, and
+  // rewriting the same row with the same values is safe.
+  // Returns the number of rows updated so the caller can log
+  // "no matching event" without a separate query.
+  updateDeliveryStatus(input: {
+    provider: string;
+    externalMessageId: string;
+    status: string;
+    errorCode?: string;
+  }): { updated: number } {
+    const now = nowIso();
+    const result = db
+      .update(messagingEvents)
+      .set({
+        deliveryStatus: input.status,
+        deliveryStatusAt: now,
+        deliveryErrorCode: input.errorCode ?? null,
+      })
+      .where(
+        and(
+          eq(messagingEvents.provider, input.provider),
+          eq(messagingEvents.externalMessageId, input.externalMessageId),
+        ),
+      )
+      .run();
+    return { updated: result.changes ?? 0 };
+  },
+
   // Events belonging to one conversation session, oldest first.
   // Used by the planner-memory path to hand recent turns back into
   // the next planner call. Limited so a long session doesn't blow

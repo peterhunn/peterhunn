@@ -84,6 +84,16 @@ export interface SendOutboundInput {
   readonly logger?: { info: (msg: string, ctx?: unknown) => void };
 }
 
+// Public URL Twilio POSTs status updates to (queued → sent →
+// delivered / undelivered / failed / read). Resolved from env
+// on every send so the operator can wire it without redeploy.
+// Unset = we don't pass it, Twilio doesn't send callbacks, and
+// delivery status stays null on the row (Phase-0 acceptable).
+const conciergeStatusCallback = (): string | undefined => {
+  const v = process.env["ATELIER_TWILIO_STATUS_CALLBACK_URL"];
+  return v && v.length > 0 ? v : undefined;
+};
+
 export interface SendOutboundResult {
   readonly refused?: "opted_out";
   readonly refusedReason?: string;
@@ -123,9 +133,15 @@ export const sendOutboundMessage = async (
   // narrow explicitly so tsc is satisfied.
   const twilioChannel: "sms" | "whatsapp" =
     input.channel === "whatsapp" ? "whatsapp" : "sms";
+  const cb = conciergeStatusCallback();
   const out = await sendTwilioMessage(
     sender as never,
-    { channel: twilioChannel, to: input.to, body: input.body },
+    {
+      channel: twilioChannel,
+      to: input.to,
+      body: input.body,
+      ...(cb ? { statusCallback: cb } : {}),
+    },
     ...(input.logger ? [{ logger: input.logger }] as const : []),
   );
 

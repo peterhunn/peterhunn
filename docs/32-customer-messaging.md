@@ -333,12 +333,38 @@ confidence 0.7 and status `candidate`. Titles are guessed from
 the MIME type (`Photo — <hash>`, `PDF — <hash>`, `Voice memo —
 <hash>`, `Video — <hash>`, else `Attachment — <hash>`).
 
-## Known limits
+## Delivery status
 
-- **No delivery-status callbacks.** We know we sent it; we
-  don't know when the customer read it. Twilio's
-  message-status webhook (`MessageStatus=sent|delivered|read`)
-  is a small follow-up commit.
+Every outbound row on `messaging_events` grows three columns
+that Twilio's async `MessageStatus` webhook populates:
+
+- `deliveryStatus` — `queued` | `sent` | `delivered` | `read`
+  (WhatsApp) | `undelivered` | `failed`.
+- `deliveryStatusAt` — timestamp of the last transition.
+- `deliveryErrorCode` — Twilio's numeric error code on the
+  failure path (30003 unreachable, 30005 unknown destination,
+  30006 landline-can't-SMS, etc.).
+
+Wiring:
+
+1. Set `ATELIER_TWILIO_STATUS_CALLBACK_URL` to a public URL
+   that resolves to `POST /messaging/status/twilio`. Unset in
+   dev = no callbacks, status column stays null on outbound.
+2. `sendTwilioMessage` passes `statusCallback: <url>` on
+   `client.messages.create(...)`. Twilio starts POSTing.
+3. `/messaging/status/twilio` verifies the signature (same
+   `ATELIER_TWILIO_AUTH_TOKEN` as inbound), matches on
+   `(provider="twilio", externalMessageId=MessageSid)`, and
+   updates the row idempotently.
+4. Console renders a status pill on outbound rows: green for
+   delivered/read, indigo for sent/queued, red for
+   failed/undelivered (with the error code in parens).
+
+Callbacks for unknown MessageSids ack 200 (so Twilio doesn't
+retry forever) and log for triage. Missing MessageSid or
+MessageStatus 400s.
+
+## Known limits
 - **Single-tenant concierge.** One number per tenant, not one
   per operator. A large multi-tenant deploy would need
   per-tenant concierge routing.

@@ -68,9 +68,10 @@ vars, (b) adding a row to the model registry pointing at
 | Name                                     | Purpose                                                       |
 | ---------------------------------------- | ------------------------------------------------------------- |
 | `ATELIER_TWILIO_ACCOUNT_SID`             | Twilio account SID.                                           |
-| `ATELIER_TWILIO_AUTH_TOKEN`              | Twilio auth token — also drives inbound signature verify.     |
+| `ATELIER_TWILIO_AUTH_TOKEN`              | Twilio auth token — also drives inbound + status webhook signature verify. |
 | `ATELIER_TWILIO_FROM_NUMBER`             | Concierge phone number (`+1…`).                               |
 | `ATELIER_TWILIO_MESSAGING_SERVICE_SID`   | Optional — use a Messaging Service instead of a fixed number. |
+| `ATELIER_TWILIO_STATUS_CALLBACK_URL`     | Optional — public URL Twilio POSTs delivery-status updates to (`/messaging/status/twilio`). Unset = no callbacks; deliveryStatus stays null on outbound rows. |
 
 Per-household Twilio credentials (for enterprise households with
 their own DID) are stored on `credentials` under provider

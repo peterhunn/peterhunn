@@ -11,8 +11,10 @@ import {
   householdRepo,
   identityRepo,
   messagingEventRepo,
+  messagingEvents,
   pendingVerificationRepo,
 } from "@atelier/db";
+import { eq } from "drizzle-orm";
 import type { HouseholdId } from "@atelier/domain";
 import { buildServer } from "../src/server.js";
 import type { FastifyInstance } from "fastify";
@@ -1060,6 +1062,100 @@ describe("messaging outbound send", () => {
       .list(hh)
       .filter((e) => e.toAddress === "+14158676001" && e.direction === "outbound");
     expect(outboundAfter).toHaveLength(0);
+  });
+});
+
+describe("delivery status callbacks", () => {
+  it("updates deliveryStatus on the outbound event when Twilio POSTs a status", async () => {
+    // First, land an outbound event we can target by its
+    // externalMessageId. Send via /messaging/send (no live
+    // twilio credential = mock provider), then rewrite the
+    // provider on the row to "twilio" and give it a predictable
+    // sid so the callback matches.
+    const send = await app.inject({
+      method: "POST",
+      url: `/households/${hh}/messaging/send`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        channel: "sms",
+        to: "+14158676100",
+        body: "hello",
+      },
+    });
+    expect(send.statusCode).toBe(200);
+    const eventId = send.json().sent.eventId as string;
+
+    // Retroactively rewrite the row so the twilio-status callback
+    // has something to match. In real prod flow, the row is
+    // already provider=twilio when Twilio calls back.
+    db.update(messagingEvents)
+      .set({ provider: "twilio", externalMessageId: "SM_delivery_1" })
+      .where(eq(messagingEvents.id, eventId))
+      .run();
+
+    // Twilio callback: MessageSid + MessageStatus.
+    const cb = await app.inject({
+      method: "POST",
+      url: "/messaging/status/twilio",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: "MessageSid=SM_delivery_1&MessageStatus=delivered",
+    });
+    expect(cb.statusCode).toBe(200);
+
+    const updated = messagingEventRepo(db)
+      .list(hh)
+      .find((e) => e.id === eventId);
+    expect(updated?.deliveryStatus).toBe("delivered");
+    expect(updated?.deliveryStatusAt).toBeTruthy();
+    expect(updated?.deliveryErrorCode).toBeNull();
+  });
+
+  it("records the Twilio error code on a failed delivery", async () => {
+    const send = await app.inject({
+      method: "POST",
+      url: `/households/${hh}/messaging/send`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { channel: "sms", to: "+14158676101", body: "will fail" },
+    });
+    const eventId = send.json().sent.eventId as string;
+    db.update(messagingEvents)
+      .set({ provider: "twilio", externalMessageId: "SM_fail_1" })
+      .where(eq(messagingEvents.id, eventId))
+      .run();
+
+    const cb = await app.inject({
+      method: "POST",
+      url: "/messaging/status/twilio",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: "MessageSid=SM_fail_1&MessageStatus=failed&ErrorCode=30003",
+    });
+    expect(cb.statusCode).toBe(200);
+
+    const updated = messagingEventRepo(db).list(hh).find((e) => e.id === eventId);
+    expect(updated?.deliveryStatus).toBe("failed");
+    expect(updated?.deliveryErrorCode).toBe("30003");
+  });
+
+  it("acks 200 (does NOT 404) when the callback references an unknown MessageSid", async () => {
+    const cb = await app.inject({
+      method: "POST",
+      url: "/messaging/status/twilio",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: "MessageSid=SM_never_seen&MessageStatus=delivered",
+    });
+    // 200 so Twilio doesn't retry forever.
+    expect(cb.statusCode).toBe(200);
+    expect(cb.json().ok).toBe(true);
+  });
+
+  it("400s a callback missing MessageSid or MessageStatus", async () => {
+    const cb = await app.inject({
+      method: "POST",
+      url: "/messaging/status/twilio",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: "MessageSid=SM_only",
+    });
+    expect(cb.statusCode).toBe(400);
   });
 });
 
