@@ -243,13 +243,28 @@ Two authoring surfaces, one send path:
   "Recent messages" panel gets a `Reply` button. Opens a
   textarea, submits via the `sendMessage` server action, which
   hits `/messaging/send` on the API.
-- **Agent reply.** `smsSendTool` (`sms.send`) — the concierge
-  send tool. Policy engine defaults it to `ask` autonomy
-  (side-effect class `communication` forces T3 + high
-  supervision), so agent-authored SMS lands as an approval
-  unless a household policy explicitly promotes it to `execute`.
-  Same shape as `message.send` (the Gmail send tool) — the
-  planner picks whichever channel fits the intent.
+- **Agent reply.** The `concierge` agent handles
+  `concierge.reply` intents — reads the customer's message +
+  prior turns, drafts a reply via a T2 model call, and hands
+  the draft to the `sms.send` tool. Policy engine defaults
+  `sms.send` to `ask` autonomy (side-effect class
+  `communication` forces T3 + high supervision), so
+  agent-authored SMS lands as an approval unless a household
+  policy explicitly promotes it to `execute`. The model can
+  also set `escalate: true` in its reply to punt to the manager
+  (financial commitments, complex bookings, medical/legal) —
+  the tool is not called at all in that case.
+- **Planner routing.** The planner's registry includes
+  `concierge.reply` alongside the task-shaped intents (calendar,
+  travel, admin, family). Conversational messages route here;
+  a "book me a car" routes to the calendar specialist which
+  emits its own outbound if needed.
+- **Runtime context injection.** `PlanAndRunOptions` accepts
+  `defaultIntentAttrs` — the messaging inbound path fills in
+  `channel`, `toAddress`, `currentMessage`, `priorTurns`,
+  `fromName` so the concierge agent (and any future
+  reply-shaped intent) gets the customer context without the
+  planner having to invent phone numbers.
 
 Both paths route through **one shared helper**,
 `sendOutboundMessage` in `apps/api/src/messaging-outbound.ts`.

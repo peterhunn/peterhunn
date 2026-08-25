@@ -222,6 +222,12 @@ export interface PlanAndRunOptions {
     readonly role: "customer" | "agent";
     readonly content: string;
   }[];
+  // Runtime-supplied defaults merged into every intent's attrs
+  // BEFORE the planner-produced attrs. Used to inject fields the
+  // planner shouldn't have to guess — a customer's phone number,
+  // the recorded prior-turn transcript, the channel the reply
+  // should go out on. Planner-produced attrs win on conflict.
+  readonly defaultIntentAttrs?: Record<string, unknown>;
 }
 
 export interface PlanAndRunResult {
@@ -234,7 +240,16 @@ export class Orchestrator {
   constructor(private readonly deps: OrchestratorDeps) {}
 
   async planAndRun(opts: PlanAndRunOptions): Promise<PlanAndRunResult> {
-    const { householdId, actor, graph, writer, prompt, origin, priorTurns } = opts;
+    const {
+      householdId,
+      actor,
+      graph,
+      writer,
+      prompt,
+      origin,
+      priorTurns,
+      defaultIntentAttrs,
+    } = opts;
     const logger = this.deps.logger ?? { info: () => {} };
 
     const plannerRun = this.deps.ledger.startRun({
@@ -317,7 +332,15 @@ export class Orchestrator {
 
     const runs: OrchestratorRunResult[] = [];
     for (const item of plan.intents) {
-      const intent = materializeIntent(item, origin);
+      // Merge runtime defaults BEFORE the planner-produced attrs
+      // — planner wins on conflict. Lets the messaging path
+      // supply toAddress / priorTurns / channel without asking
+      // the planner to invent them.
+      const mergedItem =
+        defaultIntentAttrs && Object.keys(defaultIntentAttrs).length > 0
+          ? { ...item, attrs: { ...defaultIntentAttrs, ...item.attrs } }
+          : item;
+      const intent = materializeIntent(mergedItem, origin);
       const result = await this.run({ householdId, actor, graph, writer, intent });
       runs.push(result);
     }

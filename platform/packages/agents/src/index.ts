@@ -10,6 +10,7 @@ export * from "./agents/research.js";
 export * from "./agents/admin.js";
 export * from "./agents/family.js";
 export * from "./agents/travel.js";
+export * from "./agents/concierge.js";
 export * from "./tools/vendor.js";
 export * from "./tools/calendar.js";
 export * from "./tools/message.js";

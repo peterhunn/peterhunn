@@ -442,6 +442,18 @@ const recordAndPrepareDispatch = (
         ...(input.priorTurns && input.priorTurns.length > 0
           ? { priorTurns: input.priorTurns }
           : {}),
+        // Hand the planner-produced intents the runtime-only
+        // fields they'll need — the concierge agent especially
+        // needs to know which number to reply to, on which
+        // channel, and what the prior turns were. Planner
+        // attrs still win on conflict.
+        defaultIntentAttrs: {
+          channel: input.channel,
+          toAddress: input.from,
+          fromName: actorDisplay !== input.from ? actorDisplay : undefined,
+          currentMessage: input.body,
+          priorTurns: input.priorTurns ?? [],
+        },
       });
       const firstRun = result.runs[0]?.runId;
       if (firstRun) events.linkRun(row.id, firstRun);

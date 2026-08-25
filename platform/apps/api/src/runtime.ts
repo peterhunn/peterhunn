@@ -8,6 +8,7 @@ import {
   adminAgent,
   familyAgent,
   travelAgent,
+  conciergeAgent,
   vendorScheduleTool,
   vendorPurchaseTool,
   calendarCreateTool,
@@ -128,6 +129,7 @@ export const buildOrchestrator = (db: Db): Orchestrator => {
       adminAgent,
       familyAgent,
       travelAgent,
+      conciergeAgent,
     ],
     tools: buildToolRegistry(),
     ledger: {

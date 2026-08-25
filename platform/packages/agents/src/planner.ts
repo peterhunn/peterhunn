@@ -53,6 +53,18 @@ export const PLANNER_REGISTRY: readonly PlannerIntentSpec[] = [
     },
   },
   {
+    kind: "concierge.reply",
+    description:
+      "Draft a reply on the concierge line to a customer's own text — a conversational ack, a clarifying question, a status update, a warm holding message while another agent works on the actual task. Use this when the customer's message is conversational or you need to say SOMETHING to them, and none of the task-shaped intents (calendar, travel, admin, family) apply cleanly. Do NOT use for a scheduled task — that goes to the specialist intent, and the specialist emits its own outbound if needed.",
+    attrsExample: {
+      channel: "sms",
+      toAddress: "+14158675309",
+      currentMessage: "thanks!",
+      fromName: "Ada",
+      goal: "acknowledge and confirm nothing else is needed",
+    },
+  },
+  {
     kind: "inbox.message.process",
     description:
       "Triage, extract, and draft a reply to a specific inbound message. Use only when the customer references a message that exists in the inbox.",
