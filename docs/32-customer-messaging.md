@@ -235,6 +235,44 @@ Every route below sits in `apps/api/src/routes/messaging.ts`.
 - `POST /messaging/inbound/twilio` — Twilio webhook
 - `GET /messaging/config` — concierge number + status
 
+## Reply — human OR agent
+
+Two authoring surfaces, one send path:
+
+- **Manager reply.** Every inbound row on the household page's
+  "Recent messages" panel gets a `Reply` button. Opens a
+  textarea, submits via the `sendMessage` server action, which
+  hits `/messaging/send` on the API.
+- **Agent reply.** `smsSendTool` (`sms.send`) — the concierge
+  send tool. Policy engine defaults it to `ask` autonomy
+  (side-effect class `communication` forces T3 + high
+  supervision), so agent-authored SMS lands as an approval
+  unless a household policy explicitly promotes it to `execute`.
+  Same shape as `message.send` (the Gmail send tool) — the
+  planner picks whichever channel fits the intent.
+
+Both paths route through **one shared helper**,
+`sendOutboundMessage` in `apps/api/src/messaging-outbound.ts`.
+The helper:
+
+1. Applies the outbound consent gate — an opted-out recipient
+   refuses with `refused: "opted_out"` and no Twilio API call.
+2. Resolves the Twilio sender (per-household DID first, platform
+   concierge fallback).
+3. Sends via `sendTwilioMessage`.
+4. Auto-attaches the outbound to the recipient's open
+   conversation session so agent replies land in the running
+   history.
+5. Records a `messaging_events` row so the household's traffic
+   view sees the send regardless of who authored it.
+
+The agent side reaches the helper through a `ToolContext` seam:
+`ctx.sendChannelMessage(...)`. The runtime (`buildOrchestrator`)
+supplies the implementation; test contexts leave it undefined
+and the tool falls back to a mock send with a visible reason.
+`OrchestratorDeps.messagingOutbound` is the top-level dep name
+if you're plumbing this into a new runtime.
+
 ## Instant ack + async dispatch
 
 `handleInbound` records the event, sets up the session, and

@@ -106,6 +106,29 @@ export interface CredentialSource {
   updateAccessToken?(credentialId: string, accessToken: string, expiresAt: string): void;
 }
 
+// Runtime-supplied outbound-messaging sender. When present, the
+// orchestrator threads it into every ToolContext so agent-side
+// send tools (sms.send today, more to come) land through the
+// same code path as manager-authored /messaging/send — same
+// consent gate, same session auto-attach, same recorded shape.
+// Optional so test orchestrators can leave it undefined; tools
+// that need it fall back to their own mock when it isn't wired.
+export interface MessagingOutboundSink {
+  send(
+    householdId: HouseholdId,
+    input: { channel: "sms" | "whatsapp"; to: string; body: string },
+  ): Promise<{
+    provider: "twilio" | "mock";
+    externalMessageId: string;
+    from: string;
+    to: string;
+    eventId: string;
+    status?: string;
+    reason?: string;
+    refusedFor?: "opted_out";
+  }>;
+}
+
 export interface ApprovalSink {
   enqueue(input: {
     householdId: HouseholdId;
@@ -169,6 +192,7 @@ export interface OrchestratorDeps {
   readonly approvals: ApprovalSink;
   readonly models: ModelRuntime;
   readonly credentials?: CredentialSource;
+  readonly messagingOutbound?: MessagingOutboundSink;
   readonly logger?: { info: (msg: string, ctx?: unknown) => void };
 }
 
@@ -521,6 +545,13 @@ export class Orchestrator {
           this.deps.credentials?.read(input.householdId, provider) ?? null,
         ...(this.deps.credentials?.updateAccessToken && {
           persistAccessToken: this.deps.credentials.updateAccessToken.bind(this.deps.credentials),
+        }),
+        ...(this.deps.messagingOutbound && {
+          sendChannelMessage: (send: {
+            channel: "sms" | "whatsapp";
+            to: string;
+            body: string;
+          }) => this.deps.messagingOutbound!.send(input.householdId, send),
         }),
         logger: this.deps.logger,
       },

@@ -13,6 +13,7 @@ import {
   calendarCreateTool,
   calendarRescheduleTool,
   messageSendTool,
+  smsSendTool,
   type AgentGraphWriter,
 } from "@atelier/agents";
 import {
@@ -26,6 +27,7 @@ import {
   taskRepo,
   type Db,
 } from "@atelier/db";
+import { sendOutboundMessage } from "./messaging-outbound.js";
 import { evaluate as evaluatePolicy } from "@atelier/policy";
 import { ModelRegistry, Router, callModel, callModelWithTools } from "@atelier/router";
 import {
@@ -67,6 +69,7 @@ export const buildToolRegistry = (): ToolRegistry => {
   r.register(calendarCreateTool);
   r.register(calendarRescheduleTool);
   r.register(messageSendTool);
+  r.register(smsSendTool);
   return r;
 };
 
@@ -172,6 +175,40 @@ export const buildOrchestrator = (db: Db): Orchestrator => {
       read: (h, provider) => credentials.getSecret(h, provider),
       updateAccessToken: (id, accessToken, expiresAt) =>
         credentials.updateAccessToken(id, accessToken, expiresAt),
+    },
+    messagingOutbound: {
+      send: async (householdId, input) => {
+        const out = await sendOutboundMessage(db, {
+          householdId,
+          channel: input.channel,
+          to: input.to,
+          body: input.body,
+        });
+        if (out.refused === "opted_out") {
+          // The tool contract wants a shape with externalMessageId
+          // + from + to + eventId even on refusal, so downstream
+          // recording still has stable fields. Populate with
+          // reason-carrying placeholders.
+          return {
+            provider: "mock",
+            externalMessageId: "refused-opted-out",
+            from: "",
+            to: input.to,
+            eventId: "",
+            reason: out.refusedReason ?? "opted_out",
+            refusedFor: "opted_out",
+          };
+        }
+        return {
+          provider: out.provider!,
+          externalMessageId: out.externalMessageId!,
+          from: out.from!,
+          to: out.to!,
+          eventId: out.eventId!,
+          ...(out.status ? { status: out.status } : {}),
+          ...(out.reason ? { reason: out.reason } : {}),
+        };
+      },
     },
     models: {
       callModel: async (

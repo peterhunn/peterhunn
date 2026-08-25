@@ -954,6 +954,113 @@ describe("messaging outbound send", () => {
     expect(sent.externalMessageId).toBe("SMlive123");
     expect(twilioHit).toBe(1);
   });
+
+  it("agent-authored sms.send goes through the same outbound path and lands in messaging_events", async () => {
+    // Build the orchestrator (which builds the messagingOutbound
+    // seam via runtime.ts) and invoke smsSendTool through the
+    // agent path.
+    const { buildOrchestrator } = await import("../src/runtime.js");
+    const { smsSendTool } = await import("@atelier/agents");
+    const orch = buildOrchestrator(db);
+    // The tool's normal path is through orch.executeTool via an
+    // agent, which we don't need to spin up end-to-end. Instead,
+    // we assert the wiring: buildOrchestrator's deps include
+    // messagingOutbound, and calling it lands a messaging_event.
+    const deps = (
+      orch as unknown as { deps: { messagingOutbound?: { send: Function } } }
+    ).deps;
+    expect(deps.messagingOutbound).toBeDefined();
+
+    const ep = contactEndpointRepo(db).create({
+      householdId: hh,
+      channel: "sms",
+      address: "+14158676000",
+    });
+    void ep;
+
+    const beforeCount = messagingEventRepo(db)
+      .list(hh)
+      .filter((e) => e.toAddress === "+14158676000" && e.direction === "outbound").length;
+
+    const out = await deps.messagingOutbound!.send(hh, {
+      channel: "sms",
+      to: "+14158676000",
+      body: "Booked for 7pm — confirmed.",
+    });
+    expect(out).toBeDefined();
+    expect(out.provider).toBe("mock");
+    expect(out.eventId).toMatch(/^mev_/);
+
+    const afterEvents = messagingEventRepo(db)
+      .list(hh)
+      .filter((e) => e.toAddress === "+14158676000" && e.direction === "outbound");
+    expect(afterEvents.length).toBe(beforeCount + 1);
+    expect(afterEvents[0]!.body).toBe("Booked for 7pm — confirmed.");
+
+    // Verify the tool itself uses the seam: invoke smsSendTool
+    // with a hand-built ctx pointing at the runtime's outbound.
+    const toolRes = await smsSendTool.invoke(
+      {
+        householdId: hh,
+        authorityId: "pol_test",
+        proposedBy: { actor: "concierge_agent", version: "0.1.0" },
+        readCredential: () => null,
+        sendChannelMessage: (input) => deps.messagingOutbound!.send(hh, input),
+        logger: { info: () => {} },
+      },
+      {
+        inputs: { channel: "sms", to: "+14158676000", body: "One more update." },
+        summary: "Update",
+      },
+    );
+    expect(toolRes.outcome).toBe("succeeded");
+    const finalEvents = messagingEventRepo(db)
+      .list(hh)
+      .filter((e) => e.toAddress === "+14158676000" && e.direction === "outbound");
+    expect(finalEvents.length).toBe(beforeCount + 2);
+  });
+
+  it("agent-authored sms.send refuses to send to an opted-out recipient", async () => {
+    const ep = contactEndpointRepo(db).create({
+      householdId: hh,
+      channel: "sms",
+      address: "+14158676001",
+    });
+    contactEndpointRepo(db).setConsent(ep.id, {
+      status: "opted_out",
+      source: "reply_stop",
+    });
+
+    const { buildOrchestrator } = await import("../src/runtime.js");
+    const { smsSendTool } = await import("@atelier/agents");
+    const deps = (
+      buildOrchestrator(db) as unknown as {
+        deps: { messagingOutbound: { send: Function } };
+      }
+    ).deps;
+
+    const toolRes = await smsSendTool.invoke(
+      {
+        householdId: hh,
+        authorityId: "pol_test",
+        proposedBy: { actor: "concierge_agent", version: "0.1.0" },
+        readCredential: () => null,
+        sendChannelMessage: (input) => deps.messagingOutbound.send(hh, input),
+        logger: { info: () => {} },
+      },
+      {
+        inputs: { channel: "sms", to: "+14158676001", body: "You there?" },
+        summary: "Ping",
+      },
+    );
+    expect(toolRes.outcome).toBe("failed_permanent");
+    expect(toolRes.outputs.refused).toBe("opted_out");
+    // No messaging_event recorded for a refused send.
+    const outboundAfter = messagingEventRepo(db)
+      .list(hh)
+      .filter((e) => e.toAddress === "+14158676001" && e.direction === "outbound");
+    expect(outboundAfter).toHaveLength(0);
+  });
 });
 
 describe("messaging endpoints CRUD", () => {

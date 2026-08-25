@@ -60,6 +60,28 @@ export interface ToolContext {
     accessToken: string,
     expiresAt: string,
   ) => void;
+  // Send an SMS / WhatsApp on the concierge line (or the
+  // household's own DID). Runtime-supplied: applies the outbound
+  // consent gate, records a messaging_events row, auto-attaches
+  // to the recipient's open conversation session. Agents call
+  // this instead of talking to the Twilio adapter directly, so
+  // agent-authored and manager-authored sends land through the
+  // same code path. Optional so test contexts and non-messaging
+  // agents can leave it undefined.
+  readonly sendChannelMessage?: (input: {
+    readonly channel: "sms" | "whatsapp";
+    readonly to: string;
+    readonly body: string;
+  }) => Promise<{
+    readonly provider: "twilio" | "mock";
+    readonly externalMessageId: string;
+    readonly from: string;
+    readonly to: string;
+    readonly eventId: string;
+    readonly status?: string;
+    readonly reason?: string;
+    readonly refusedFor?: "opted_out";
+  }>;
   readonly logger?: { info: (msg: string, ctx?: unknown) => void };
 }
 

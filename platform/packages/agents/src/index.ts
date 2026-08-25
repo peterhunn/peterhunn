@@ -13,6 +13,7 @@ export * from "./agents/travel.js";
 export * from "./tools/vendor.js";
 export * from "./tools/calendar.js";
 export * from "./tools/message.js";
+export * from "./tools/message-sms.js";
 export * from "./tools/gmail-sync.js";
 export * from "./tools/calendar-sync.js";
 export * from "./tools/twilio.js";

@@ -20,6 +20,7 @@ import { getBlobStore } from "../blob-store.js";
 import { sendTwilioMessage, verifyTwilioInboundSignature } from "@atelier/agents";
 import { buildGraphView, buildGraphWriter, buildOrchestrator } from "../runtime.js";
 import { stripUndefined } from "../util.js";
+import { sendOutboundMessage } from "../messaging-outbound.js";
 
 // Customer messaging surface.
 //
@@ -769,53 +770,32 @@ export const messagingRoutes = (db: Db): FastifyPluginAsync => async (app) => {
         return reply.code(400).send({ error: "invalid_body", issues: parsed.error.issues });
       }
       const householdId = req.householdContext as HouseholdId;
-      const gate = outboundConsentGate(db, householdId, parsed.data.channel, parsed.data.to);
-      if (gate.blocked) {
-        return reply.code(403).send({
-          error: "recipient_opted_out",
-          message:
-            "This recipient has opted out. Outbound refused. Ask them to reply START to opt back in.",
-          reason: gate.reason,
-        });
-      }
-      const sender = resolveTwilioSender(db, householdId);
-      const out = await sendTwilioMessage(sender.credential as never, parsed.data, {
+      const result = await sendOutboundMessage(db, {
+        householdId,
+        channel: parsed.data.channel,
+        to: parsed.data.to,
+        body: parsed.data.body,
         logger: {
           info: (msg, ctx) => req.log.info({ ...(ctx as object) }, msg),
         },
       });
-      // If the recipient endpoint has an open session, tag the
-      // outbound with its id so the reply lands in the running
-      // conversation history — the next inbound turn will see it
-      // as prior agent context.
-      const recipEp =
-        (gate.blocked === false ? gate.endpoint as { id: string } | null : null) ??
-        contactEndpointRepo(db).resolve(parsed.data.channel, parsed.data.to);
-      let outboundSessionId: string | undefined;
-      if (recipEp) {
-        const openSessions = conversationSessionRepo(db).listOpenForEndpoint(recipEp.id);
-        outboundSessionId = openSessions[0]?.id;
+      if (result.refused === "opted_out") {
+        return reply.code(403).send({
+          error: "recipient_opted_out",
+          message:
+            "This recipient has opted out. Outbound refused. Ask them to reply START to opt back in.",
+          reason: result.refusedReason,
+        });
       }
-      const record = events.record({
-        householdId,
-        direction: "outbound",
-        channel: parsed.data.channel,
-        provider: out.provider,
-        externalMessageId: out.externalMessageId,
-        fromAddress: out.from,
-        toAddress: out.to,
-        body: parsed.data.body,
-        ...(outboundSessionId ? { sessionId: outboundSessionId } : {}),
-      });
       return {
         sent: {
-          provider: out.provider,
-          externalMessageId: out.externalMessageId,
-          from: out.from,
-          to: out.to,
-          eventId: record.row.id,
-          ...(out.status ? { status: out.status } : {}),
-          ...(out.reason ? { reason: out.reason } : {}),
+          provider: result.provider,
+          externalMessageId: result.externalMessageId,
+          from: result.from,
+          to: result.to,
+          eventId: result.eventId,
+          ...(result.status ? { status: result.status } : {}),
+          ...(result.reason ? { reason: result.reason } : {}),
         },
       };
     },
