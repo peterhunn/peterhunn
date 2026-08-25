@@ -4,6 +4,7 @@ import {
   contactEndpointRepo,
   conversationSessionRepo,
   credentialRepo,
+  documentBlobRepo,
   extractVerificationCode,
   graphRepo,
   householdRepo,
@@ -13,7 +14,9 @@ import {
   type Db,
   type MessagingChannel,
 } from "@atelier/db";
-import type { HouseholdId, NodeId } from "@atelier/domain";
+import type { HouseholdId, NodeId, NodeType } from "@atelier/domain";
+import { nowIso } from "@atelier/domain";
+import { getBlobStore } from "../blob-store.js";
 import { sendTwilioMessage, verifyTwilioInboundSignature } from "@atelier/agents";
 import { buildGraphView, buildGraphWriter, buildOrchestrator } from "../runtime.js";
 import { stripUndefined } from "../util.js";
@@ -173,6 +176,11 @@ interface InboundResult {
   eventId?: string;
   runId?: string;
   ackMessage?: string;
+  // When present, the caller is responsible for calling this to
+  // trigger the planner run. Split out so webhooks can send the
+  // ack SMS first and dispatch in the background — a 20-second
+  // planner call should not delay "on it" to the customer.
+  runDispatch?: () => Promise<{ runId?: string }>;
 }
 
 // TCPA-standard opt-out keywords. Twilio auto-recognises many of
@@ -227,7 +235,130 @@ const outboundConsentGate = (
   return { blocked: false, endpoint: ep };
 };
 
-const dispatchToPlanner = async (
+// Cap on any single MMS attachment we'll download. Twilio's own
+// per-message limit is 5MB but that's a soft product limit; the
+// hard cap here protects the blob store from a hostile URL. Well
+// above real-world SMS attachments (photos ~1-3MB, PDFs ~1MB).
+const MMS_MAX_BYTES = 10 * 1024 * 1024;
+
+// Download the media Twilio referenced, stash each in the blob
+// store, and create a document.record candidate node so the
+// household's graph carries "customer sent a picture" as
+// something the manager (or the extractor) can categorise later.
+// Errors on individual items don't stop the batch — an SMS with
+// 3 attachments where one 404s should still land the other two.
+const downloadTwilioAttachments = async (opts: {
+  db: Db;
+  log: FastifyRequest["log"];
+  householdId: HouseholdId;
+  messagingEventId: string;
+  items: readonly { url: string; contentType: string }[];
+  authToken: string | null;
+}): Promise<void> => {
+  const { db, log, householdId, messagingEventId, items, authToken } = opts;
+  const blobs = documentBlobRepo(db);
+  const graph = graphRepo(db);
+  const store = getBlobStore();
+  const accountSid = process.env["ATELIER_TWILIO_ACCOUNT_SID"];
+  const authHeader =
+    accountSid && authToken
+      ? "Basic " + Buffer.from(`${accountSid}:${authToken}`).toString("base64")
+      : null;
+
+  for (const item of items) {
+    try {
+      const res = await fetch(item.url, {
+        ...(authHeader ? { headers: { authorization: authHeader } } : {}),
+        redirect: "follow",
+      });
+      if (!res.ok) {
+        log.info(
+          { url: item.url, status: res.status },
+          "twilio attachment fetch failed",
+        );
+        continue;
+      }
+      const ab = await res.arrayBuffer();
+      if (ab.byteLength > MMS_MAX_BYTES) {
+        log.info(
+          { url: item.url, byteLength: ab.byteLength, max: MMS_MAX_BYTES },
+          "twilio attachment exceeds MMS_MAX_BYTES — skipped",
+        );
+        continue;
+      }
+      const buf = Buffer.from(ab);
+      const { sha256, byteSize, storageRef } = await store.put(buf);
+
+      // Guess a document category from the MIME type. Everything
+      // lands as category "other" for now — extractor / manager
+      // can re-categorise once the file has been seen.
+      const title = attachmentTitle(item.contentType, sha256);
+      const node = graph.createNode(householdId, {
+        type: "document.record" as NodeType,
+        data: {
+          title,
+          category: "other",
+          storedAt: `blob:sha256:${sha256}`,
+          notes: `MMS attachment from messaging event ${messagingEventId}`,
+        },
+        provenance: {
+          // Closest existing provenance source — the customer sent
+          // it to us. Not a "document upload" (manager didn't
+          // pick and upload it) and not an "email attachment"
+          // (came in through the messaging channel, not the
+          // extractor). If a fifth source is added later, migrate
+          // these rows.
+          source: "customer_document",
+          assertedBy: "twilio_inbound",
+          assertedAt: nowIso(),
+          confidence: 0.7,
+          status: "candidate",
+        },
+      });
+
+      blobs.record({
+        householdId,
+        sha256,
+        mime: item.contentType,
+        byteSize,
+        storageBackend: store.backend,
+        storageRef,
+        uploadedBy: `twilio_inbound:${messagingEventId}`,
+        documentNodeId: node.id,
+      });
+      log.info(
+        {
+          messagingEventId,
+          documentNodeId: node.id,
+          contentType: item.contentType,
+          byteSize,
+        },
+        "twilio attachment landed as document candidate",
+      );
+    } catch (err) {
+      log.error(
+        { url: item.url, error: (err as Error).message },
+        "twilio attachment download threw — skipping this item",
+      );
+    }
+  }
+};
+
+const attachmentTitle = (contentType: string, sha256: string): string => {
+  const short = sha256.slice(0, 8);
+  if (contentType.startsWith("image/")) return `Photo — ${short}`;
+  if (contentType === "application/pdf") return `PDF — ${short}`;
+  if (contentType.startsWith("audio/")) return `Voice memo — ${short}`;
+  if (contentType.startsWith("video/")) return `Video — ${short}`;
+  return `Attachment — ${short}`;
+};
+
+// Record the inbound event AND return a dispatcher that fires the
+// planner call. Split so the webhook can send the ack SMS as soon
+// as the event is recorded, then run the planner in the background.
+// dedupe short-circuits at the record step — no dispatcher returned
+// for a retried webhook.
+const recordAndPrepareDispatch = (
   db: Db,
   log: FastifyRequest["log"],
   input: {
@@ -243,7 +374,11 @@ const dispatchToPlanner = async (
     sessionId?: string;
     priorTurns?: readonly { role: "customer" | "agent"; content: string }[];
   },
-): Promise<{ eventId: string; deduped: boolean; runId?: string }> => {
+): {
+  eventId: string;
+  deduped: boolean;
+  runDispatch?: () => Promise<{ runId?: string }>;
+} => {
   const events = messagingEventRepo(db);
   const eventInput = {
     householdId: input.householdId,
@@ -265,9 +400,9 @@ const dispatchToPlanner = async (
 
   // If the endpoint is bound to a person node (person.principal
   // / .member / .staff / .contact), tell the planner who's
-  // talking — not just which household. `fullName` is the shape
-  // used by the people extractor + the person nodes; missing =
-  // fall back to the from-address as before.
+  // talking — not just which household. Resolution happens here
+  // (in the sync path) so we don't hold up the ack; if the node
+  // is missing at dispatch time we log and fall back.
   let actorId = input.from;
   let actorDisplay = input.from;
   if (input.principalId) {
@@ -285,37 +420,41 @@ const dispatchToPlanner = async (
     }
   }
 
-  try {
-    const orch = buildOrchestrator(db);
-    const result = await orch.planAndRun({
-      householdId: input.householdId,
-      actor: {
-        type: "customer",
-        id: actorId,
-        displayName: actorDisplay,
-      },
-      graph: buildGraphView(db, input.householdId),
-      writer: buildGraphWriter(
-        db,
-        input.householdId,
-        `customer:${input.channel}:${input.from}`,
-      ),
-      prompt: input.body,
-      origin: { source: "customer", by: `${input.channel}:${input.from}` },
-      ...(input.priorTurns && input.priorTurns.length > 0
-        ? { priorTurns: input.priorTurns }
-        : {}),
-    });
-    const firstRun = result.runs[0]?.runId;
-    if (firstRun) events.linkRun(row.id, firstRun);
-    return { eventId: row.id, deduped: false, ...(firstRun ? { runId: firstRun } : {}) };
-  } catch (err) {
-    log.error(
-      { error: (err as Error).message, eventId: row.id },
-      "messaging planAndRun failed",
-    );
-    return { eventId: row.id, deduped: false };
-  }
+  const runDispatch = async (): Promise<{ runId?: string }> => {
+    try {
+      const orch = buildOrchestrator(db);
+      const result = await orch.planAndRun({
+        householdId: input.householdId,
+        actor: {
+          type: "customer",
+          id: actorId,
+          displayName: actorDisplay,
+        },
+        graph: buildGraphView(db, input.householdId),
+        writer: buildGraphWriter(
+          db,
+          input.householdId,
+          `customer:${input.channel}:${input.from}`,
+        ),
+        prompt: input.body,
+        origin: { source: "customer", by: `${input.channel}:${input.from}` },
+        ...(input.priorTurns && input.priorTurns.length > 0
+          ? { priorTurns: input.priorTurns }
+          : {}),
+      });
+      const firstRun = result.runs[0]?.runId;
+      if (firstRun) events.linkRun(row.id, firstRun);
+      return firstRun ? { runId: firstRun } : {};
+    } catch (err) {
+      log.error(
+        { error: (err as Error).message, eventId: row.id },
+        "messaging planAndRun failed",
+      );
+      return {};
+    }
+  };
+
+  return { eventId: row.id, deduped: false, runDispatch };
 };
 
 // Full inbound-side pipeline: shared-line vs dedicated-line
@@ -440,7 +579,7 @@ const handleInbound = async (
         content: e.body.length > 1000 ? `${e.body.slice(0, 1000)}…` : e.body,
       }));
 
-    const out = await dispatchToPlanner(db, log, {
+    const prepared = recordAndPrepareDispatch(db, log, {
       householdId: ep.householdId as HouseholdId,
       channel: input.channel,
       from: input.from,
@@ -454,10 +593,13 @@ const handleInbound = async (
       ...(priorTurns.length > 0 ? { priorTurns } : {}),
     });
     return {
-      outcome: out.deduped ? "deduped" : "dispatched",
+      outcome: prepared.deduped ? "deduped" : "dispatched",
       householdId: ep.householdId as HouseholdId,
-      eventId: out.eventId,
-      ...(out.runId ? { runId: out.runId } : {}),
+      eventId: prepared.eventId,
+      ...(prepared.deduped
+        ? {}
+        : { ackMessage: "Got it — I'm on this and will follow up." }),
+      ...(prepared.runDispatch ? { runDispatch: prepared.runDispatch } : {}),
     };
   }
 
@@ -722,12 +864,21 @@ export const messagingRoutes = (db: Db): FastifyPluginAsync => async (app) => {
           message: `No contact endpoint or live verification for ${parsed.data.channel}:${parsed.data.from} → ${parsed.data.to}.`,
         });
       }
+      // The mock endpoint runs the planner synchronously so tests
+      // (and interactive dev inspection) see the completed run in
+      // the response. Twilio's real inbound webhook fires the
+      // planner in the background after the ack SMS.
+      let runId: string | undefined = out.runId;
+      if (out.runDispatch) {
+        const d = await out.runDispatch();
+        if (d.runId) runId = d.runId;
+      }
       return {
         ok: true,
         outcome: out.outcome,
         ...(out.eventId ? { eventId: out.eventId } : {}),
         ...(out.householdId ? { householdId: out.householdId } : {}),
-        ...(out.runId ? { plannerRunId: out.runId } : {}),
+        ...(runId ? { plannerRunId: runId } : {}),
         ...(out.ackMessage ? { ackMessage: out.ackMessage } : {}),
       };
     },
@@ -800,7 +951,7 @@ export const messagingRoutes = (db: Db): FastifyPluginAsync => async (app) => {
 
       let ackText: string | null = null;
       if (out.outcome === "dispatched") {
-        ackText = "Got it — I'm working on this and will follow up.";
+        ackText = out.ackMessage ?? "Got it — I'm on this and will follow up.";
       } else if (out.outcome === "verified") {
         ackText = out.ackMessage ?? "Verified.";
       } else if (out.outcome === "already_verified") {
@@ -818,10 +969,56 @@ export const messagingRoutes = (db: Db): FastifyPluginAsync => async (app) => {
       if (out.outcome === "unrouted") {
         req.log.info({ channel, from, to }, "twilio inbound unrouted");
       }
+
+      // MMS media — Twilio POSTs the URLs and content types but
+      // does NOT include the bytes. Download in the background so
+      // the customer's ack isn't held up on a slow media host;
+      // handleAttachments records each blob and creates a
+      // document.record candidate node for the household.
+      const numMedia = Number.parseInt(raw["NumMedia"] ?? "0", 10);
+      const mediaItems: Array<{ url: string; contentType: string }> = [];
+      if (Number.isFinite(numMedia) && numMedia > 0 && out.householdId && out.eventId) {
+        for (let i = 0; i < numMedia; i++) {
+          const url = raw[`MediaUrl${i}`];
+          const contentType = raw[`MediaContentType${i}`] ?? "application/octet-stream";
+          if (url) mediaItems.push({ url, contentType });
+        }
+      }
+
       const inner = ackText ? `<Message>${escapeXml(ackText)}</Message>` : "";
-      return reply
+      reply
         .header("content-type", "text/xml; charset=utf-8")
         .send(`<?xml version="1.0" encoding="UTF-8"?><Response>${inner}</Response>`);
+
+      // Fire-and-forget: the customer already has the ack SMS in
+      // hand. Long-running work (planner, attachment downloads)
+      // runs after the response bytes are on the wire so a 20s
+      // planner call doesn't turn into a 20s "waiting for reply"
+      // on the customer's phone.
+      if (out.runDispatch) {
+        void out.runDispatch().catch((err) =>
+          req.log.error(
+            { error: (err as Error).message },
+            "twilio inbound dispatch failed",
+          ),
+        );
+      }
+      if (mediaItems.length > 0 && out.householdId && out.eventId) {
+        void downloadTwilioAttachments({
+          db,
+          log: req.log,
+          householdId: out.householdId,
+          messagingEventId: out.eventId,
+          items: mediaItems,
+          authToken: authToken ?? null,
+        }).catch((err) =>
+          req.log.error(
+            { error: (err as Error).message },
+            "twilio attachment download failed",
+          ),
+        );
+      }
+      return reply;
     },
   );
 

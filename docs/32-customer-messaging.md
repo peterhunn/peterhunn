@@ -235,16 +235,64 @@ Every route below sits in `apps/api/src/routes/messaging.ts`.
 - `POST /messaging/inbound/twilio` — Twilio webhook
 - `GET /messaging/config` — concierge number + status
 
+## Instant ack + async dispatch
+
+`handleInbound` records the event, sets up the session, and
+returns a `runDispatch()` function — it does NOT wait for the
+planner. Callers decide when to fire that function.
+
+- **Twilio webhook** ships the TwiML ack ("Got it — I'm on
+  this…") immediately, then `void runDispatch()` in the
+  background. A 20-second planner call no longer turns into
+  20 seconds of "waiting for reply" on the customer's phone.
+- **Mock webhook** awaits `runDispatch` before returning so
+  tests (and interactive dev inspection) see the completed
+  planner run in the response.
+
+Same code path, different await behaviour — the divergence is
+documented in `apps/api/src/routes/messaging.ts`. When the ack
+text depends on the outcome (STOP / START confirmations,
+verified onboarding), the ack still comes from `handleInbound`'s
+result — the async part is only the planner call.
+
+## MMS attachments
+
+Twilio inbound webhooks include `NumMedia` + `MediaUrl<N>` +
+`MediaContentType<N>` when the customer sends photos, PDFs, or
+audio. Handling:
+
+1. The webhook returns the ack TwiML immediately (see above).
+2. `downloadTwilioAttachments` runs in the background: fetches
+   each URL with Twilio basic auth
+   (`AccountSID:AuthToken`), pipes bytes through the
+   content-addressed blob store, records a `document_blobs`
+   row, and creates a `document.record` node in the graph as
+   a `candidate` (needs manager / extractor review to
+   categorise).
+3. Per-item errors (404, oversized, malformed content) log and
+   skip; other items in the same MMS still land.
+4. Hard cap: `MMS_MAX_BYTES = 10 MiB` per item — well above
+   real-world MMS attachments (photos ~1-3 MB, PDFs ~1 MB),
+   protects the blob store from a hostile URL.
+
+Provenance is `customer_document / twilio_inbound` with
+confidence 0.7 and status `candidate`. Titles are guessed from
+the MIME type (`Photo — <hash>`, `PDF — <hash>`, `Voice memo —
+<hash>`, `Video — <hash>`, else `Attachment — <hash>`).
+
 ## Known limits
 
-- **No attachments.** MMS images, PDFs, audio — currently ignored.
-- **No delivery-status callbacks.** We know we sent it; we don't
-  know when the customer read it.
-- **No auto-ack.** A customer texts and waits for the agent to
-  finish before hearing back. The "on it, one sec" instant ack
-  is called out in the improvement backlog.
+- **No delivery-status callbacks.** We know we sent it; we
+  don't know when the customer read it. Twilio's
+  message-status webhook (`MessageStatus=sent|delivered|read`)
+  is a small follow-up commit.
 - **Single-tenant concierge.** One number per tenant, not one
-  per operator. A large multi-tenant deploy would need per-tenant
-  concierge routing.
+  per operator. A large multi-tenant deploy would need
+  per-tenant concierge routing.
 - **English only** in the default invite body and STOP / START
-  confirmations. `bodyOverride` on invite lets a manager localise.
+  confirmations. `bodyOverride` on invite lets a manager
+  localise.
+- **Attachments don't get auto-categorised.** They land as
+  `category: "other"`; a manager (or the extractor when it
+  runs) reclassifies to `identity | legal | policy | record |
+  receipt`. OCR on images / PDFs is a future commit.

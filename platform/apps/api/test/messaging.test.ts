@@ -6,6 +6,7 @@ import {
   contactEndpointRepo,
   conversationSessionRepo,
   credentialRepo,
+  documentBlobRepo,
   graphRepo,
   householdRepo,
   identityRepo,
@@ -151,7 +152,119 @@ describe("messaging inbound", () => {
     // choose one or the other and Twilio doesn't care.
     expect(res.body).toMatch(/<Response\s*\/>|<Response><\/Response>/);
   });
+
+  it("twilio webhook returns an instant TwiML ack for a known endpoint (planner fires in background)", async () => {
+    contactEndpointRepo(db).create({
+      householdId: hh,
+      channel: "sms",
+      address: "+14158675800",
+    });
+    const started = Date.now();
+    const res = await app.inject({
+      method: "POST",
+      url: "/messaging/inbound/twilio",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload:
+        "From=%2B14158675800&To=%2B14155550000&Body=hi%20there&MessageSid=SM_ack_1",
+    });
+    const elapsed = Date.now() - started;
+    expect(res.statusCode).toBe(200);
+    // Ack text is in the TwiML body. XML entity-escapes apostrophes.
+    expect(res.body).toMatch(/Got it — I(&apos;|')m on this/);
+    // Ack must not wait for the planner (which is at least an
+    // in-memory mock call, but the assertion here is about the
+    // shape, not timing — the ack should be present regardless of
+    // whether the planner has completed yet).
+    // Ceiling of 5s is generous; a real ack should be sub-100ms.
+    expect(elapsed).toBeLessThan(5000);
+  });
+
+  it("twilio webhook records MMS attachments as document.record candidates", async () => {
+    contactEndpointRepo(db).create({
+      householdId: hh,
+      channel: "sms",
+      address: "+14158675801",
+    });
+    // MSW: mock the Twilio media CDN. Two attachments.
+    const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const pdfBytes = Buffer.from("%PDF-1.4\nfake\n");
+    server.use(
+      http.get("https://api.twilio.com/photo.png", () =>
+        HttpResponse.arrayBuffer(pngBytes.buffer as ArrayBuffer, {
+          headers: { "content-type": "image/png" },
+        }),
+      ),
+      http.get("https://api.twilio.com/receipt.pdf", () =>
+        HttpResponse.arrayBuffer(pdfBytes.buffer as ArrayBuffer, {
+          headers: { "content-type": "application/pdf" },
+        }),
+      ),
+    );
+
+    const params = new URLSearchParams({
+      From: "+14158675801",
+      To: "+14155550000",
+      Body: "here you go",
+      MessageSid: "SM_mms_1",
+      NumMedia: "2",
+      MediaUrl0: "https://api.twilio.com/photo.png",
+      MediaContentType0: "image/png",
+      MediaUrl1: "https://api.twilio.com/receipt.pdf",
+      MediaContentType1: "application/pdf",
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/messaging/inbound/twilio",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: params.toString(),
+    });
+    expect(res.statusCode).toBe(200);
+
+    // Attachments download in the background. Poll for both.
+    const graph = graphRepo(db);
+    const targetTitles = new Set(["photo.png", "receipt.pdf"]);
+    const docs = await pollFor(() => {
+      const found = graph
+        .listNodes(hh, { type: "document.record" })
+        .filter((n) => {
+          const d = n.data as { notes?: string; title?: string };
+          const notes = d.notes ?? "";
+          const title = d.title ?? "";
+          if (!notes.startsWith("MMS attachment from messaging event ")) return false;
+          return title.startsWith("Photo —") || title.startsWith("PDF —");
+        });
+      // Unique by storedAt (dedupe across polling iterations).
+      const uniq = Array.from(
+        new Map(found.map((n) => [(n.data as { storedAt: string }).storedAt, n])).values(),
+      );
+      return uniq.length >= 2 ? uniq : null;
+    });
+    expect(docs).not.toBeNull();
+    const titles = docs!.map((d) => (d.data as { title: string }).title).sort();
+    expect(titles[0]).toMatch(/^PDF —/);
+    expect(titles[1]).toMatch(/^Photo —/);
+    for (const d of docs!) {
+      expect((d.data as { storedAt: string }).storedAt).toMatch(/^blob:sha256:[0-9a-f]{64}$/);
+    }
+    // Both blobs land in document_blobs, linked to the same nodes.
+    const blobs = documentBlobRepo(db).list(hh);
+    const mmsBlobs = blobs.filter((b) => b.uploadedBy.startsWith("twilio_inbound:"));
+    expect(mmsBlobs.length).toBeGreaterThanOrEqual(2);
+    void targetTitles;
+  });
 });
+
+// Tiny polling helper — bails after ~1s. Used to wait on
+// fire-and-forget background work in the twilio path.
+const pollFor = async <T>(fn: () => T | null): Promise<T | null> => {
+  for (let i = 0; i < 20; i++) {
+    const v = fn();
+    if (v !== null && !(Array.isArray(v) && v.length === 0)) return v;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return null;
+};
 
 describe("verification loop", () => {
   it("shared-line: unrouted from-number with a matching code binds and consumes the verification", async () => {
