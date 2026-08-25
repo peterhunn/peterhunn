@@ -117,6 +117,17 @@ export interface MessagingOutboundSink {
   send(
     householdId: HouseholdId,
     input: { channel: "sms" | "whatsapp"; to: string; body: string },
+    // Optional author info. The orchestrator supplies the agent's
+    // name+version so the resulting messaging_events row can be
+    // rendered as "concierge agent drafted, you approved" in the
+    // console. Manager-triggered sends via /messaging/send pass
+    // their own author info directly to sendOutboundMessage; the
+    // seam is only used by agents.
+    authoredBy?: {
+      type: "manager" | "agent" | "system";
+      id: string;
+      label?: string;
+    },
   ): Promise<{
     provider: "twilio" | "mock";
     externalMessageId: string;
@@ -574,7 +585,12 @@ export class Orchestrator {
             channel: "sms" | "whatsapp";
             to: string;
             body: string;
-          }) => this.deps.messagingOutbound!.send(input.householdId, send),
+          }) =>
+            this.deps.messagingOutbound!.send(input.householdId, send, {
+              type: "agent",
+              id: `${input.agent.name}/${input.agent.version}`,
+              label: input.agent.name,
+            }),
         }),
         logger: this.deps.logger,
       },

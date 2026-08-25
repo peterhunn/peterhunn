@@ -359,6 +359,36 @@ bottom). Each card carries:
 The old flat "Recent messages" list is preserved behind a
 collapsed `<details>` for raw-event triage.
 
+## Author attribution on outbound
+
+Every outbound `messaging_events` row records who wrote it.
+Three columns:
+
+- `authoredByType` — `manager` | `agent` | `system` (nullable on
+  inbound and on legacy outbound rows from before this landed).
+- `authoredById` — the manager id, agent `name/version`
+  (`concierge/0.1.0`), or `system`.
+- `authoredByLabel` — display name cached at send time, so the
+  console renders without a JOIN.
+
+Wiring:
+
+- `sendOutboundMessage(db, { …, authoredBy })` — the shared
+  helper accepts optional `authoredBy: { type, id, label? }`.
+- `/messaging/send` (manager path) stamps
+  `{ type: "manager", id: req.actor.id, label: displayName }`.
+- Agent-authored sends go through the `MessagingOutboundSink`
+  seam; the orchestrator supplies
+  `{ type: "agent", id: "<agent>/<version>", label: "<agent>" }`
+  from `input.agent` on every tool invocation.
+
+Console: an `AuthorPill` renders on every outbound bubble in
+the conversation-thread view — slate for manager
+("Ada Chen · manager"), violet for agent ("concierge · agent"),
+gray for system. Manager and agent replies land the same way
+in the customer's thread but read as distinctly authored so
+the operator can see the mix at a glance.
+
 ## Delivery status
 
 Every outbound row on `messaging_events` grows three columns

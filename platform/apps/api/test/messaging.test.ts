@@ -1065,6 +1065,57 @@ describe("messaging outbound send", () => {
   });
 });
 
+describe("outbound author attribution", () => {
+  it("manager-triggered /messaging/send stamps authoredByType: 'manager' + actor id + display name", async () => {
+    const send = await app.inject({
+      method: "POST",
+      url: `/households/${hh}/messaging/send`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        channel: "sms",
+        to: "+14158676200",
+        body: "Manager reply.",
+      },
+    });
+    expect(send.statusCode).toBe(200);
+    const eventId = send.json().sent.eventId as string;
+    const row = messagingEventRepo(db)
+      .list(hh)
+      .find((e) => e.id === eventId);
+    expect(row?.authoredByType).toBe("manager");
+    expect(row?.authoredById).toMatch(/^mgr_/);
+    expect(row?.authoredByLabel).toBe("M");
+  });
+
+  it("agent-authored send via the runtime seam stamps authoredByType: 'agent' + agent name+version", async () => {
+    const { buildOrchestrator } = await import("../src/runtime.js");
+    const deps = (
+      buildOrchestrator(db) as unknown as {
+        deps: {
+          messagingOutbound: {
+            send: (
+              hh: string,
+              i: { channel: string; to: string; body: string },
+              a?: { type: string; id: string; label?: string },
+            ) => Promise<{ eventId: string }>;
+          };
+        };
+      }
+    ).deps;
+    const out = await deps.messagingOutbound.send(
+      hh,
+      { channel: "sms", to: "+14158676201", body: "Agent draft." },
+      { type: "agent", id: "concierge/0.1.0", label: "concierge" },
+    );
+    const row = messagingEventRepo(db)
+      .list(hh)
+      .find((e) => e.id === out.eventId);
+    expect(row?.authoredByType).toBe("agent");
+    expect(row?.authoredById).toBe("concierge/0.1.0");
+    expect(row?.authoredByLabel).toBe("concierge");
+  });
+});
+
 describe("delivery status callbacks", () => {
   it("updates deliveryStatus on the outbound event when Twilio POSTs a status", async () => {
     // First, land an outbound event we can target by its

@@ -89,6 +89,15 @@ export const messagingEvents = sqliteTable(
     deliveryStatus: text("delivery_status"),
     deliveryStatusAt: text("delivery_status_at"),
     deliveryErrorCode: text("delivery_error_code"),
+    // Who authored this outbound. Null on inbound rows and on
+    // legacy outbound rows from before this landed. Type is one
+    // of "manager" | "agent" | "system"; id is the manager id,
+    // agent name+version ("concierge/0.1.0"), or "system"; label
+    // is the display name we cached at send time so the console
+    // doesn't need a JOIN to render "Ada Chen sent this."
+    authoredByType: text("authored_by_type"),
+    authoredById: text("authored_by_id"),
+    authoredByLabel: text("authored_by_label"),
   },
   (t) => ({
     householdIdx: index("messaging_events_household_idx").on(t.householdId),

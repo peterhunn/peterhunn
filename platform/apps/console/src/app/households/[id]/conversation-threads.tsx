@@ -28,6 +28,9 @@ interface MessagingEvent {
   deliveryStatus: string | null;
   deliveryStatusAt: string | null;
   deliveryErrorCode: string | null;
+  authoredByType: "manager" | "agent" | "system" | null;
+  authoredById: string | null;
+  authoredByLabel: string | null;
 }
 
 interface Endpoint {
@@ -170,6 +173,12 @@ export function ConversationThreads({
                         ) : null}
                         <div className="bubble-body">{e.body || "(empty)"}</div>
                         <div className="bubble-meta">
+                          {e.direction === "outbound" ? (
+                            <AuthorPill
+                              type={e.authoredByType}
+                              label={e.authoredByLabel}
+                            />
+                          ) : null}
                           <span className="mono">
                             {new Date(e.receivedAt).toLocaleString()}
                           </span>
@@ -276,6 +285,36 @@ const ConsentPill = ({
       title={at ? `${label} ${new Date(at).toLocaleString()}` : label}
     >
       {label}
+    </span>
+  );
+};
+
+const AuthorPill = ({
+  type,
+  label,
+}: {
+  type: "manager" | "agent" | "system" | null;
+  label: string | null;
+}) => {
+  if (!type) return null;
+  // Colour per author type — matches the mental model: managers
+  // are people (slate), agents are software (violet), system is
+  // internal (gray).
+  const cls =
+    type === "manager"
+      ? { background: "#e2e8f0", color: "#334155" }
+      : type === "agent"
+        ? { background: "#ede9fe", color: "#5b21b6" }
+        : { background: "#f3f4f6", color: "#4b5563" };
+  const text =
+    type === "manager"
+      ? `${label ?? "manager"} · manager`
+      : type === "agent"
+        ? `${label ?? "agent"} · agent`
+        : "system";
+  return (
+    <span className="tag" style={cls}>
+      {text}
     </span>
   );
 };

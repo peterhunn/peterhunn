@@ -82,6 +82,16 @@ export interface SendOutboundInput {
   readonly to: string;
   readonly body: string;
   readonly logger?: { info: (msg: string, ctx?: unknown) => void };
+  // Who wrote this outbound. Manager sends from /messaging/send
+  // fill in the manager's actor info; agent sends via the
+  // sms.send tool fill in the agent's name+version. Stamped on
+  // the resulting messaging_events row so the thread view can
+  // render "Ada Chen sent this" vs "concierge agent drafted."
+  readonly authoredBy?: {
+    readonly type: "manager" | "agent" | "system";
+    readonly id: string;
+    readonly label?: string;
+  };
 }
 
 // Public URL Twilio POSTs status updates to (queued → sent →
@@ -165,6 +175,11 @@ export const sendOutboundMessage = async (
     toAddress: out.to,
     body: input.body,
     ...(sessionId ? { sessionId } : {}),
+    ...(input.authoredBy && {
+      authoredByType: input.authoredBy.type,
+      authoredById: input.authoredBy.id,
+      ...(input.authoredBy.label ? { authoredByLabel: input.authoredBy.label } : {}),
+    }),
   });
 
   return {

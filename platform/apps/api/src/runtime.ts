@@ -179,12 +179,13 @@ export const buildOrchestrator = (db: Db): Orchestrator => {
         credentials.updateAccessToken(id, accessToken, expiresAt),
     },
     messagingOutbound: {
-      send: async (householdId, input) => {
+      send: async (householdId, input, authoredBy) => {
         const out = await sendOutboundMessage(db, {
           householdId,
           channel: input.channel,
           to: input.to,
           body: input.body,
+          ...(authoredBy && { authoredBy }),
         });
         if (out.refused === "opted_out") {
           // The tool contract wants a shape with externalMessageId

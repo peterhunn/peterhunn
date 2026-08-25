@@ -787,6 +787,13 @@ export const messagingRoutes = (db: Db): FastifyPluginAsync => async (app) => {
         channel: parsed.data.channel,
         to: parsed.data.to,
         body: parsed.data.body,
+        authoredBy: {
+          type: (req.actor.type === "manager" ? "manager" : "system") as
+            | "manager"
+            | "system",
+          id: req.actor.id,
+          label: req.actor.displayName,
+        },
         logger: {
           info: (msg, ctx) => req.log.info({ ...(ctx as object) }, msg),
         },

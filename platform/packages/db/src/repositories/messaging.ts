@@ -145,6 +145,9 @@ export interface RecordMessagingEventInput {
   readonly receivedAt?: string;
   readonly plannerRunId?: string;
   readonly sessionId?: string;
+  readonly authoredByType?: "manager" | "agent" | "system";
+  readonly authoredById?: string;
+  readonly authoredByLabel?: string;
 }
 
 export const messagingEventRepo = (db: Db) => ({
@@ -185,6 +188,9 @@ export const messagingEventRepo = (db: Db) => ({
         plannerRunId: input.plannerRunId ?? null,
         createdAt: now,
         sessionId: input.sessionId ?? null,
+        authoredByType: input.authoredByType ?? null,
+        authoredById: input.authoredById ?? null,
+        authoredByLabel: input.authoredByLabel ?? null,
       })
       .run();
     const row = db
