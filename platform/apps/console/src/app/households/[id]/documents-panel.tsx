@@ -4,9 +4,11 @@ import { useMemo, useState, useTransition } from "react";
 import type { HouseholdId } from "@atelier/domain";
 import {
   addDocument,
+  loadDocumentAudit,
   removeDocument,
   resolveDocumentExtraction,
   updateDocument,
+  type DocumentAuditEvent,
   type DocumentSubcategory,
 } from "./actions";
 
@@ -168,6 +170,9 @@ function DocRow({
 
   const anyAccepted = acceptSet.size > 0;
 
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [history, setHistory] = useState<DocumentAuditEvent[] | null>(null);
+
   return (
     <li className="person-row">
       {editing ? (
@@ -322,6 +327,23 @@ function DocRow({
               type="button"
               className="link-btn"
               disabled={isPending}
+              onClick={() => {
+                setHistoryOpen((prev) => !prev);
+                if (!historyOpen && history === null) {
+                  startTransition(async () => {
+                    const res = await loadDocumentAudit(householdId, doc.id);
+                    setMessage(res.message);
+                    setHistory(res.events ?? []);
+                  });
+                }
+              }}
+            >
+              {historyOpen ? "Hide history" : "History"}
+            </button>
+            <button
+              type="button"
+              className="link-btn"
+              disabled={isPending}
               onClick={() =>
                 startTransition(async () => {
                   const res = await removeDocument(householdId, doc.id);
@@ -342,6 +364,33 @@ function DocRow({
           Auto-moved from <span className="mono">{autoRecategorised.from}</span>{" "}
           to <span className="mono">{autoRecategorised.to}</span> by{" "}
           {autoRecategorised.source}.
+        </div>
+      ) : null}
+
+      {historyOpen ? (
+        <div className="doc-history">
+          {history === null ? (
+            <span className="muted">Loading history…</span>
+          ) : history.length === 0 ? (
+            <span className="muted">No audit events for this document yet.</span>
+          ) : (
+            <ol className="doc-history-list">
+              {history.map((ev) => (
+                <li key={ev.id} className="doc-history-item">
+                  <div className="doc-history-head">
+                    <span className="mono">{ev.action}</span>
+                    <span className="muted">
+                      {new Date(ev.at).toLocaleString()} · {ev.actorType}
+                      {ev.actorId ? ` ${ev.actorId.slice(0, 8)}` : ""}
+                    </span>
+                  </div>
+                  {ev.action === "documents.extraction.resolve" && ev.metadata.route ? (
+                    <ExtractionResolveDetail route={ev.metadata.route} />
+                  ) : null}
+                </li>
+              ))}
+            </ol>
+          )}
         </div>
       ) : null}
 
@@ -448,6 +497,50 @@ function DocRow({
         </div>
       ) : null}
     </li>
+  );
+}
+
+function ExtractionResolveDetail({ route }: { route: Record<string, unknown> }) {
+  const accepted = Array.isArray(route.accepted) ? (route.accepted as string[]) : [];
+  const rejected = Array.isArray(route.rejected) ? (route.rejected as string[]) : [];
+  const edited = Array.isArray(route.editedKeys)
+    ? (route.editedKeys as string[])
+    : [];
+  const applied = (route.appliedFields as Record<string, unknown> | undefined) ?? {};
+  const proposed =
+    ((route.pendingBefore as { proposed?: Record<string, unknown> } | undefined)
+      ?.proposed) ?? {};
+  return (
+    <div className="doc-history-detail">
+      {accepted.length > 0 ? (
+        <ul className="doc-history-fields">
+          {accepted.map((k) => {
+            const wasEdited = edited.includes(k);
+            return (
+              <li key={k}>
+                <span className="mono">{k}</span>{" "}
+                <span>{stringifyValue(applied[k])}</span>
+                {wasEdited ? (
+                  <>
+                    {" "}
+                    <span className="muted">
+                      ← LLM proposed: {stringifyValue(proposed[k])}
+                    </span>
+                  </>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <span className="muted">No fields accepted (dismissed).</span>
+      )}
+      {rejected.length > 0 ? (
+        <div className="muted doc-history-rejected">
+          Rejected: {rejected.map((k) => `${k} (“${stringifyValue(proposed[k])}”)`).join(", ")}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

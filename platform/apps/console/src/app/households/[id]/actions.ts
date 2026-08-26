@@ -315,6 +315,44 @@ export async function resolveDocumentExtraction(
   }
 }
 
+export interface DocumentAuditEvent {
+  id: string;
+  actorType: string;
+  actorId: string;
+  action: string;
+  resourceId: string;
+  at: string;
+  metadata: {
+    method?: string;
+    url?: string;
+    status?: number;
+    route?: Record<string, unknown>;
+  };
+}
+
+export async function loadDocumentAudit(
+  householdId: HouseholdId,
+  nodeId: string,
+): Promise<{
+  message: string;
+  lineage?: string[];
+  events?: DocumentAuditEvent[];
+}> {
+  const token = await getSessionToken();
+  if (!token) return { message: "Session expired." };
+  try {
+    const res = await api(token).documentAudit(householdId, nodeId);
+    return {
+      message: `Loaded ${res.events.length} event${res.events.length === 1 ? "" : "s"}.`,
+      lineage: res.lineage,
+      events: res.events as DocumentAuditEvent[],
+    };
+  } catch (err) {
+    if (err instanceof ApiError) return { message: `Error: ${err.message}` };
+    return { message: `Error: ${(err as Error).message}` };
+  }
+}
+
 export type AssetKind = "property" | "vehicle" | "equipment" | "membership" | "pet";
 
 export async function addAsset(

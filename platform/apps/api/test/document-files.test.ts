@@ -568,4 +568,107 @@ describe("document file blob store", () => {
     expect(res.statusCode).toBe(404);
     expect(res.json().error).toBe("no_pending_extraction");
   });
+
+  it("records the extraction resolve decision in the audit trail and returns it via the per-document lineage endpoint", async () => {
+    // Seed a node with a pending proposal directly so the audit
+    // trail focuses on the resolve event (not the upload's own
+    // event). This mirrors what the upload route would have
+    // written on disk.
+    const seededProposal = {
+      title: "LLM guess",
+      expiresAt: "2027-06-01T00:00:00Z",
+      issuer: "Some Bureau",
+      subject: "unwanted",
+    };
+    const doc = graphRepo(db).createNode(hh, {
+      type: "document.identity",
+      data: {
+        title: "Manager-set placeholder",
+        category: "identity",
+        pendingExtraction: {
+          provider: "anthropic" as const,
+          proposed: seededProposal,
+          createdAt: new Date().toISOString(),
+        },
+      },
+      provenance: {
+        source: "manager_observed",
+        assertedBy: "test",
+        assertedAt: new Date().toISOString(),
+        confidence: 1,
+        status: "confirmed",
+      },
+    });
+
+    const resolve = await app.inject({
+      method: "POST",
+      url: `/households/${hh}/documents/${doc.id}/extraction/resolve`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        accept: ["title", "expiresAt"],
+        edits: { title: "Manager-final title" },
+      },
+    });
+    expect(resolve.statusCode).toBe(200);
+    const resolved = resolve.json();
+
+    // The audit trail comes back scoped to the live doc — the
+    // resolve event lives on the pre-resolve id, which the
+    // lineage walk includes automatically.
+    const trail = await app.inject({
+      method: "GET",
+      url: `/households/${hh}/documents/${resolved.document.id}/audit`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(trail.statusCode).toBe(200);
+    const body = trail.json() as {
+      lineage: string[];
+      events: Array<{
+        action: string;
+        resourceId: string;
+        metadata: {
+          method?: string;
+          status?: number;
+          route?: {
+            priorNodeId?: string;
+            replacementNodeId?: string;
+            pendingBefore?: { proposed?: Record<string, unknown> };
+            accepted?: string[];
+            rejected?: string[];
+            editedKeys?: string[];
+            appliedFields?: Record<string, unknown>;
+          };
+        };
+      }>;
+    };
+    // Lineage covers both versions of the doc.
+    expect(body.lineage).toContain(doc.id);
+    expect(body.lineage).toContain(resolved.document.id);
+    // The resolve event is recorded against the pre-resolve id
+    // (that's the URL param the audit hook keys off of).
+    const resolveEvent = body.events.find(
+      (e) => e.action === "documents.extraction.resolve",
+    );
+    expect(resolveEvent).toBeDefined();
+    expect(resolveEvent!.resourceId).toBe(doc.id);
+    expect(resolveEvent!.metadata.route?.priorNodeId).toBe(doc.id);
+    expect(resolveEvent!.metadata.route?.replacementNodeId).toBe(
+      resolved.document.id,
+    );
+    // The manager's decision is preserved in full.
+    expect(resolveEvent!.metadata.route?.accepted).toEqual(["title", "expiresAt"]);
+    expect(resolveEvent!.metadata.route?.rejected?.sort()).toEqual(
+      ["issuer", "subject"].sort(),
+    );
+    expect(resolveEvent!.metadata.route?.editedKeys).toEqual(["title"]);
+    expect(resolveEvent!.metadata.route?.appliedFields).toEqual({
+      title: "Manager-final title",
+      expiresAt: "2027-06-01T00:00:00Z",
+    });
+    // The pre-review proposal snapshot is intact for later
+    // review — "here's what the LLM originally suggested".
+    expect(resolveEvent!.metadata.route?.pendingBefore?.proposed).toEqual(
+      seededProposal,
+    );
+  });
 });

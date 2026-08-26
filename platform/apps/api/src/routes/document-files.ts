@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import {
+  auditRepo,
   documentBlobRepo,
   graphRepo,
   type Db,
@@ -62,6 +63,7 @@ const currentSubcategory = (type: string): string | null =>
 export const documentFileRoutes = (db: Db): FastifyPluginAsync => async (app) => {
   const graph = graphRepo(db);
   const blobs = documentBlobRepo(db);
+  const audit = auditRepo(db);
 
   app.put<{ Params: { householdId: string; nodeId: string } }>(
     "/households/:householdId/documents/:nodeId/file",
@@ -387,6 +389,30 @@ export const documentFileRoutes = (db: Db): FastifyPluginAsync => async (app) =>
         replacement.id as NodeId,
       );
 
+      // Attach the resolve decision to the audit envelope so
+      // "why is this document titled X?" is answerable later
+      // without replaying the request log. Records the pre-review
+      // proposal snapshot, which keys the manager accepted vs
+      // ignored, the final value for each accepted key, and which
+      // of those diverged from the LLM's original suggestion.
+      const rejected = Object.keys(proposed).filter(
+        (k) => !body.data.accept.includes(k),
+      );
+      const editedKeys = body.data.accept.filter((k) => {
+        const suggested = proposed[k];
+        const applied = patch[k];
+        return applied !== undefined && applied !== suggested;
+      });
+      req.auditMetadata = {
+        priorNodeId: current.id,
+        replacementNodeId: replacement.id,
+        pendingBefore: pending,
+        accepted: body.data.accept,
+        rejected,
+        editedKeys,
+        appliedFields: patch,
+      };
+
       return {
         document: {
           id: replacement.id,
@@ -395,6 +421,58 @@ export const documentFileRoutes = (db: Db): FastifyPluginAsync => async (app) =>
         accepted: body.data.accept,
         acceptedCount: Object.keys(patch).length,
       };
+    },
+  );
+
+  // Per-document audit trail. Walks the supersede lineage so
+  // events recorded against earlier versions (e.g. an
+  // extraction.resolve on the pre-resolve node id, or the
+  // original upload) come back alongside events on the live id.
+  // Answers "why is this document titled X?" — the response
+  // includes each row's metadata (which fields the manager
+  // accepted, which they rejected, the pre-review LLM proposal
+  // snapshot).
+  app.get<{ Params: { householdId: string; nodeId: string } }>(
+    "/households/:householdId/documents/:nodeId/audit",
+    {
+      config: {
+        audit: {
+          action: "documents.audit.list",
+          resourceType: "document",
+          sensitive: true,
+        },
+      },
+    },
+    async (req, reply) => {
+      const householdId = req.householdContext as HouseholdId;
+      const nodeId = req.params.nodeId as NodeId;
+      const node = graph.getNode(householdId, nodeId);
+      const lineage = graph.listNodeLineage(householdId, nodeId);
+      if (!node && lineage.length === 0) {
+        return reply.code(404).send({ error: "not_found" });
+      }
+      const seen = new Set<string>();
+      const events: Array<Record<string, unknown>> = [];
+      for (const id of lineage) {
+        for (const ev of audit.listForResource("document", id)) {
+          if (seen.has(ev.id)) continue;
+          seen.add(ev.id);
+          events.push({
+            id: ev.id,
+            actorType: ev.actorType,
+            actorId: ev.actorId,
+            action: ev.action,
+            resourceType: ev.resourceType,
+            resourceId: ev.resourceId,
+            sensitive: ev.sensitive,
+            metadata: ev.metadata,
+            at: ev.at,
+          });
+        }
+      }
+      // Newest first — same convention as listForHousehold.
+      events.sort((a, b) => (a.at as string < (b.at as string) ? 1 : -1));
+      return { lineage, events };
     },
   );
 };

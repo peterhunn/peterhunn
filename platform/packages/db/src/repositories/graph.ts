@@ -157,4 +157,54 @@ export const graphRepo = (db: Db) => ({
       .where(and(eq(nodes.id, id), eq(nodes.householdId, householdId)))
       .run();
   },
+
+  // Walk the supersede chain in both directions from a starting
+  // node id and return every version id in the lineage, oldest
+  // first. Used by the per-document audit endpoint to include
+  // audit rows that were recorded against previous versions of a
+  // supersede-and-replace node (e.g. an extraction.resolve event
+  // lives on the pre-resolve id; the current node id would find
+  // nothing without this walk).
+  listNodeLineage(householdId: HouseholdId, seed: NodeId): string[] {
+    const seen = new Set<string>();
+    const visitBackward = (id: string): void => {
+      const priors = db
+        .select({ id: nodes.id })
+        .from(nodes)
+        .where(
+          and(eq(nodes.householdId, householdId), eq(nodes.supersededBy, id)),
+        )
+        .all();
+      for (const p of priors) {
+        if (seen.has(p.id)) continue;
+        seen.add(p.id);
+        visitBackward(p.id);
+      }
+    };
+    const visitForward = (id: string): void => {
+      const row = db
+        .select({ supersededBy: nodes.supersededBy })
+        .from(nodes)
+        .where(and(eq(nodes.householdId, householdId), eq(nodes.id, id)))
+        .get();
+      if (row?.supersededBy && !seen.has(row.supersededBy)) {
+        seen.add(row.supersededBy);
+        visitForward(row.supersededBy);
+      }
+    };
+    seen.add(seed);
+    visitForward(seed);
+    visitBackward(seed);
+    // Order by creation time so callers see the version sequence.
+    if (seen.size === 0) return [];
+    const rows = db
+      .select({ id: nodes.id, createdAt: nodes.createdAt })
+      .from(nodes)
+      .where(eq(nodes.householdId, householdId))
+      .all();
+    return rows
+      .filter((r) => seen.has(r.id))
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      .map((r) => r.id);
+  },
 });

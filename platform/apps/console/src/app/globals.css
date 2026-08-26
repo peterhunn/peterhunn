@@ -1095,6 +1095,51 @@ form.login {
   color: var(--ink);
   border-radius: 3px;
 }
+.doc-history {
+  margin-top: 0.6rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--paper);
+  font-size: 0.85rem;
+}
+.doc-history-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.doc-history-item {
+  padding: 0.3rem 0;
+  border-bottom: 1px dashed var(--rule);
+}
+.doc-history-item:last-child {
+  border-bottom: none;
+}
+.doc-history-head {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 0.25rem;
+}
+.doc-history-detail {
+  padding-left: 0.5rem;
+  border-left: 2px solid var(--rule-soft, var(--rule));
+}
+.doc-history-fields {
+  list-style: none;
+  padding: 0;
+  margin: 0.25rem 0 0.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.doc-history-rejected {
+  font-size: 0.8rem;
+}
 .tag-attached {
   margin-left: 0.35rem;
   padding: 0.05rem 0.35rem;

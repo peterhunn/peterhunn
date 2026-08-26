@@ -7,6 +7,11 @@ import type { HouseholdId } from "@atelier/domain";
 // household. Reads and writes both. Routes may set reply.header
 // 'x-atelier-resource-id' / 'x-atelier-resource-type' to attribute the
 // event more precisely; otherwise we log at household granularity.
+// Routes that need to attach structured decision context to the
+// audit metadata (e.g. "which fields were accepted from an LLM
+// extraction proposal") assign `req.auditMetadata = {...}` before
+// returning; the hook merges it under a `route` key on top of the
+// default `{method, url, status}` envelope.
 declare module "fastify" {
   interface FastifyContextConfig {
     audit?: {
@@ -14,6 +19,9 @@ declare module "fastify" {
       resourceType?: string;
       sensitive?: boolean;
     };
+  }
+  interface FastifyRequest {
+    auditMetadata?: Record<string, unknown>;
   }
 }
 
@@ -53,6 +61,7 @@ const plugin: FastifyPluginAsync<AuditPluginOpts> = async (app, opts) => {
         method: req.method,
         url: req.url,
         status: reply.statusCode,
+        ...(req.auditMetadata ? { route: req.auditMetadata } : {}),
       },
     });
   });

@@ -410,6 +410,20 @@ export const api = (token: string) => ({
       `/households/${id}/documents/${nodeId}/extraction/resolve`,
       body,
     ),
+  documentAudit: (id: HouseholdId, nodeId: string) =>
+    request<{
+      lineage: string[];
+      events: Array<
+        AuditEventSummary & {
+          metadata: {
+            method?: string;
+            url?: string;
+            status?: number;
+            route?: Record<string, unknown>;
+          };
+        }
+      >;
+    }>(token, "GET", `/households/${id}/documents/${nodeId}/audit`),
   listAssets: (id: HouseholdId) =>
     request<{
       assets: {

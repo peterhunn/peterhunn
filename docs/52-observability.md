@@ -29,10 +29,25 @@ Automatically written by the `auditPlugin` `onResponse` hook.
 - `sensitive` — a boolean the route can set to flag entries
   that operators should look at first.
 - `metadata` — a JSON blob with method, url, response status.
+  Routes that need to record structured decision context
+  assign `req.auditMetadata = {...}` inside the handler; the
+  audit hook nests that under `metadata.route`. Today the
+  extraction-resolve route uses this to persist the manager's
+  per-field decision — the pre-review LLM proposal snapshot,
+  which keys were accepted / rejected / edited, and the final
+  values applied — so "why is this document titled X?" is
+  answerable from `audit_events` alone.
 
 Used for: **who did what.** "Which manager touched Ada's
 graph in the last 24h?" is a straight query against this
 table.
+
+Per-resource query surface: `GET /households/:id/audit`
+returns every row for the household, `GET /households/:id
+/documents/:nodeId/audit` walks the supersede lineage of a
+single document (a supersede-and-replace node's history sits
+across multiple ids — events recorded against pre-resolve
+ids surface alongside the current live id).
 
 ### 2. `actions` — every tool invocation
 
