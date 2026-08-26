@@ -159,6 +159,8 @@ export interface ApprovalSink {
     summary: string;
     authorityPolicyId?: PolicyId;
     proposedBy: { agent: string; agentVersion: string };
+    origin?: "customer" | "manager" | "proactive" | "system";
+    originBy?: string;
     reasons: readonly string[];
   }): { id: string };
 }
@@ -433,6 +435,7 @@ export class Orchestrator {
             inputs,
             request,
             subject: intent.subjectPrincipalId,
+            origin: intent.origin,
           }),
         callModel: (call) =>
           this.deps.models.callModel(householdId, run.id, task.id, call),
@@ -510,6 +513,7 @@ export class Orchestrator {
       attrs?: Record<string, unknown>;
     };
     subject: string;
+    origin: Intent["origin"];
   }): Promise<AgentToolResult<O>> {
     const tool = this.deps.tools.get(input.toolName) as unknown as {
       name: string;
@@ -559,6 +563,8 @@ export class Orchestrator {
         summary: input.request.summary,
         ...(decision.authorityId !== undefined && { authorityPolicyId: decision.authorityId }),
         proposedBy: { agent: input.agent.name, agentVersion: input.agent.version },
+        origin: input.origin.source,
+        originBy: input.origin.by,
         reasons: decision.reasons,
       });
       return { decision, action: null, outputs: null, approvalId: enqueued.id };

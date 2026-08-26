@@ -32,6 +32,8 @@ const toItem = (r: ApprovalRow): ApprovalItem => ({
   summary: r.summary,
   authorityPolicyId: (r.authorityPolicyId ?? undefined) as PolicyId | undefined,
   proposedBy: { agent: r.proposedByAgent, agentVersion: r.proposedByAgentVersion },
+  origin: r.origin ?? undefined,
+  originBy: r.originBy ?? undefined,
   reasons: (r.reasons as string[]) ?? [],
   state: r.state,
   resolvedByType: r.resolvedByType ?? undefined,
@@ -61,6 +63,8 @@ export interface CreateApprovalInput {
   readonly summary: string;
   readonly authorityPolicyId?: PolicyId;
   readonly proposedBy: { agent: string; agentVersion: string };
+  readonly origin?: "customer" | "manager" | "proactive" | "system";
+  readonly originBy?: string;
   readonly reasons: readonly string[];
   readonly deadlineAt?: string;
 }
@@ -98,6 +102,8 @@ export const approvalRepo = (db: Db) => ({
         authorityPolicyId: input.authorityPolicyId ?? null,
         proposedByAgent: input.proposedBy.agent,
         proposedByAgentVersion: input.proposedBy.agentVersion,
+        origin: input.origin ?? null,
+        originBy: input.originBy ?? null,
         reasons: input.reasons,
         state: "pending",
         deadlineAt: input.deadlineAt ?? null,

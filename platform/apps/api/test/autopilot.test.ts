@@ -105,11 +105,14 @@ describe("autopilot", () => {
     // → an approval row for this household exists.
     const approvals = approvalRepo(db).listPending(hh);
     expect(approvals.length).toBeGreaterThan(0);
-    // Approval knows the proposing agent; the "autopilot" identity
-    // lives on the run row that spawned it (origin: proactive,
-    // originBy: autopilot:inbox), reachable by runId.
+    // Approval carries the proposing agent + the run's origin
+    // denormalised onto the row itself so the console can render
+    // the trigger without a join. Both surfaces still line up
+    // with the orchestrator_runs row, cross-checked here.
     const first = approvals[0]!;
     expect(first.proposedBy.agent).toBe("inbox");
+    expect(first.origin).toBe("proactive");
+    expect(first.originBy).toBe("autopilot:inbox");
     const run = taskRepo(db).getRun(hh, first.runId);
     expect(run?.origin).toBe("proactive");
     expect(run?.originBy).toBe("autopilot:inbox");

@@ -34,6 +34,12 @@ export function ApprovalCard({
             <span className="mono">
               from {approval.proposedBy.agent}@{approval.proposedBy.agentVersion}
             </span>
+            {approval.origin ? (
+              <span className={`tag origin-${approval.origin}`}>
+                {approval.origin}
+                {approval.originBy ? ` · ${approval.originBy}` : ""}
+              </span>
+            ) : null}
           </p>
           {approval.reasons.length > 0 ? (
             <p className="approval-reasons mono">

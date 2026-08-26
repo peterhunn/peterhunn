@@ -33,6 +33,15 @@ export const approvals = sqliteTable(
     authorityPolicyId: text("authority_policy_id"),
     proposedByAgent: text("proposed_by_agent").notNull(),
     proposedByAgentVersion: text("proposed_by_agent_version").notNull(),
+    // The origin that kicked off the run this approval belongs to
+    // — customer/manager/proactive/system, plus a free-text label
+    // like "autopilot:inbox" or the manager's actor id. Denormalised
+    // from orchestrator_runs so the approval card doesn't need a
+    // join to answer "who kicked this off?".
+    origin: text("origin", {
+      enum: ["customer", "manager", "proactive", "system"],
+    }),
+    originBy: text("origin_by"),
     reasons: text("reasons", { mode: "json" }).notNull().default("[]"),
 
     state: text("state", {

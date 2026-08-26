@@ -154,6 +154,13 @@ An action requiring approval enters an approval queue with:
 - **Reversibility window** — how late an approved action can be
   undone.
 - **Context bundle** — everything the approver needs on one screen.
+- **Trigger** — the origin of the run that produced the proposal.
+  Denormalised onto the approval row itself (`origin` +
+  `originBy`) so the manager sees whether a draft was kicked off
+  by the customer texting in, another manager acting on their
+  behalf, the autopilot processing a fresh inbox message, or a
+  system playbook, without a second query. The full run row
+  remains the source of truth, still reachable by `runId`.
 - **Explicit choices** — Approve / Approve with edit / Reject / Ask
   the manager.
 

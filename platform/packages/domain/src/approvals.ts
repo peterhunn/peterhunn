@@ -41,6 +41,13 @@ export interface ApprovalItem {
 
   readonly authorityPolicyId: PolicyId | undefined;
   readonly proposedBy: { readonly agent: string; readonly agentVersion: string };
+  // The origin of the run that spawned this approval, denormalised
+  // from orchestrator_runs so the console can render the trigger
+  // ("proactive · autopilot:inbox", "manager · alex@…") without
+  // a second query. Legacy rows written before the schema gained
+  // these columns leave them undefined.
+  readonly origin: "customer" | "manager" | "proactive" | "system" | undefined;
+  readonly originBy: string | undefined;
   readonly reasons: readonly string[];
 
   readonly state: ApprovalState;

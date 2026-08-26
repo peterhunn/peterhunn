@@ -1140,6 +1140,22 @@ form.login {
 .doc-history-rejected {
   font-size: 0.8rem;
 }
+.origin-customer {
+  background: #dbeafe;
+  color: #1e40af;
+}
+.origin-manager {
+  background: #e2e8f0;
+  color: #334155;
+}
+.origin-proactive {
+  background: #ede9fe;
+  color: #5b21b6;
+}
+.origin-system {
+  background: #f3f4f6;
+  color: #4b5563;
+}
 .tag-attached {
   margin-left: 0.35rem;
   padding: 0.05rem 0.35rem;
