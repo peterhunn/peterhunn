@@ -10,10 +10,20 @@ export default async function Dashboard() {
   if (!token) redirect("/");
 
   const client = api(token);
-  const [{ actor }, { households }, { approvals }] = await Promise.all([
+  const [{ actor }, { households }, { approvals }, attention] = await Promise.all([
     client.me(),
     client.listHouseholds(),
     client.approvalInbox().catch(() => ({ approvals: [] })),
+    client.attention().catch(() => ({
+      generatedAt: new Date().toISOString(),
+      items: [],
+      counts: {
+        deliveryFailures: 0,
+        unreadThreads: 0,
+        upcomingObligations: 0,
+        frozenHouseholds: 0,
+      },
+    })),
   ]);
 
   const householdName = new Map(households.map((h) => [h.id, h.name] as const));
@@ -42,6 +52,53 @@ export default async function Dashboard() {
               />
             ))}
           </div>
+        ) : null}
+
+        {attention.items.length > 0 ? (
+          <section className="attention-section">
+            <div className="section-head">
+              <h2>Attention</h2>
+              <span className="mono">{attention.items.length}</span>
+            </div>
+            <p className="attention-summary muted">
+              {[
+                attention.counts.deliveryFailures > 0
+                  ? `${attention.counts.deliveryFailures} delivery failure${attention.counts.deliveryFailures === 1 ? "" : "s"}`
+                  : null,
+                attention.counts.frozenHouseholds > 0
+                  ? `${attention.counts.frozenHouseholds} frozen household${attention.counts.frozenHouseholds === 1 ? "" : "s"}`
+                  : null,
+                attention.counts.unreadThreads > 0
+                  ? `${attention.counts.unreadThreads} unread thread${attention.counts.unreadThreads === 1 ? "" : "s"}`
+                  : null,
+                attention.counts.upcomingObligations > 0
+                  ? `${attention.counts.upcomingObligations} upcoming obligation${attention.counts.upcomingObligations === 1 ? "" : "s"}`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
+            <div className="attention-stack">
+              {attention.items.map((item, i) => (
+                <Link
+                  key={`${item.kind}-${item.householdId}-${item.sortAt}-${i}`}
+                  href={`/households/${item.householdId}`}
+                  className={`attention-card attention-${item.kind}`}
+                >
+                  <div className="attention-head">
+                    <span className={`tag attention-tag-${item.kind}`}>
+                      {attentionLabel(item.kind)}
+                    </span>
+                    <span className="attention-household">{item.householdName}</span>
+                    <span className="mono muted">
+                      {new Date(item.sortAt).toLocaleString()}
+                    </span>
+                  </div>
+                  <p className="attention-body">{item.summary}</p>
+                </Link>
+              ))}
+            </div>
+          </section>
         ) : null}
 
         <div className="section-head">
@@ -78,4 +135,23 @@ export default async function Dashboard() {
 
 function firstName(full: string): string {
   return full.split(" ")[0] ?? full;
+}
+
+function attentionLabel(
+  kind:
+    | "delivery_failure"
+    | "unread_thread"
+    | "upcoming_obligation"
+    | "frozen_household",
+): string {
+  switch (kind) {
+    case "delivery_failure":
+      return "delivery failed";
+    case "unread_thread":
+      return "unread";
+    case "upcoming_obligation":
+      return "upcoming";
+    case "frozen_household":
+      return "frozen";
+  }
 }

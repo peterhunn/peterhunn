@@ -153,6 +153,28 @@ export const api = (token: string) => ({
     request<{ approvals: ApprovalItem[] }>(token, "GET", `/households/${id}/approvals`),
   approvalInbox: () =>
     request<{ approvals: ApprovalItem[] }>(token, "GET", "/approvals/inbox"),
+  attention: () =>
+    request<{
+      generatedAt: string;
+      items: Array<{
+        kind:
+          | "delivery_failure"
+          | "unread_thread"
+          | "upcoming_obligation"
+          | "frozen_household";
+        householdId: string;
+        householdName: string;
+        sortAt: string;
+        summary: string;
+        detail: Record<string, unknown>;
+      }>;
+      counts: {
+        deliveryFailures: number;
+        unreadThreads: number;
+        upcomingObligations: number;
+        frozenHouseholds: number;
+      };
+    }>(token, "GET", "/me/attention"),
   approveApproval: (id: HouseholdId, approvalId: string, body: { note?: string }) =>
     request<{ approval: ApprovalItem }>(
       token,

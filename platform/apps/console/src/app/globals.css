@@ -1287,3 +1287,94 @@ form.login {
   font-size: 0.85rem;
   padding: 0.25rem 0;
 }
+
+/* Cross-household attention feed on the dashboard */
+
+.attention-section {
+  margin-top: 24px;
+}
+
+.attention-summary {
+  font-size: 12px;
+  margin: -6px 0 12px;
+}
+
+.attention-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.attention-card {
+  display: block;
+  padding: 12px 16px;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-left-width: 4px;
+  border-radius: 4px;
+  color: var(--ink);
+  text-decoration: none;
+  transition: background 0.1s;
+}
+
+.attention-card:hover {
+  background: var(--paper-hover, #f9f7f2);
+}
+
+.attention-delivery_failure {
+  border-left-color: #dc2626;
+}
+
+.attention-frozen_household {
+  border-left-color: #ea580c;
+}
+
+.attention-unread_thread {
+  border-left-color: #2563eb;
+}
+
+.attention-upcoming_obligation {
+  border-left-color: #6b7280;
+}
+
+.attention-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.attention-household {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.attention-body {
+  font-family: var(--serif);
+  font-size: 15px;
+  line-height: 1.4;
+  margin: 0;
+  color: var(--ink);
+}
+
+.attention-tag-delivery_failure {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.attention-tag-frozen_household {
+  background: #ffedd5;
+  color: #9a3412;
+}
+
+.attention-tag-unread_thread {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.attention-tag-upcoming_obligation {
+  background: #e5e7eb;
+  color: #374151;
+}

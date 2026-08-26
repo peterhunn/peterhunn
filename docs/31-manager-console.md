@@ -99,6 +99,45 @@ Composition is agent-assisted (the drafts from the Draft/Ask rungs
 land here pre-filled) but the manager owns every outgoing character.
 No message leaves this surface without an explicit send.
 
+## Cross-household attention feed
+
+The `/dashboard` in the console is a manager-scoped view — approvals
+plus a cross-household **attention feed**. A manager running 3-10
+households needs one screen that surfaces "what's on fire, anywhere,
+right now" without opening each household. The feed is powered by
+`GET /me/attention` on the API; the same endpoint aggregates across
+every household the calling manager has a live grant on and only
+those. Managers without grants get an empty feed; non-manager actors
+get an empty feed.
+
+Four attention kinds today, ranked in this order:
+
+1. **delivery_failure** — an outbound message we sent that the
+   carrier (Twilio) marked `failed` or `undelivered` in the last 24h.
+   Something we did didn't reach the customer; needs manager triage.
+2. **frozen_household** — the household is frozen. Every agent action
+   is shelved until unblocked; the manager needs to know they need
+   to unfreeze (or that the freeze is still legitimate). One
+   top-of-list card per frozen household.
+3. **unread_thread** — an inbound customer message in the last 24h
+   with no subsequent outbound to that endpoint. Customer said
+   something and nobody's replied yet — manager or concierge agent.
+4. **upcoming_obligation** — an `obligation.deadline` node whose
+   `dueAt` lands in the next 14 days. Proactive nudge; the console
+   doesn't wait for the deadline to arrive to surface it. Stale
+   overdue items (30d+ past dueAt) are filtered out — they belong
+   in the household drill-down, not the attention feed.
+
+Within a kind, reactive items (delivery failures, unread threads,
+frozen holds) sort newest-first — the most recent break is likely
+the most urgent. Upcoming obligations sort ascending by `dueAt`
+so what's due soonest floats up.
+
+Every item carries `householdId` + `householdName` so the console
+can render the drill-down link. The feed is a triage lane, not a
+resolution surface: clicking through takes the manager to the
+household page where the actual work happens.
+
 ## Item lifecycle
 
 Every item on the manager's screen is one of:
