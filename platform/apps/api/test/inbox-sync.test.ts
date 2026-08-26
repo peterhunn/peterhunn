@@ -1,4 +1,6 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
+import { http, HttpResponse } from "msw";
+import { setupServer } from "msw/node";
 import {
   openDb,
   credentialRepo,
@@ -37,14 +39,18 @@ beforeAll(async () => {
   await app.ready();
 });
 
-afterAll(async () => await app.close());
+afterAll(async () => {
+  server.close();
+  await app.close();
+});
 
-beforeEach(() => {
-  vi.unstubAllGlobals();
-});
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
+// The Gmail sync path uses @googleapis/gmail (gaxios under the
+// hood), not global fetch, so vi.stubGlobal("fetch") never sees
+// its calls. MSW intercepts at the socket layer for both.
+const server = setupServer();
+beforeAll(() => server.listen({ onUnhandledRequest: "bypass" }));
+beforeEach(() => server.resetHandlers());
+afterEach(() => server.resetHandlers());
 
 describe("Gmail inbox sync API", () => {
   it("400s when the household has no gmail credential", async () => {
@@ -71,35 +77,32 @@ describe("Gmail inbox sync API", () => {
       },
     });
 
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string) => {
-        if (url.includes("/users/me/messages?q=")) {
-          return new Response(
-            JSON.stringify({ messages: [{ id: "gm_sync_1" }] }),
-            { status: 200 },
-          );
-        }
-        if (url.includes("/users/me/messages/gm_sync_1")) {
-          return new Response(
-            JSON.stringify({
-              id: "gm_sync_1",
-              threadId: "t1",
-              internalDate: String(Date.UTC(2026, 8, 1, 15, 0, 0)),
-              payload: {
-                headers: [
-                  { name: "From", value: '"Sam" <sam@example.com>' },
-                  { name: "Subject", value: "Estimate" },
-                ],
-                mimeType: "text/plain",
-                body: { data: b64url("$1,850. Confirm by Friday.") },
-              },
-            }),
-            { status: 200 },
-          );
-        }
-        throw new Error(`unexpected fetch: ${url}`);
-      }),
+    server.use(
+      http.get(
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+        () =>
+          HttpResponse.json({
+            messages: [{ id: "gm_sync_1" }],
+            resultSizeEstimate: 1,
+          }),
+      ),
+      http.get(
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages/gm_sync_1",
+        () =>
+          HttpResponse.json({
+            id: "gm_sync_1",
+            threadId: "t1",
+            internalDate: String(Date.UTC(2026, 8, 1, 15, 0, 0)),
+            payload: {
+              headers: [
+                { name: "From", value: '"Sam" <sam@example.com>' },
+                { name: "Subject", value: "Estimate" },
+              ],
+              mimeType: "text/plain",
+              body: { data: b64url("$1,850. Confirm by Friday.") },
+            },
+          }),
+      ),
     );
 
     const first = await app.inject({
@@ -132,7 +135,14 @@ describe("Gmail inbox sync API", () => {
     expect(synced!.fromAddress).toBe("sam@example.com");
     expect(synced!.body).toContain("$1,850");
 
-    // Re-run: dedupe → 0 inserted, 1 skipped.
+    // Re-run: the incremental cursor now points at the historyId
+    // recorded above. Empty history → dedupe → 0 inserted.
+    server.use(
+      http.get(
+        "https://gmail.googleapis.com/gmail/v1/users/me/history",
+        () => HttpResponse.json({ historyId: "1000" }),
+      ),
+    );
     const second = await app.inject({
       method: "POST",
       url: `/households/${hh}/inbox/sync`,
@@ -141,6 +151,5 @@ describe("Gmail inbox sync API", () => {
     });
     const secondResult = second.json().sync;
     expect(secondResult.inserted).toBe(0);
-    expect(secondResult.skippedDuplicates).toBe(1);
   });
 });

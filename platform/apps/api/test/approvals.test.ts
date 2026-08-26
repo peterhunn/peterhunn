@@ -95,7 +95,13 @@ describe("approval queue end-to-end", () => {
       list.json().approvals;
     const pending = approvals.find((a) => a.state === "pending");
     expect(pending).toBeDefined();
-    expect(pending!.kind).toBe("customer_approval");
+    // Per-action limit violation short-circuits to manager_review
+    // (the manager owns the "authorize an over-limit purchase"
+    // decision); the amount_gt escalation on approval.conditions
+    // would route to customer_approval, but it never runs because
+    // the limits check happens first. See packages/policy/src/
+    // engine.ts:evaluateLimits.
+    expect(pending!.kind).toBe("manager_review");
 
     const approve = await app.inject({
       method: "POST",

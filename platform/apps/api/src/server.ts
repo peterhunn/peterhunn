@@ -79,11 +79,47 @@ export const buildServer = (db: Db) => {
     // /healthz is public and cheap; /messaging/inbound/* have
     // stricter per-route limits set at the route.
     allowList: (req) => req.url === "/healthz",
-    errorResponseBuilder: (_req, ctx) => ({
-      error: "rate_limited",
-      message: `Too many requests. Retry after ${ctx.after}.`,
-      retryAfter: ctx.after,
-    }),
+    errorResponseBuilder: (_req, ctx) => {
+      // The plugin THROWS whatever we return here; Fastify's
+      // default error handler serializes `{ statusCode, error,
+      // message, code }` from an Error's own properties, so we
+      // return an Error subtype with the right shape rather than
+      // a bare object (which Fastify would treat as an unknown
+      // error and default to 500 with "Internal Server Error").
+      const err = new Error(
+        `Too many requests. Retry after ${ctx.after}.`,
+      ) as Error & {
+        statusCode: number;
+        code: string;
+        retryAfter: string;
+      };
+      err.statusCode = ctx.statusCode;
+      err.code = "RATE_LIMITED";
+      err.retryAfter = ctx.after;
+      return err;
+    },
+  });
+
+  // Reshape rate-limit errors into the { error: "rate_limited" }
+  // envelope the rest of the API uses. Everything else falls
+  // through to Fastify's default (which serializes as
+  // { statusCode, error, message } with `error` set to the HTTP
+  // reason phrase — fine for generic 4xx/5xx).
+  app.setErrorHandler((err, req, reply) => {
+    const anyErr = err as Error & {
+      statusCode?: number;
+      code?: string;
+      retryAfter?: string;
+    };
+    if (anyErr.code === "RATE_LIMITED") {
+      return reply.code(anyErr.statusCode ?? 429).send({
+        error: "rate_limited",
+        message: anyErr.message,
+        ...(anyErr.retryAfter ? { retryAfter: anyErr.retryAfter } : {}),
+      });
+    }
+    reply.send(anyErr);
+    void req;
   });
 
   // Twilio webhooks POST application/x-www-form-urlencoded. Fastify
@@ -121,11 +157,20 @@ export const buildServer = (db: Db) => {
   for (const mime of [
     "application/octet-stream",
     "application/pdf",
-    "image/*",
     "text/plain",
   ]) {
     app.addContentTypeParser(mime, { parseAs: "buffer" }, rawBinaryParser as never);
   }
+  // Fastify's addContentTypeParser takes a string (exact match) or a
+  // RegExp — the "image/*" wildcard string does NOT expand, it just
+  // fails to match "image/jpeg" / "image/png" and Fastify replies 415.
+  // Register a regex so every image/* mime routes to the same raw
+  // buffer parser.
+  app.addContentTypeParser(
+    /^image\//,
+    { parseAs: "buffer" },
+    rawBinaryParser as never,
+  );
 
   // Security headers (helmet) + CORS. Both must land before any
   // route handlers, so register them right after the body parsers

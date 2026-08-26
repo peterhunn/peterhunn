@@ -169,10 +169,23 @@ describe("document file blob store", () => {
     // is present in error shape by uploading a large payload
     // relative to a very small cap set at request time.
     process.env["ATELIER_MAX_UPLOAD_BYTES"] = "8";
+    // Fresh doc node — earlier tests supersede-and-replace
+    // docNodeId, and getNode filters out superseded rows.
+    const doc = graphRepo(db).createNode(hh, {
+      type: "document.identity",
+      data: { title: "Cap test", category: "identity" },
+      provenance: {
+        source: "manager_observed",
+        assertedBy: "test",
+        assertedAt: new Date().toISOString(),
+        confidence: 1,
+        status: "confirmed",
+      },
+    });
     const bytes = Buffer.alloc(64, 1);
     const res = await app.inject({
       method: "PUT",
-      url: `/households/${hh}/documents/${docNodeId}/file`,
+      url: `/households/${hh}/documents/${doc.id}/file`,
       headers: {
         authorization: `Bearer ${token}`,
         "content-type": "application/pdf",

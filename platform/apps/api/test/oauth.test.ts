@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
+import { http, HttpResponse } from "msw";
+import { setupServer } from "msw/node";
 import { openDb, credentialRepo, householdRepo, identityRepo } from "@atelier/db";
 import type { HouseholdId } from "@atelier/domain";
 import { buildServer } from "../src/server.js";
@@ -8,6 +10,11 @@ let app: FastifyInstance;
 let db: ReturnType<typeof openDb>;
 let token: string;
 let hh: HouseholdId;
+
+// Token exchange runs through @googleapis/OAuth2Client → gaxios,
+// not global fetch — intercept at the socket layer with MSW so the
+// SDK's request resolves without hitting real Google.
+const server = setupServer();
 
 beforeAll(async () => {
   db = openDb({ url: ":memory:" });
@@ -23,13 +30,18 @@ beforeAll(async () => {
 
   app = buildServer(db);
   await app.ready();
+
+  server.listen({ onUnhandledRequest: "bypass" });
 });
 
-afterAll(async () => await app.close());
+afterAll(async () => {
+  server.close();
+  await app.close();
+});
 
 beforeEach(() => {
+  server.resetHandlers();
   vi.unstubAllEnvs();
-  vi.unstubAllGlobals();
   vi.stubEnv("ATELIER_OAUTH_STATE_SECRET", "test-state-secret-32-chars-long-a");
   vi.stubEnv("GOOGLE_OAUTH_CLIENT_ID", "cid");
   vi.stubEnv("GOOGLE_OAUTH_CLIENT_SECRET", "csec");
@@ -38,8 +50,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  server.resetHandlers();
   vi.unstubAllEnvs();
-  vi.unstubAllGlobals();
 });
 
 describe("OAuth flow — Google", () => {
@@ -99,31 +111,21 @@ describe("OAuth flow — Google", () => {
     });
     const state = new URL((start.json() as { authUrl: string }).authUrl).searchParams.get("state")!;
 
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string, init?: RequestInit) => {
-        if (url === "https://oauth2.googleapis.com/token") {
-          const body = String(init?.body ?? "");
-          expect(body).toContain("code=code-abc");
-          return new Response(
-            JSON.stringify({
-              access_token: "at-abc",
-              refresh_token: "rt-abc",
-              expires_in: 3600,
-              scope:
-                "openid email profile https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/gmail.send",
-            }),
-            { status: 200 },
-          );
-        }
-        if (url === "https://openidconnect.googleapis.com/v1/userinfo") {
-          return new Response(
-            JSON.stringify({ email: "alex@example.com", name: "Alex Carrington" }),
-            { status: 200 },
-          );
-        }
-        throw new Error(`unexpected fetch: ${url}`);
+    server.use(
+      http.post("https://oauth2.googleapis.com/token", async ({ request }) => {
+        const body = await request.text();
+        expect(body).toContain("code=code-abc");
+        return HttpResponse.json({
+          access_token: "at-abc",
+          refresh_token: "rt-abc",
+          expires_in: 3600,
+          scope:
+            "openid email profile https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/gmail.send",
+        });
       }),
+      http.get("https://openidconnect.googleapis.com/v1/userinfo", () =>
+        HttpResponse.json({ email: "alex@example.com", name: "Alex Carrington" }),
+      ),
     );
 
     const cb = await app.inject({
@@ -172,27 +174,18 @@ describe("OAuth flow — Google", () => {
     vi.stubEnv("ATELIER_OAUTH_STATE_SECRET", "new-secret-32-chars-long-abcdef02");
     vi.stubEnv("ATELIER_OAUTH_STATE_SECRET_PREVIOUS", "old-secret-32-chars-long-abcdef01");
 
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string) => {
-        if (url === "https://oauth2.googleapis.com/token") {
-          return new Response(
-            JSON.stringify({
-              access_token: "at-rot",
-              refresh_token: "rt-rot",
-              expires_in: 3600,
-              scope: "https://www.googleapis.com/auth/calendar",
-            }),
-            { status: 200 },
-          );
-        }
-        if (url === "https://openidconnect.googleapis.com/v1/userinfo") {
-          return new Response(JSON.stringify({ email: "rot@example.com" }), {
-            status: 200,
-          });
-        }
-        throw new Error(`unexpected fetch: ${url}`);
-      }),
+    server.use(
+      http.post("https://oauth2.googleapis.com/token", () =>
+        HttpResponse.json({
+          access_token: "at-rot",
+          refresh_token: "rt-rot",
+          expires_in: 3600,
+          scope: "https://www.googleapis.com/auth/calendar",
+        }),
+      ),
+      http.get("https://openidconnect.googleapis.com/v1/userinfo", () =>
+        HttpResponse.json({ email: "rot@example.com" }),
+      ),
     );
 
     const cb = await app.inject({

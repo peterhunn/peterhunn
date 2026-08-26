@@ -5,6 +5,8 @@ import {
   identityRepo,
   inboxRepo,
   approvalRepo,
+  policyRepo,
+  taskRepo,
 } from "@atelier/db";
 import type { HouseholdId } from "@atelier/domain";
 import { buildAutopilot } from "../src/autopilot.js";
@@ -26,10 +28,38 @@ beforeAll(async () => {
   const m = identity.createManager({ displayName: "M", email: "m@a.b" });
   identity.mintToken({ actorType: "manager", actorId: m.id, label: "t" });
   const households = householdRepo(db);
+  const policies = policyRepo(db);
+
+  // Inbox agent proposes message.send. Without a matching allow
+  // policy the engine would deny and no approval would enqueue —
+  // seed the draft-authority policy from docs/33 so the flow
+  // demotes into manager_review and lands in the approvals list.
+  const seedMessageSendPolicy = (householdId: import("@atelier/domain").HouseholdId) =>
+    policies.create({
+      householdId,
+      spec: {
+        effect: "allow",
+        kind: "standing",
+        subject: "any_principal",
+        domain: "communication",
+        actionClass: "message.send",
+        scope: {},
+        autonomy: "draft",
+        limits: {},
+        approval: {
+          conditions: [],
+          fallbackApprover: "manager",
+        },
+        window: {},
+        label: "Any outbound customer-voice message",
+      },
+      provenance: { source: "customer_direct", assertedBy: m.id, confidence: 1 },
+    });
 
   const a = households.create({ name: "Autopilot on", tier: "life" });
   hh = a.id;
   identity.grantHousehold({ managerId: m.id, householdId: a.id, role: "primary" });
+  seedMessageSendPolicy(hh);
 
   const b = households.create({ name: "Frozen", tier: "life" });
   hhFrozen = b.id;
@@ -73,14 +103,16 @@ describe("autopilot", () => {
 
     // The inbox agent proposes message.send, which is draft-authority
     // → an approval row for this household exists.
-    const approvals = approvalRepo(db).listOpen(hh);
+    const approvals = approvalRepo(db).listPending(hh);
     expect(approvals.length).toBeGreaterThan(0);
-    // Approval carries the autopilot identity through — the exact
-    // formatting is orchestrator-internal, but "autopilot" must
-    // appear somewhere in proposedBy or the origin.
+    // Approval knows the proposing agent; the "autopilot" identity
+    // lives on the run row that spawned it (origin: proactive,
+    // originBy: autopilot:inbox), reachable by runId.
     const first = approvals[0]!;
-    const trace = JSON.stringify(first);
-    expect(trace.toLowerCase()).toContain("autopilot");
+    expect(first.proposedBy.agent).toBe("inbox");
+    const run = taskRepo(db).getRun(hh, first.runId);
+    expect(run?.origin).toBe("proactive");
+    expect(run?.originBy).toBe("autopilot:inbox");
   });
 
   it("skips a frozen household without dispatching", async () => {

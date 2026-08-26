@@ -1,4 +1,6 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
+import { http, HttpResponse } from "msw";
+import { setupServer } from "msw/node";
 import {
   openDb,
   credentialRepo,
@@ -17,6 +19,11 @@ const silentLogger = {
   info: () => {},
   error: () => {},
 };
+
+// Gmail sync flows through @googleapis/gmail (gaxios), not global
+// fetch — intercept at the socket layer with MSW so the SDK's
+// requests actually resolve without the internet.
+const server = setupServer();
 
 beforeAll(async () => {
   db = openDb({ url: ":memory:" });
@@ -55,32 +62,32 @@ beforeAll(async () => {
     credential: { access_token: "at-old", from_address: "c@example.com" },
   });
   credentials.revoke(revoked.id);
+
+  server.listen({ onUnhandledRequest: "bypass" });
 });
 
 afterAll(() => {
-  // In-memory sqlite; nothing to close.
+  server.close();
 });
 
-beforeEach(() => {
-  vi.unstubAllGlobals();
-});
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
+beforeEach(() => server.resetHandlers());
+afterEach(() => server.resetHandlers());
 
 describe("background sync scheduler", () => {
   it("runOnce iterates only households with an unrevoked gmail credential", async () => {
-    const seen: string[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string) => {
-        // Stamp which household id showed up (via the access_token used).
-        if (url.includes("/users/me/messages")) {
-          seen.push(url);
-          return new Response(JSON.stringify({ messages: [] }), { status: 200 });
-        }
-        return new Response(JSON.stringify({}), { status: 200 });
-      }),
+    let listHits = 0;
+    server.use(
+      http.get(
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+        () => {
+          listHits++;
+          return HttpResponse.json({ messages: [], resultSizeEstimate: 0 });
+        },
+      ),
+      http.get(
+        "https://www.googleapis.com/calendar/v3/calendars/primary/events",
+        () => HttpResponse.json({ items: [] }),
+      ),
     );
 
     const scheduler = buildScheduler(db, {
@@ -93,9 +100,9 @@ describe("background sync scheduler", () => {
     expect(result.householdsSynced).toBe(1);
     expect(result.perHousehold).toHaveLength(1);
     expect(result.perHousehold[0]!.householdId).toBe(hhWithGmail);
-    // Revoked and missing gmail households are skipped — no fetches for them.
-    // We can't inspect ids from the URL but we know only the live household ran.
-    expect(seen.length).toBeGreaterThan(0);
+    // Revoked and missing gmail households are skipped — only the
+    // live household drove the Gmail SDK.
+    expect(listHits).toBe(1);
     void hhWithoutGmail;
     void hhRevokedGmail;
   });
@@ -104,15 +111,18 @@ describe("background sync scheduler", () => {
     let resolveFetch!: () => void;
     const gate = new Promise<void>((r) => (resolveFetch = r));
 
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string) => {
-        if (url.includes("/users/me/messages")) {
+    server.use(
+      http.get(
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+        async () => {
           await gate;
-          return new Response(JSON.stringify({ messages: [] }), { status: 200 });
-        }
-        return new Response(JSON.stringify({}), { status: 200 });
-      }),
+          return HttpResponse.json({ messages: [], resultSizeEstimate: 0 });
+        },
+      ),
+      http.get(
+        "https://www.googleapis.com/calendar/v3/calendars/primary/events",
+        () => HttpResponse.json({ items: [] }),
+      ),
     );
 
     const scheduler = buildScheduler(db, {
