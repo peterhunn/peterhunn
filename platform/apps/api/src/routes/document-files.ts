@@ -34,6 +34,20 @@ const DEFAULT_MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 const BLOB_URI_PREFIX = "atelier://blob/";
 
+// Subcategories that map to a document.* node type. "other" is a
+// valid DocumentData.category but not a distinct graph type, so
+// auto-recategorisation only routes into these five buckets.
+const RECATEGORY_TARGETS = new Set([
+  "identity",
+  "legal",
+  "policy",
+  "record",
+  "receipt",
+]);
+
+const currentSubcategory = (type: string): string | null =>
+  type.startsWith("document.") ? type.slice("document.".length) : null;
+
 export const documentFileRoutes = (db: Db): FastifyPluginAsync => async (app) => {
   const graph = graphRepo(db);
   const blobs = documentBlobRepo(db);
@@ -90,40 +104,15 @@ export const documentFileRoutes = (db: Db): FastifyPluginAsync => async (app) =>
         documentNodeId: nodeId,
       });
 
-      // Stamp storedAt on a new version of the document node
-      // (supersede-and-replace so history is preserved). Re-validate
-      // the merged data to keep the invariant that every graph node
-      // matches its schema.
-      const merged = {
-        ...(current.data as Record<string, unknown>),
-        storedAt: `${BLOB_URI_PREFIX}${sha256}`,
-      };
-      const validated = DocumentData.safeParse(merged);
-      if (!validated.success) {
-        return reply.code(500).send({
-          error: "document_merge_invalid",
-          issues: validated.error.issues,
-        });
-      }
-      const replacement = graph.createNode(householdId, {
-        type: current.type,
-        data: validated.data,
-        provenance: {
-          source: "manager_observed",
-          assertedBy: `${req.actor.type}:${req.actor.id}`,
-          assertedAt: nowIso(),
-          confidence: 1,
-          status: "confirmed",
-        },
-      });
-      graph.supersedeNode(householdId, current.id as NodeId, replacement.id as NodeId);
-
-      // Run extraction inline. Result comes back as a *proposal* —
-      // the manager reviews via PATCH. We don't auto-promote onto
-      // the node so a bad extraction can't overwrite manager-typed
-      // metadata without human review. Extraction latency (2-5s
-      // typical) rides on the upload response for phase-0; a real
-      // product would go async with a task ledger row.
+      // Run extraction inline BEFORE the supersede-and-replace so
+      // the new node can land in the right document.* bucket in one
+      // step (no orphan node in the wrong bucket). Result comes back
+      // as a *proposal* on the response — the manager reviews field
+      // values via PATCH; we only ever auto-apply the category (the
+      // graph type name), never the free-text fields (title, issuer,
+      // subject, notes). Extraction latency (2-5s typical) rides on
+      // the upload response for phase-0; a real product would go
+      // async with a task ledger row.
       let extraction: Awaited<ReturnType<typeof extractDocumentFields>> | null = null;
       try {
         extraction = await extractDocumentFields({
@@ -141,6 +130,60 @@ export const documentFileRoutes = (db: Db): FastifyPluginAsync => async (app) =>
         );
       }
 
+      // Decide the target subcategory. Auto-recategorise only when
+      // ALL of these hold:
+      //   * the current node lives in document.identity — our
+      //     placeholder bucket. The console's "upload without
+      //     categorising" flow lands here; a manager who
+      //     deliberately created document.legal / .receipt /
+      //     .policy / .record has already pinned intent and we
+      //     don't overrule them from an extractor guess.
+      //   * extraction is a real classifier call (provider !==
+      //     "mock") — the mock never proposes a category so this
+      //     also serves as a null check;
+      //   * proposed category is a real bucket ("other" doesn't
+      //     map to a distinct node type);
+      //   * proposed category is different from identity.
+      const currentSub = currentSubcategory(current.type);
+      const proposedCategory = extraction?.proposed.category;
+      const shouldRecategorise =
+        currentSub === "identity" &&
+        extraction?.provider !== "mock" &&
+        typeof proposedCategory === "string" &&
+        RECATEGORY_TARGETS.has(proposedCategory) &&
+        proposedCategory !== currentSub;
+      const targetSub = shouldRecategorise ? proposedCategory : currentSub;
+
+      // Stamp storedAt on a new version of the document node
+      // (supersede-and-replace so history is preserved). Re-validate
+      // the merged data to keep the invariant that every graph node
+      // matches its schema. When auto-recategorising, also bump the
+      // data.category so the field matches the new type.
+      const merged: Record<string, unknown> = {
+        ...(current.data as Record<string, unknown>),
+        storedAt: `${BLOB_URI_PREFIX}${sha256}`,
+        ...(shouldRecategorise ? { category: proposedCategory } : {}),
+      };
+      const validated = DocumentData.safeParse(merged);
+      if (!validated.success) {
+        return reply.code(500).send({
+          error: "document_merge_invalid",
+          issues: validated.error.issues,
+        });
+      }
+      const replacement = graph.createNode(householdId, {
+        type: `document.${targetSub}` as never,
+        data: validated.data,
+        provenance: {
+          source: "manager_observed",
+          assertedBy: `${req.actor.type}:${req.actor.id}`,
+          assertedAt: nowIso(),
+          confidence: 1,
+          status: "confirmed",
+        },
+      });
+      graph.supersedeNode(householdId, current.id as NodeId, replacement.id as NodeId);
+
       return reply.code(recorded.inserted ? 201 : 200).send({
         blob: {
           sha256,
@@ -152,6 +195,16 @@ export const documentFileRoutes = (db: Db): FastifyPluginAsync => async (app) =>
         document: {
           id: replacement.id,
           data: replacement.data,
+          subcategory: targetSub,
+          ...(shouldRecategorise
+            ? {
+                autoRecategorised: {
+                  from: currentSub,
+                  to: proposedCategory,
+                  source: `extraction:${extraction!.provider}`,
+                },
+              }
+            : {}),
         },
         ...(extraction
           ? {

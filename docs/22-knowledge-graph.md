@@ -78,7 +78,16 @@ added by extending the ontology, not by overloading existing types.
 - `preference.decision` (approval thresholds, veto rules)
 
 ### Documents
-- `document.identity` (passport, ID, license)
+- `document.identity` (passport, ID, license) — also the **placeholder
+  bucket** on upload. When the console lets a manager attach a file
+  without picking a subcategory, the node lands here and the upload
+  route auto-recategorises to `document.receipt` / `.legal` /
+  `.policy` / `.record` if the inline document extractor
+  (Anthropic vision on images, pdf-parse + text on PDFs) returns a
+  confident `category` field. Mock/fallback extractions never
+  auto-move — no signal means no move. A node the manager
+  explicitly created outside `document.identity` is treated as
+  pinned and never overruled, even if the extractor disagrees.
 - `document.legal` (contract, will, POA)
 - `document.policy` (insurance)
 - `document.record` (medical, school, tax)
