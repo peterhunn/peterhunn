@@ -112,12 +112,27 @@ export const AssetPetData = z.object({
   dateOfBirth: z.string().date().optional(),
 });
 
+// Document extraction proposal — attached inline on the document
+// node so it survives across page loads. When the upload route runs
+// the LLM extractor, the proposed fields are stamped here (never
+// applied to `data.*` fields automatically — the auto-move only
+// changes the graph type, not free-text metadata). The console
+// renders a review card off this shape; POST .../extraction/resolve
+// merges the accepted subset into `data` and clears this field.
+export const DocumentExtractionProposal = z.object({
+  provider: z.enum(["anthropic", "mock"]),
+  reason: z.string().optional(),
+  proposed: z.record(z.string(), z.unknown()),
+  createdAt: z.string().datetime(),
+});
+
 export const DocumentData = z.object({
   title: z.string(),
   category: z.enum(["identity", "legal", "policy", "record", "receipt", "other"]),
   storedAt: z.string().optional(),
   expiresAt: z.string().datetime().optional(),
   notes: z.string().optional(),
+  pendingExtraction: DocumentExtractionProposal.optional(),
 });
 
 // ═══════════════════════════════════════════════════════════════════

@@ -1,4 +1,5 @@
 import type { FastifyPluginAsync } from "fastify";
+import { z } from "zod";
 import {
   documentBlobRepo,
   graphRepo,
@@ -12,6 +13,16 @@ import {
 } from "@atelier/domain";
 import { extractDocumentFields } from "@atelier/agents";
 import { getBlobStore } from "../blob-store.js";
+
+// Body for POST .../extraction/resolve. The caller lists which
+// proposed keys to accept (and optionally overrides them with an
+// edited value); anything not listed is discarded. Either way the
+// pendingExtraction field is cleared on the resulting node
+// version, so a "reject all" is `{ accept: [] }`.
+const ResolveExtractionBody = z.object({
+  accept: z.array(z.string()).default([]),
+  edits: z.record(z.string(), z.unknown()).default({}),
+});
 
 // File upload + download for document nodes.
 //
@@ -154,6 +165,27 @@ export const documentFileRoutes = (db: Db): FastifyPluginAsync => async (app) =>
         proposedCategory !== currentSub;
       const targetSub = shouldRecategorise ? proposedCategory : currentSub;
 
+      // Persist the extraction proposal on the node itself so it
+      // survives across page loads — the manager can leave the
+      // review card sitting for the next session. We only stamp
+      // when the proposal actually has fields to review; the
+      // category, if we already applied it via auto-recategorise,
+      // is stripped from the proposed set so the review card
+      // doesn't offer a redundant "accept category" toggle.
+      const rawProposed =
+        (extraction?.proposed as Record<string, unknown> | undefined) ?? {};
+      const proposedForReview: Record<string, unknown> = { ...rawProposed };
+      if (shouldRecategorise) delete proposedForReview.category;
+      const pendingExtraction =
+        extraction && Object.keys(proposedForReview).length > 0
+          ? {
+              provider: extraction.provider,
+              ...(extraction.reason ? { reason: extraction.reason } : {}),
+              proposed: proposedForReview,
+              createdAt: nowIso(),
+            }
+          : undefined;
+
       // Stamp storedAt on a new version of the document node
       // (supersede-and-replace so history is preserved). Re-validate
       // the merged data to keep the invariant that every graph node
@@ -163,6 +195,7 @@ export const documentFileRoutes = (db: Db): FastifyPluginAsync => async (app) =>
         ...(current.data as Record<string, unknown>),
         storedAt: `${BLOB_URI_PREFIX}${sha256}`,
         ...(shouldRecategorise ? { category: proposedCategory } : {}),
+        ...(pendingExtraction ? { pendingExtraction } : {}),
       };
       const validated = DocumentData.safeParse(merged);
       if (!validated.success) {
@@ -261,6 +294,107 @@ export const documentFileRoutes = (db: Db): FastifyPluginAsync => async (app) =>
             : "inline",
         )
         .send(store.stream(blob.storageRef));
+    },
+  );
+
+  // Resolve a pending extraction proposal on a document. The
+  // manager picks which proposed fields to accept (optionally
+  // editing them); anything not accepted is discarded. Always
+  // clears pendingExtraction on the resulting node version so the
+  // review card doesn't linger. Both "accept some" and "reject
+  // all" go through the same endpoint — reject-all is just an
+  // empty accept list.
+  app.post<{ Params: { householdId: string; nodeId: string } }>(
+    "/households/:householdId/documents/:nodeId/extraction/resolve",
+    {
+      config: {
+        audit: {
+          action: "documents.extraction.resolve",
+          resourceType: "document",
+        },
+      },
+    },
+    async (req, reply) => {
+      const householdId = req.householdContext as HouseholdId;
+      const nodeId = req.params.nodeId as NodeId;
+      const current = graph.getNode(householdId, nodeId);
+      if (!current || !current.type.startsWith("document.")) {
+        return reply.code(404).send({ error: "not_found" });
+      }
+      const body = ResolveExtractionBody.safeParse(req.body ?? {});
+      if (!body.success) {
+        return reply
+          .code(400)
+          .send({ error: "invalid_body", issues: body.error.issues });
+      }
+      const currentData = current.data as {
+        pendingExtraction?: { proposed?: Record<string, unknown> };
+      };
+      const pending = currentData.pendingExtraction;
+      if (!pending) {
+        return reply.code(404).send({ error: "no_pending_extraction" });
+      }
+      const proposed = pending.proposed ?? {};
+
+      // Build the accepted-fields patch. `edits` overrides the
+      // proposal on a per-key basis; keys in `edits` but not in
+      // `accept` are ignored (edits without acceptance would let a
+      // caller sneak arbitrary values in through a merge that's
+      // supposed to be about reviewing an LLM proposal).
+      const patch: Record<string, unknown> = {};
+      for (const key of body.data.accept) {
+        if (key === "pendingExtraction" || key === "storedAt") continue; // reserved
+        const editedValue = Object.prototype.hasOwnProperty.call(
+          body.data.edits,
+          key,
+        )
+          ? body.data.edits[key]
+          : proposed[key];
+        if (editedValue !== undefined) patch[key] = editedValue;
+      }
+
+      // Merge + drop pendingExtraction. Re-validate — accepting a
+      // proposed value that doesn't fit the schema (e.g. malformed
+      // expiresAt) is a caller-visible 400, not a silent drop.
+      const merged: Record<string, unknown> = {
+        ...(current.data as Record<string, unknown>),
+        ...patch,
+      };
+      delete merged.pendingExtraction;
+
+      const validated = DocumentData.safeParse(merged);
+      if (!validated.success) {
+        return reply.code(400).send({
+          error: "invalid_after_merge",
+          issues: validated.error.issues,
+        });
+      }
+
+      const replacement = graph.createNode(householdId, {
+        type: current.type,
+        data: validated.data,
+        provenance: {
+          source: "manager_observed",
+          assertedBy: `${req.actor.type}:${req.actor.id}`,
+          assertedAt: nowIso(),
+          confidence: 1,
+          status: "confirmed",
+        },
+      });
+      graph.supersedeNode(
+        householdId,
+        current.id as NodeId,
+        replacement.id as NodeId,
+      );
+
+      return {
+        document: {
+          id: replacement.id,
+          data: replacement.data,
+        },
+        accepted: body.data.accept,
+        acceptedCount: Object.keys(patch).length,
+      };
     },
   );
 };

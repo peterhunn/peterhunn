@@ -395,6 +395,21 @@ export const api = (token: string) => ({
     }>(token, "PATCH", `/households/${id}/documents/${nodeId}`, { data }),
   deleteDocument: (id: HouseholdId, nodeId: string) =>
     request<void>(token, "DELETE", `/households/${id}/documents/${nodeId}`),
+  resolveDocumentExtraction: (
+    id: HouseholdId,
+    nodeId: string,
+    body: { accept: string[]; edits?: Record<string, unknown> },
+  ) =>
+    request<{
+      document: { id: string; data: Record<string, unknown> };
+      accepted: string[];
+      acceptedCount: number;
+    }>(
+      token,
+      "POST",
+      `/households/${id}/documents/${nodeId}/extraction/resolve`,
+      body,
+    ),
   listAssets: (id: HouseholdId) =>
     request<{
       assets: {

@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import type { HouseholdId } from "@atelier/domain";
 import {
   addDocument,
   removeDocument,
+  resolveDocumentExtraction,
   updateDocument,
   type DocumentSubcategory,
 } from "./actions";
@@ -99,11 +100,31 @@ const toFormData = (data: Record<string, unknown>): Record<string, string> => {
   return out;
 };
 
-interface Extraction {
+interface PendingExtraction {
   provider: "anthropic" | "mock";
   reason?: string;
   proposed: Record<string, unknown>;
+  createdAt: string;
 }
+
+interface AutoRecategorised {
+  from: string;
+  to: string;
+  source: string;
+}
+
+const readPending = (
+  data: Record<string, unknown>,
+): PendingExtraction | null => {
+  const v = data["pendingExtraction"];
+  if (!v || typeof v !== "object") return null;
+  const r = v as Partial<PendingExtraction>;
+  if (!r.provider || !r.proposed || !r.createdAt) return null;
+  return r as PendingExtraction;
+};
+
+const stringifyValue = (v: unknown): string =>
+  typeof v === "string" ? v : JSON.stringify(v);
 
 function DocRow({
   householdId,
@@ -119,10 +140,33 @@ function DocRow({
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<Record<string, string>>(toFormData(doc.data));
   const [message, setMessage] = useState<string | null>(null);
-  const [pendingExtraction, setPendingExtraction] = useState<Extraction | null>(
-    null,
-  );
+  // Recent auto-recategorise info lives in memory only — comes
+  // from the upload response, not persisted on the node.
+  const [autoRecategorised, setAutoRecategorised] =
+    useState<AutoRecategorised | null>(null);
   const [isPending, startTransition] = useTransition();
+
+  // The extraction proposal is now persistent on the node data
+  // (server writes it there on upload); the review card renders
+  // straight from doc.data so a refresh doesn't lose it.
+  const pending = useMemo(() => readPending(doc.data), [doc.data]);
+  const proposedEntries = useMemo(
+    () =>
+      pending ? Object.entries(pending.proposed).filter(([k]) => k !== "storedAt") : [],
+    [pending],
+  );
+
+  // Per-field accept toggle + inline edits, defaulted to "all
+  // proposed fields accepted with the LLM's values" so the
+  // common case ("looks right, ship it") is one click.
+  const [acceptSet, setAcceptSet] = useState<Set<string>>(
+    () => new Set(proposedEntries.map(([k]) => k)),
+  );
+  const [edits, setEdits] = useState<Record<string, string>>(() =>
+    Object.fromEntries(proposedEntries.map(([k, v]) => [k, stringifyValue(v)])),
+  );
+
+  const anyAccepted = acceptSet.size > 0;
 
   return (
     <li className="person-row">
@@ -225,8 +269,11 @@ function DocRow({
                       }
                       const json = (await resp.json()) as {
                         blob: { sha256: string; deduped: boolean };
-                        document: { data: Record<string, unknown> };
-                        extraction?: Extraction;
+                        document: {
+                          id: string;
+                          data: Record<string, unknown>;
+                          autoRecategorised?: AutoRecategorised;
+                        };
                       };
                       setMessage(
                         json.blob.deduped
@@ -234,12 +281,23 @@ function DocRow({
                           : `Uploaded ${json.blob.sha256.slice(0, 8)}.`,
                       );
                       onUpdated(json.document.data);
-                      if (
-                        json.extraction &&
-                        Object.keys(json.extraction.proposed).length > 0
-                      ) {
-                        setPendingExtraction(json.extraction);
+                      if (json.document.autoRecategorised) {
+                        setAutoRecategorised(json.document.autoRecategorised);
                       }
+                      // Reset the accept form so its defaults track
+                      // whatever proposal the server just persisted.
+                      const nextPending = readPending(json.document.data);
+                      const nextEntries = nextPending
+                        ? Object.entries(nextPending.proposed).filter(
+                            ([k]) => k !== "storedAt",
+                          )
+                        : [];
+                      setAcceptSet(new Set(nextEntries.map(([k]) => k)));
+                      setEdits(
+                        Object.fromEntries(
+                          nextEntries.map(([k, v]) => [k, stringifyValue(v)]),
+                        ),
+                      );
                     } catch (err) {
                       setMessage(`Error: ${(err as Error).message}`);
                     }
@@ -279,66 +337,112 @@ function DocRow({
         </div>
       )}
 
-      {pendingExtraction ? (
+      {autoRecategorised ? (
+        <div className="extraction-recat">
+          Auto-moved from <span className="mono">{autoRecategorised.from}</span>{" "}
+          to <span className="mono">{autoRecategorised.to}</span> by{" "}
+          {autoRecategorised.source}.
+        </div>
+      ) : null}
+
+      {pending && proposedEntries.length > 0 ? (
         <div className="extraction-review">
           <div className="extraction-header">
             <strong>Fields extracted from file</strong>
             <span className="mono muted">
-              via {pendingExtraction.provider}
-              {pendingExtraction.reason ? ` — ${pendingExtraction.reason}` : ""}
+              via {pending.provider}
+              {pending.reason ? ` — ${pending.reason}` : ""}
+              {" · "}
+              {new Date(pending.createdAt).toLocaleString()}
             </span>
           </div>
           <ul className="extraction-fields">
-            {Object.entries(pendingExtraction.proposed).map(([k, v]) => (
-              <li key={k}>
-                <span className="mono muted">{k}</span>{" "}
-                <span>{typeof v === "string" ? v : JSON.stringify(v)}</span>
-              </li>
-            ))}
+            {proposedEntries.map(([k, v]) => {
+              const accepted = acceptSet.has(k);
+              const originalValue = stringifyValue(v);
+              const currentEdit = edits[k] ?? originalValue;
+              const edited = currentEdit !== originalValue;
+              return (
+                <li key={k} className="extraction-row">
+                  <label className="extraction-toggle">
+                    <input
+                      type="checkbox"
+                      checked={accepted}
+                      onChange={(e) => {
+                        setAcceptSet((prev) => {
+                          const next = new Set(prev);
+                          if (e.target.checked) next.add(k);
+                          else next.delete(k);
+                          return next;
+                        });
+                      }}
+                    />
+                    <span className="mono muted">{k}</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={currentEdit}
+                    disabled={!accepted}
+                    onChange={(e) =>
+                      setEdits((prev) => ({ ...prev, [k]: e.target.value }))
+                    }
+                  />
+                  {edited && accepted ? (
+                    <span className="mono muted extraction-edited">edited</span>
+                  ) : null}
+                </li>
+              );
+            })}
           </ul>
           <div className="person-actions">
             <button
               type="button"
-              disabled={isPending}
+              disabled={isPending || !anyAccepted}
               onClick={() =>
                 startTransition(async () => {
-                  const merged = {
-                    ...(doc.data as Record<string, unknown>),
-                    ...pendingExtraction.proposed,
-                  };
-                  const res = await updateDocument(householdId, doc.id, merged);
+                  const accept = Array.from(acceptSet);
+                  const editsPayload: Record<string, unknown> = {};
+                  for (const k of accept) {
+                    const original = stringifyValue(pending.proposed[k]);
+                    if ((edits[k] ?? original) !== original) {
+                      editsPayload[k] = edits[k];
+                    }
+                  }
+                  const res = await resolveDocumentExtraction(
+                    householdId,
+                    doc.id,
+                    Object.keys(editsPayload).length > 0
+                      ? { accept, edits: editsPayload }
+                      : { accept },
+                  );
                   setMessage(res.message);
-                  if (!res.message.startsWith("Error")) {
-                    onUpdated(merged);
-                    setPendingExtraction(null);
+                  if (!res.message.startsWith("Error") && res.data) {
+                    onUpdated(res.data);
                   }
                 })
               }
             >
-              Accept all
+              Apply {acceptSet.size} field{acceptSet.size === 1 ? "" : "s"}
             </button>
             <button
               type="button"
               className="link-btn"
               disabled={isPending}
-              onClick={() => {
-                setEditing(true);
-                setForm({
-                  ...toFormData(doc.data),
-                  ...toFormData(pendingExtraction.proposed),
-                });
-                setPendingExtraction(null);
-              }}
+              onClick={() =>
+                startTransition(async () => {
+                  const res = await resolveDocumentExtraction(
+                    householdId,
+                    doc.id,
+                    { accept: [] },
+                  );
+                  setMessage(res.message);
+                  if (!res.message.startsWith("Error") && res.data) {
+                    onUpdated(res.data);
+                  }
+                })
+              }
             >
-              Edit before accepting
-            </button>
-            <button
-              type="button"
-              className="link-btn"
-              disabled={isPending}
-              onClick={() => setPendingExtraction(null)}
-            >
-              Discard
+              Dismiss all
             </button>
           </div>
         </div>

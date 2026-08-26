@@ -88,6 +88,19 @@ added by extending the ontology, not by overloading existing types.
   auto-move — no signal means no move. A node the manager
   explicitly created outside `document.identity` is treated as
   pinned and never overruled, even if the extractor disagrees.
+
+  The extractor's other proposed fields (title, expiresAt, issuer,
+  subject, notes) are **never** applied automatically — they land on
+  the node under `data.pendingExtraction = { provider, reason?,
+  proposed, createdAt }`, and the console renders a review card
+  with per-field accept/reject + inline edit. `POST /households/:id
+  /documents/:nodeId/extraction/resolve` (body: `{ accept: string[],
+  edits?: Record<string, unknown> }`) merges the accepted subset
+  into `data`, applies `edits` for any key that also appears in
+  `accept`, and clears `pendingExtraction`; supersede-and-replace,
+  so history holds every version of the proposal + review. An
+  empty `accept` array is "reject all" — same endpoint, same
+  clearing behavior.
 - `document.legal` (contract, will, POA)
 - `document.policy` (insurance)
 - `document.record` (medical, school, tax)

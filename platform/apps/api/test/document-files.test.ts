@@ -417,4 +417,155 @@ describe("document file blob store", () => {
     expect(body.document.autoRecategorised).toBeUndefined();
     expect(body.extraction.proposed.category).toBe("receipt");
   });
+
+  it("persists the extraction proposal on the node and lets the manager resolve it per-field", async () => {
+    // Real classifier path returns a rich proposal — title,
+    // issuer, expiresAt. Upload should stamp pendingExtraction on
+    // the node data so the review card survives a reload; the
+    // "category" key is stripped because auto-recategorisation
+    // already applied it and a second toggle would be redundant.
+    const doc = graphRepo(db).createNode(hh, {
+      type: "document.identity",
+      data: { title: "unknown-upload", category: "identity" },
+      provenance: {
+        source: "manager_observed",
+        assertedBy: "test",
+        assertedAt: new Date().toISOString(),
+        confidence: 1,
+        status: "confirmed",
+      },
+    });
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    server.use(
+      http.post("https://api.anthropic.com/v1/messages", () =>
+        HttpResponse.json({
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                title: "AAA Auto Policy #1234",
+                category: "policy",
+                expiresAt: "2027-04-01T00:00:00Z",
+                issuer: "AAA",
+                subject: "irrelevant",
+              }),
+            },
+          ],
+        }),
+      ),
+    );
+    const bytes = Buffer.concat([
+      Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
+      Buffer.from("resolve-test"),
+    ]);
+    const upload = await app.inject({
+      method: "PUT",
+      url: `/households/${hh}/documents/${doc.id}/file`,
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "image/jpeg",
+      },
+      payload: bytes,
+    });
+    expect(upload.statusCode).toBe(201);
+    const uploadBody = upload.json();
+    // Auto-moved to policy; landed node id is different.
+    expect(uploadBody.document.subcategory).toBe("policy");
+    const landedId = uploadBody.document.id;
+    // pendingExtraction lives on the node data now, and its
+    // proposed set no longer carries the redundant category.
+    const pending = uploadBody.document.data.pendingExtraction;
+    expect(pending).toBeDefined();
+    expect(pending.provider).toBe("anthropic");
+    expect(pending.proposed).toEqual({
+      title: "AAA Auto Policy #1234",
+      expiresAt: "2027-04-01T00:00:00Z",
+      issuer: "AAA",
+      subject: "irrelevant",
+    });
+    expect(pending.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+
+    // Manager accepts title (edited) + expiresAt as-is, discards
+    // issuer + subject. Endpoint merges + clears pendingExtraction
+    // + supersedes the node.
+    const resolve = await app.inject({
+      method: "POST",
+      url: `/households/${hh}/documents/${landedId}/extraction/resolve`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        accept: ["title", "expiresAt"],
+        edits: { title: "AAA Auto Policy — 2026-27" },
+      },
+    });
+    expect(resolve.statusCode).toBe(200);
+    const resolveBody = resolve.json();
+    expect(resolveBody.acceptedCount).toBe(2);
+    expect(resolveBody.document.data.title).toBe("AAA Auto Policy — 2026-27");
+    expect(resolveBody.document.data.expiresAt).toBe("2027-04-01T00:00:00Z");
+    expect(resolveBody.document.data.pendingExtraction).toBeUndefined();
+    // Rejected fields don't sneak onto the doc.
+    expect(resolveBody.document.data.issuer).toBeUndefined();
+    expect(resolveBody.document.data.subject).toBeUndefined();
+    // Superseded — landed node is retired, the resolved node is
+    // the live one.
+    expect(graphRepo(db).getNode(hh, landedId)).toBeNull();
+    const live = graphRepo(db).getNode(hh, resolveBody.document.id);
+    expect(live).not.toBeNull();
+    expect((live!.data as { pendingExtraction?: unknown }).pendingExtraction).toBeUndefined();
+  });
+
+  it("reject-all clears the pendingExtraction without changing any field", async () => {
+    const doc = graphRepo(db).createNode(hh, {
+      type: "document.legal",
+      data: {
+        title: "Manager-set title",
+        category: "legal",
+        pendingExtraction: {
+          provider: "anthropic" as const,
+          proposed: { title: "LLM-guessed title", notes: "junk" },
+          createdAt: new Date().toISOString(),
+        },
+      },
+      provenance: {
+        source: "manager_observed",
+        assertedBy: "test",
+        assertedAt: new Date().toISOString(),
+        confidence: 1,
+        status: "confirmed",
+      },
+    });
+    const res = await app.inject({
+      method: "POST",
+      url: `/households/${hh}/documents/${doc.id}/extraction/resolve`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { accept: [] },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.acceptedCount).toBe(0);
+    expect(body.document.data.title).toBe("Manager-set title");
+    expect(body.document.data.pendingExtraction).toBeUndefined();
+  });
+
+  it("404s the resolve endpoint when there is no pending extraction", async () => {
+    const doc = graphRepo(db).createNode(hh, {
+      type: "document.identity",
+      data: { title: "no pending here", category: "identity" },
+      provenance: {
+        source: "manager_observed",
+        assertedBy: "test",
+        assertedAt: new Date().toISOString(),
+        confidence: 1,
+        status: "confirmed",
+      },
+    });
+    const res = await app.inject({
+      method: "POST",
+      url: `/households/${hh}/documents/${doc.id}/extraction/resolve`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { accept: ["title"] },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().error).toBe("no_pending_extraction");
+  });
 });

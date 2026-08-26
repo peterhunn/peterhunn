@@ -1052,10 +1052,48 @@ form.login {
   list-style: none;
   padding: 0;
   margin: 0 0 0.5rem;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 0.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
   font-size: 0.85rem;
+}
+.extraction-row {
+  display: grid;
+  grid-template-columns: minmax(140px, auto) 1fr auto;
+  gap: 0.5rem;
+  align-items: center;
+}
+.extraction-toggle {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+  cursor: pointer;
+}
+.extraction-row input[type="text"] {
+  width: 100%;
+  padding: 0.25rem 0.4rem;
+  font-size: 0.85rem;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: var(--paper);
+  color: var(--ink);
+}
+.extraction-row input[type="text"]:disabled {
+  opacity: 0.55;
+  background: transparent;
+}
+.extraction-edited {
+  font-size: 0.75rem;
+  color: #b45309;
+}
+.extraction-recat {
+  margin-top: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  border-left: 3px solid #2563eb;
+  background: rgba(37, 99, 235, 0.06);
+  font-size: 0.85rem;
+  color: var(--ink);
+  border-radius: 3px;
 }
 .tag-attached {
   margin-left: 0.35rem;

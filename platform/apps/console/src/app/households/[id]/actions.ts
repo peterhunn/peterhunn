@@ -282,6 +282,39 @@ export async function removeDocument(
   }
 }
 
+export async function resolveDocumentExtraction(
+  householdId: HouseholdId,
+  nodeId: string,
+  body: { accept: string[]; edits?: Record<string, unknown> },
+): Promise<{
+  message: string;
+  id?: string;
+  data?: Record<string, unknown>;
+  acceptedCount?: number;
+}> {
+  const token = await getSessionToken();
+  if (!token) return { message: "Session expired." };
+  try {
+    const res = await api(token).resolveDocumentExtraction(
+      householdId,
+      nodeId,
+      body,
+    );
+    return {
+      message:
+        body.accept.length === 0
+          ? "Extraction dismissed."
+          : `Accepted ${res.acceptedCount} field${res.acceptedCount === 1 ? "" : "s"}.`,
+      id: res.document.id,
+      data: res.document.data,
+      acceptedCount: res.acceptedCount,
+    };
+  } catch (err) {
+    if (err instanceof ApiError) return { message: `Error: ${err.message}` };
+    return { message: `Error: ${(err as Error).message}` };
+  }
+}
+
 export type AssetKind = "property" | "vehicle" | "equipment" | "membership" | "pet";
 
 export async function addAsset(
