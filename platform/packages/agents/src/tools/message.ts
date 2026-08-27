@@ -23,7 +23,14 @@ export const MessageSendInputs = z.object({
   toAddress: z.string().email(),
   subject: z.string(),
   body: z.string(),
-  inReplyToMessageId: z.string().optional(),
+  // RFC 5322 Message-ID (angle brackets stripped) of the message
+  // being replied to. Renders as In-Reply-To + References headers
+  // so non-Gmail MUAs thread the reply.
+  inReplyToRef: z.string().optional(),
+  // Gmail-side thread id. When set, the Gmail send call includes
+  // it in the request body so Gmail places the reply in the same
+  // conversation server-side.
+  threadId: z.string().optional(),
   fromName: z.string().optional(),
   fromAddress: z.string().email().optional(),
 });
@@ -34,12 +41,32 @@ export interface MessageSendOutputs {
   readonly sentAt: string;
   readonly provider: "gmail" | "mock";
   readonly threadId?: string;
+  // The RFC 5322 Message-ID (angle brackets stripped) generated
+  // for the outbound message. Callers persist this alongside the
+  // send so a future reply — inbound sync landing a message whose
+  // In-Reply-To matches this id — can be threaded.
+  readonly messageIdHeader?: string;
 }
+
+// Generate an RFC 5322 Message-ID. Format:
+// <timestamp.random@fromDomain>. The fromDomain-based right-hand
+// side follows RFC convention; the random+timestamp left half is
+// enough uniqueness for our volume.
+const generateMessageId = (fromAddress: string): string => {
+  const domain = fromAddress.split("@")[1] ?? "atelier.local";
+  const rand =
+    typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function"
+      ? Array.from(crypto.getRandomValues(new Uint8Array(8)))
+          .map((b) => b.toString(16).padStart(2, "0"))
+          .join("")
+      : Math.random().toString(16).slice(2, 18).padStart(16, "0");
+  return `${Date.now()}.${rand}@${domain}`;
+};
 
 // Build an RFC-822 message body Gmail's send endpoint accepts. Header
 // lines are CRLF-terminated; text/plain UTF-8 body follows a blank
-// line. Kept intentionally simple — HTML alternative parts, threading
-// headers, and attachments are next-commit territory.
+// line. Kept intentionally simple — HTML alternative parts and
+// attachments are next-commit territory.
 const rfc822Message = (opts: {
   fromName?: string;
   fromAddress: string;
@@ -48,6 +75,7 @@ const rfc822Message = (opts: {
   subject: string;
   body: string;
   inReplyToRef?: string;
+  messageIdHeader: string;
 }): string => {
   const from = opts.fromName ? `${opts.fromName} <${opts.fromAddress}>` : opts.fromAddress;
   const to = opts.toName ? `${opts.toName} <${opts.toAddress}>` : opts.toAddress;
@@ -55,6 +83,7 @@ const rfc822Message = (opts: {
     `From: ${from}`,
     `To: ${to}`,
     `Subject: ${opts.subject}`,
+    `Message-ID: <${opts.messageIdHeader}>`,
     "MIME-Version: 1.0",
     'Content-Type: text/plain; charset="utf-8"',
     "Content-Transfer-Encoding: 7bit",
@@ -73,7 +102,12 @@ export const trySendViaGmail = async (
   ctx: ToolContext,
   inputs: MessageSendInputs,
 ): Promise<
-  | { provider: "gmail"; sentMessageId: string; threadId: string | undefined }
+  | {
+      provider: "gmail";
+      sentMessageId: string;
+      threadId: string | undefined;
+      messageIdHeader: string;
+    }
   | null
 > => {
   const auth = await readGoogleAuth<GmailFields>(ctx, "gmail");
@@ -87,6 +121,7 @@ export const trySendViaGmail = async (
     return null;
   }
 
+  const messageIdHeader = generateMessageId(fromAddress);
   const raw = rfc822Message({
     ...(inputs.fromName !== undefined ? { fromName: inputs.fromName } : {}),
     ...(auth.credential.from_name !== undefined && inputs.fromName === undefined
@@ -97,15 +132,23 @@ export const trySendViaGmail = async (
     toAddress: inputs.toAddress,
     subject: inputs.subject,
     body: inputs.body,
-    ...(inputs.inReplyToMessageId !== undefined
-      ? { inReplyToRef: inputs.inReplyToMessageId }
+    ...(inputs.inReplyToRef !== undefined
+      ? { inReplyToRef: inputs.inReplyToRef }
       : {}),
+    messageIdHeader,
   });
 
   const gmail = gmailApi.gmail({ version: "v1", auth: auth.client });
+  // Pass threadId so Gmail places the reply in the same
+  // conversation server-side; combined with the In-Reply-To /
+  // References headers, this threads for both Gmail and non-
+  // Gmail recipients.
   const res = await gmail.users.messages.send({
     userId: "me",
-    requestBody: { raw: base64UrlEncode(raw) },
+    requestBody: {
+      raw: base64UrlEncode(raw),
+      ...(inputs.threadId ? { threadId: inputs.threadId } : {}),
+    },
   });
   ctx.logger?.info("gmail message sent", {
     messageId: res.data.id,
@@ -115,6 +158,7 @@ export const trySendViaGmail = async (
     provider: "gmail",
     sentMessageId: res.data.id ?? "unknown",
     threadId: res.data.threadId ?? undefined,
+    messageIdHeader,
   };
 };
 
@@ -137,6 +181,7 @@ export const messageSendTool: Tool<MessageSendInputs, MessageSendOutputs> = {
             sentAt: new Date().toISOString(),
             provider: sent.provider,
             ...(sent.threadId !== undefined && { threadId: sent.threadId }),
+            messageIdHeader: sent.messageIdHeader,
           },
           outcome: "succeeded",
           summary: `Sent "${inputs.subject}" to ${inputs.toName} <${inputs.toAddress}> via Gmail`,

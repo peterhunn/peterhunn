@@ -92,7 +92,7 @@ describe("message.send", () => {
     expect(capturedRaw).toContain("Thanks Sam");
   });
 
-  it("adds In-Reply-To and References headers when the input carries inReplyToMessageId", async () => {
+  it("adds In-Reply-To and References headers when the input carries inReplyToRef", async () => {
     let capturedRaw: string | null = null;
     server.use(
       http.post(GMAIL_SEND, async ({ request }) => {
@@ -107,7 +107,7 @@ describe("message.send", () => {
         from_address: "alex@atelier.example",
       }),
       {
-        inputs: { ...baseInputs, inReplyToMessageId: "sam@example.com/original-id" },
+        inputs: { ...baseInputs, inReplyToRef: "sam@example.com/original-id" },
         summary: "Send reply",
       },
     );

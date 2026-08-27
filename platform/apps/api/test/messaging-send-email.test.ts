@@ -117,5 +117,70 @@ describe("POST /households/:id/messaging/send-email", () => {
     expect(inboxRow!.body).toContain("Wine bar");
     expect(inboxRow!.externalMessageId).toBe("gmail_id_1");
     expect(inboxRow!.externalThreadId).toBe("thread_1");
+    // A freshly generated Message-ID is persisted so a customer's
+    // reply — arriving inbound with In-Reply-To = this header — can
+    // be threaded back to the outbound row we just recorded.
+    expect(inboxRow!.messageIdHeader).toBeTruthy();
+    expect(inboxRow!.messageIdHeader).toContain("@atelier.example");
+  });
+
+  it("threads the reply — passes threadId to Gmail and stamps In-Reply-To / References onto the RFC-822 body", async () => {
+    // Credential already stored above. Capture the outbound
+    // request so we can assert the raw RFC-822 headers and the
+    // threadId that Gmail sees.
+    const captured: {
+      body?: { raw?: string; threadId?: string };
+      raw?: string;
+    } = {};
+    server.use(
+      http.post(
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+        async ({ request }) => {
+          captured.body = (await request.json()) as {
+            raw?: string;
+            threadId?: string;
+          };
+          const rawB64 = captured.body?.raw ?? "";
+          // Gmail expects base64url (no padding); decode to inspect.
+          const b = Buffer.from(
+            rawB64.replace(/-/g, "+").replace(/_/g, "/") +
+              "==".slice(0, (4 - (rawB64.length % 4)) % 4),
+            "base64",
+          );
+          captured.raw = b.toString("utf-8");
+          return HttpResponse.json({
+            id: "gmail_id_2",
+            threadId: "thread_1",
+          });
+        },
+      ),
+    );
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/households/${hh}/messaging/send-email`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        toName: "Sam",
+        toAddress: "sam@example.com",
+        subject: "Re: dinner",
+        body: "See you at 8.",
+        inReplyToRef: "orig-123@example.com",
+        threadId: "thread_1",
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.sent.sentMessageId).toBe("gmail_id_2");
+    expect(body.sent.threadId).toBe("thread_1");
+
+    // Gmail received threadId server-side.
+    expect(captured.body?.threadId).toBe("thread_1");
+
+    // RFC-822 headers pass through so non-Gmail MUAs also thread.
+    expect(captured.raw).toContain("In-Reply-To: <orig-123@example.com>");
+    expect(captured.raw).toContain("References: <orig-123@example.com>");
+    // Every outbound gets a fresh Message-ID header on the wire.
+    expect(captured.raw).toMatch(/Message-ID: <[^>]+@atelier\.example>/);
   });
 });

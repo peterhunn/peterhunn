@@ -200,7 +200,10 @@ export interface SendOutboundEmailInput {
   readonly toAddress: string;
   readonly subject: string;
   readonly body: string;
-  readonly inReplyToMessageId?: string;
+  // RFC 5322 Message-ID of the message being replied to.
+  readonly inReplyToRef?: string;
+  // Gmail-side thread id — server-side threading.
+  readonly threadId?: string;
   readonly authoredBy?: {
     readonly type: "manager" | "system";
     readonly id: string;
@@ -213,6 +216,7 @@ export interface SendOutboundEmailResult {
   readonly provider: "gmail" | "mock";
   readonly sentMessageId: string;
   readonly threadId?: string;
+  readonly messageIdHeader?: string;
   readonly from: string;
   readonly inboxMessageId: string;
   readonly reason?: string;
@@ -249,9 +253,8 @@ export const sendOutboundEmail = async (
       toAddress: input.toAddress,
       subject: input.subject,
       body: input.body,
-      ...(input.inReplyToMessageId
-        ? { inReplyToMessageId: input.inReplyToMessageId }
-        : {}),
+      ...(input.inReplyToRef ? { inReplyToRef: input.inReplyToRef } : {}),
+      ...(input.threadId ? { threadId: input.threadId } : {}),
     });
   } catch (err) {
     input.logger?.info("manager gmail send failed — mock fallback", {
@@ -285,6 +288,7 @@ export const sendOutboundEmail = async (
     externalProvider: "gmail",
     externalMessageId: sent.sentMessageId,
     ...(sent.threadId ? { externalThreadId: sent.threadId } : {}),
+    messageIdHeader: sent.messageIdHeader,
     direction: "outbound",
     fromName: "",
     fromAddress,
@@ -298,6 +302,7 @@ export const sendOutboundEmail = async (
     provider: sent.provider,
     sentMessageId: sent.sentMessageId,
     ...(sent.threadId ? { threadId: sent.threadId } : {}),
+    messageIdHeader: sent.messageIdHeader,
     from: fromAddress,
     inboxMessageId: recorded.row.id,
   };

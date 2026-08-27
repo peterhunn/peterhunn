@@ -594,7 +594,8 @@ export const api = (token: string) => ({
       toAddress: string;
       subject: string;
       body: string;
-      inReplyToMessageId?: string;
+      inReplyToRef?: string;
+      threadId?: string;
     },
   ) =>
     request<{
@@ -602,6 +603,7 @@ export const api = (token: string) => ({
         provider: "gmail" | "mock";
         sentMessageId: string;
         threadId?: string;
+        messageIdHeader?: string;
         from: string;
         inboxMessageId: string;
       };

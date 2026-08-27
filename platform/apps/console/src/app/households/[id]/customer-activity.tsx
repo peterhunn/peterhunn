@@ -73,6 +73,32 @@ const defaultSubject = (items: ActivityItem[]): string => {
   return /^re:/i.test(subj) ? subj : `Re: ${subj}`;
 };
 
+// Find the most recent inbound email in the timeline. That's the
+// message we're threading against — its Message-ID becomes
+// In-Reply-To / References, and its Gmail threadId is passed to
+// the Gmail send so the outbound lands in the same conversation.
+const findEmailReplyTarget = (
+  items: ActivityItem[],
+): { inReplyToRef?: string; threadId?: string } => {
+  const target = items.find(
+    (i) => i.source === "email" && i.direction === "inbound",
+  );
+  if (!target) return {};
+  const detail = target.detail ?? {};
+  const inReplyToRef =
+    typeof detail["messageIdHeader"] === "string"
+      ? (detail["messageIdHeader"] as string)
+      : undefined;
+  const threadId =
+    typeof detail["externalThreadId"] === "string"
+      ? (detail["externalThreadId"] as string)
+      : undefined;
+  const out: { inReplyToRef?: string; threadId?: string } = {};
+  if (inReplyToRef) out.inReplyToRef = inReplyToRef;
+  if (threadId) out.threadId = threadId;
+  return out;
+};
+
 function ReplyComposer({
   householdId,
   personName: name,
@@ -132,11 +158,13 @@ function ReplyComposer({
               onSent();
             }
           } else {
+            const threading = findEmailReplyTarget(items);
             const res = await sendEmail(householdId, {
               toName: name,
               toAddress: target.address,
               subject: subject || "Following up",
               body,
+              ...threading,
             });
             setMessage(res.message);
             if (!res.message.startsWith("Error")) {

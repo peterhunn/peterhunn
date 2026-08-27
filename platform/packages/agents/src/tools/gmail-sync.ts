@@ -52,6 +52,7 @@ export interface GmailSyncSink {
     externalProvider: "gmail";
     externalMessageId: string;
     externalThreadId?: string;
+    messageIdHeader?: string;
     direction?: "inbound" | "outbound";
     fromName: string;
     fromAddress: string;
@@ -185,6 +186,7 @@ const fetchAndParse = async (
   | {
       externalMessageId: string;
       externalThreadId: string | undefined;
+      messageIdHeader: string | undefined;
       fromName: string;
       fromAddress: string;
       toAddress: string | undefined;
@@ -214,6 +216,14 @@ const fetchAndParse = async (
   const toRaw = headerValue(headers, "To");
   const subject = headerValue(headers, "Subject") || "(no subject)";
   const dateHeader = headerValue(headers, "Date");
+  // Message-ID header comes wrapped in angle brackets by RFC 5322
+  // convention; strip them so downstream code can re-wrap when
+  // building an In-Reply-To / References header rather than
+  // handling both shapes.
+  const rawMessageId = headerValue(headers, "Message-ID") || headerValue(headers, "Message-Id");
+  const messageIdHeader = rawMessageId
+    ? rawMessageId.trim().replace(/^</, "").replace(/>$/, "") || undefined
+    : undefined;
   const { fromName, fromAddress } = parseFrom(fromRaw);
   // Multi-recipient To headers keep the first address only —
   // enough to route into a customer's per-person timeline.
@@ -228,6 +238,7 @@ const fetchAndParse = async (
   return {
     externalMessageId: id,
     externalThreadId: msg.threadId ?? undefined,
+    messageIdHeader,
     fromName,
     fromAddress,
     toAddress: firstTo || undefined,
@@ -326,6 +337,9 @@ export const syncGmailInbox = async (
           ...(parsed.externalThreadId
             ? { externalThreadId: parsed.externalThreadId }
             : {}),
+          ...(parsed.messageIdHeader
+            ? { messageIdHeader: parsed.messageIdHeader }
+            : {}),
           direction,
           fromName: parsed.fromName,
           fromAddress: parsed.fromAddress,
@@ -417,6 +431,9 @@ export const syncGmailInbox = async (
       externalProvider: "gmail",
       externalMessageId: parsed.externalMessageId,
       ...(parsed.externalThreadId ? { externalThreadId: parsed.externalThreadId } : {}),
+      ...(parsed.messageIdHeader
+        ? { messageIdHeader: parsed.messageIdHeader }
+        : {}),
       direction,
       fromName: parsed.fromName,
       fromAddress: parsed.fromAddress,

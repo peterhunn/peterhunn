@@ -649,7 +649,8 @@ export async function sendEmail(
     toAddress: string;
     subject: string;
     body: string;
-    inReplyToMessageId?: string;
+    inReplyToRef?: string;
+    threadId?: string;
   },
 ): Promise<{ message: string }> {
   const token = await getSessionToken();

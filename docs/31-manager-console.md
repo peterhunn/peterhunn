@@ -139,6 +139,19 @@ next SENT sync. Opted-out SMS numbers refuse composition
 locally; a household without a connected Gmail credential
 refuses email sends with a `gmail_not_connected` message.
 
+Email replies thread properly in both Gmail and non-Gmail
+recipients. The Gmail sync extracts the RFC 5322 `Message-ID`
+header (angle brackets stripped) and persists it on the
+`inbox_messages` row alongside Gmail's own `externalThreadId`.
+When the composer sends an email reply, it feeds the last
+inbound email's Message-ID as `inReplyToRef` (rendered on the
+wire as `In-Reply-To` + `References` headers so any MUA threads
+it) and the `externalThreadId` as `threadId` (so the Gmail send
+API places the reply in the same conversation server-side).
+Every outbound also gets a freshly generated Message-ID header
+persisted on its own row, so a customer replying downstream is
+threaded back to the outbound.
+
 ## Cross-household attention feed
 
 The `/dashboard` in the console is a manager-scoped view — approvals

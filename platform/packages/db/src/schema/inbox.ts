@@ -39,6 +39,14 @@ export const inboxMessages = sqliteTable(
     externalProvider: text("external_provider"),
     externalMessageId: text("external_message_id"),
     externalThreadId: text("external_thread_id"),
+    // RFC 5322 Message-ID header, angle brackets stripped. Distinct
+    // from externalMessageId (which is Gmail's internal opaque id):
+    // this is the id that actually goes on the wire and is what
+    // non-Gmail MUAs use to thread. Populated by the Gmail sync
+    // when it can read the header; used by outbound sends as the
+    // In-Reply-To / References target so replies thread even for
+    // recipients not on Gmail.
+    messageIdHeader: text("message_id_header"),
 
     status: text("status", {
       enum: ["received", "triaged", "replied", "archived", "spam"],

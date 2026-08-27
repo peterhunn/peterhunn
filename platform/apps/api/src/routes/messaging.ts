@@ -55,7 +55,13 @@ const SendEmailBody = z.object({
   toAddress: z.string().email(),
   subject: z.string().min(1).max(240),
   body: z.string().min(1).max(50_000),
-  inReplyToMessageId: z.string().optional(),
+  // RFC 5322 Message-ID of the message being replied to (angle
+  // brackets stripped). Feeds In-Reply-To + References headers so
+  // non-Gmail MUAs thread the reply.
+  inReplyToRef: z.string().optional(),
+  // Gmail thread id — makes Gmail place the reply in the same
+  // conversation server-side, complementing the RFC headers.
+  threadId: z.string().optional(),
 });
 
 const CreateVerificationBody = z.object({
@@ -858,9 +864,10 @@ export const messagingRoutes = (db: Db): FastifyPluginAsync => async (app) => {
         toAddress: parsed.data.toAddress,
         subject: parsed.data.subject,
         body: parsed.data.body,
-        ...(parsed.data.inReplyToMessageId
-          ? { inReplyToMessageId: parsed.data.inReplyToMessageId }
+        ...(parsed.data.inReplyToRef
+          ? { inReplyToRef: parsed.data.inReplyToRef }
           : {}),
+        ...(parsed.data.threadId ? { threadId: parsed.data.threadId } : {}),
         authoredBy: {
           type: req.actor.type === "manager" ? "manager" : "system",
           id: req.actor.id,
@@ -882,6 +889,9 @@ export const messagingRoutes = (db: Db): FastifyPluginAsync => async (app) => {
           provider: result.provider,
           sentMessageId: result.sentMessageId,
           ...(result.threadId ? { threadId: result.threadId } : {}),
+          ...(result.messageIdHeader
+            ? { messageIdHeader: result.messageIdHeader }
+            : {}),
           from: result.from,
           inboxMessageId: result.inboxMessageId,
         },

@@ -156,6 +156,7 @@ export const customerActivityRoutes = (db: Db): FastifyPluginAsync => async (app
             draftReply: m.draftReply,
             externalProvider: m.externalProvider,
             externalThreadId: m.externalThreadId,
+            messageIdHeader: m.messageIdHeader,
           },
         });
       }

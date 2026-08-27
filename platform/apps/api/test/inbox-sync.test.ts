@@ -97,6 +97,7 @@ describe("Gmail inbox sync API", () => {
               headers: [
                 { name: "From", value: '"Sam" <sam@example.com>' },
                 { name: "Subject", value: "Estimate" },
+                { name: "Message-ID", value: "<sam-original-msg-id@example.com>" },
               ],
               mimeType: "text/plain",
               body: { data: b64url("$1,850. Confirm by Friday.") },
@@ -128,12 +129,16 @@ describe("Gmail inbox sync API", () => {
       subject: string;
       body: string;
       fromAddress: string;
+      messageIdHeader: string | null;
     }> = inbox.json().messages;
     const synced = list.find((m) => m.externalMessageId === "gm_sync_1");
     expect(synced).toBeDefined();
     expect(synced!.subject).toBe("Estimate");
     expect(synced!.fromAddress).toBe("sam@example.com");
     expect(synced!.body).toContain("$1,850");
+    // Message-ID header extracted, angle brackets stripped — the
+    // form the composer feeds back into a reply's inReplyToRef.
+    expect(synced!.messageIdHeader).toBe("sam-original-msg-id@example.com");
 
     // Re-run: the incremental cursor now points at the historyId
     // recorded above. Empty history → dedupe → 0 inserted.

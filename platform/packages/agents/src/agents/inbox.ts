@@ -154,7 +154,7 @@ export const inboxAgent: Agent = {
         toAddress: msg.fromAddress,
         subject: msg.subject.startsWith("Re:") ? msg.subject : `Re: ${msg.subject}`,
         body: draftText,
-        inReplyToMessageId: msg.messageId,
+        inReplyToRef: msg.messageId,
       },
       {
         summary: `Draft reply to ${msg.fromName} — "${msg.subject}"`,
