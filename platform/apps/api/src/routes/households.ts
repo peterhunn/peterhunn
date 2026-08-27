@@ -59,4 +59,24 @@ export const householdRoutes = (db: Db): FastifyPluginAsync => async (app) => {
       return { household };
     },
   );
+
+  // Turn the concierge line's instant-ack SMS on or off for this
+  // household. Off by default — the ack is an agent-authored SMS
+  // going to the customer without manager review, which is a
+  // customer-facing agent surface. See messaging.ts handleInbound.
+  app.post<{ Params: { householdId: string }; Body: { enabled: boolean } }>(
+    "/households/:householdId/instant-ack",
+    {
+      config: {
+        audit: { action: "household.instant_ack.set", resourceType: "household" },
+      },
+    },
+    async (req, reply) => {
+      const body = z.object({ enabled: z.boolean() }).safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ error: "invalid_body" });
+      repo.setInstantAck(req.householdContext as HouseholdId, body.data.enabled);
+      const household = repo.get(req.householdContext as HouseholdId);
+      return { household };
+    },
+  );
 };

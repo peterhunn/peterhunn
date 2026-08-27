@@ -20,6 +20,7 @@ export interface HouseholdState extends Household {
   readonly frozenAt: string | undefined;
   readonly frozenReason: string | undefined;
   readonly autopilotEnabled: boolean;
+  readonly instantAckEnabled: boolean;
 }
 
 const toHousehold = (row: typeof households.$inferSelect): HouseholdState => ({
@@ -31,6 +32,10 @@ const toHousehold = (row: typeof households.$inferSelect): HouseholdState => ({
   frozenAt: row.frozenAt ?? undefined,
   frozenReason: row.frozenReason ?? undefined,
   autopilotEnabled: row.autopilotEnabled !== "no",
+  // Legacy rows written before the column existed default to "no"
+  // via the migration DEFAULT clause, matching the intent that the
+  // ack is opt-in per household.
+  instantAckEnabled: row.instantAckEnabled === "yes",
 });
 
 export const householdRepo = (db: Db) => ({
@@ -49,12 +54,20 @@ export const householdRepo = (db: Db) => ({
       frozenAt: null,
       frozenReason: null,
       autopilotEnabled: "yes",
+      instantAckEnabled: "no",
     });
   },
 
   setAutopilot(id: HouseholdId, enabled: boolean): void {
     db.update(households)
       .set({ autopilotEnabled: enabled ? "yes" : "no" })
+      .where(eq(households.id, id))
+      .run();
+  },
+
+  setInstantAck(id: HouseholdId, enabled: boolean): void {
+    db.update(households)
+      .set({ instantAckEnabled: enabled ? "yes" : "no" })
       .where(eq(households.id, id))
       .run();
   },

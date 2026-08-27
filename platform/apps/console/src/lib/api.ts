@@ -55,6 +55,7 @@ export interface Household {
   readonly frozenAt?: string;
   readonly frozenReason?: string;
   readonly autopilotEnabled?: boolean;
+  readonly instantAckEnabled?: boolean;
 }
 
 export interface NodeSummary {
@@ -659,6 +660,13 @@ export const api = (token: string) => ({
       token,
       "POST",
       `/households/${id}/autopilot`,
+      { enabled },
+    ),
+  setInstantAck: (id: HouseholdId, enabled: boolean) =>
+    request<{ household: { id: string; instantAckEnabled: boolean } }>(
+      token,
+      "POST",
+      `/households/${id}/instant-ack`,
       { enabled },
     ),
   listCredentials: (id: HouseholdId) =>

@@ -619,13 +619,24 @@ const handleInbound = async (
       sessionId: session.id,
       ...(priorTurns.length > 0 ? { priorTurns } : {}),
     });
+    // Instant-ack gate. The "Got it — I'm on this" reply is an
+    // agent-authored SMS going to the customer without manager
+    // review. Under the manager-mediated-only model, that's a
+    // customer-facing agent surface and defaults off; a household
+    // can opt in per-household (out-of-hours coverage, shared
+    // line where the customer expects a fast automated ack).
+    // STOP / START consent confirmations (returned above) and
+    // verification confirmations (returned below) are legally /
+    // transactionally required and are NOT gated by this flag.
+    const hh = households.get(ep.householdId as HouseholdId);
+    const emitAck = !prepared.deduped && hh?.instantAckEnabled === true;
     return {
       outcome: prepared.deduped ? "deduped" : "dispatched",
       householdId: ep.householdId as HouseholdId,
       eventId: prepared.eventId,
-      ...(prepared.deduped
-        ? {}
-        : { ackMessage: "Got it — I'm on this and will follow up." }),
+      ...(emitAck
+        ? { ackMessage: "Got it — I'm on this and will follow up." }
+        : {}),
       ...(prepared.runDispatch ? { runDispatch: prepared.runDispatch } : {}),
     };
   }
@@ -1029,7 +1040,12 @@ export const messagingRoutes = (db: Db): FastifyPluginAsync => async (app) => {
 
       let ackText: string | null = null;
       if (out.outcome === "dispatched") {
-        ackText = out.ackMessage ?? "Got it — I'm on this and will follow up.";
+        // Whether the instant ack fires is gated per-household in
+        // handleInbound (flag: households.instantAckEnabled). If
+        // handleInbound didn't emit an ackMessage, we don't
+        // synthesize one here — the TwiML response comes back
+        // empty and the customer sees no bot reply.
+        ackText = out.ackMessage ?? null;
       } else if (out.outcome === "verified") {
         ackText = out.ackMessage ?? "Verified.";
       } else if (out.outcome === "already_verified") {

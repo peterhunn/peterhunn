@@ -295,18 +295,42 @@ returns a `runDispatch()` function — it does NOT wait for the
 planner. Callers decide when to fire that function.
 
 - **Twilio webhook** ships the TwiML ack ("Got it — I'm on
-  this…") immediately, then `void runDispatch()` in the
-  background. A 20-second planner call no longer turns into
-  20 seconds of "waiting for reply" on the customer's phone.
+  this…") immediately if the household opts in (see the flag
+  below), then `void runDispatch()` in the background. A
+  20-second planner call no longer turns into 20 seconds of
+  "waiting for reply" on the customer's phone.
 - **Mock webhook** awaits `runDispatch` before returning so
   tests (and interactive dev inspection) see the completed
   planner run in the response.
 
 Same code path, different await behaviour — the divergence is
-documented in `apps/api/src/routes/messaging.ts`. When the ack
-text depends on the outcome (STOP / START confirmations,
-verified onboarding), the ack still comes from `handleInbound`'s
-result — the async part is only the planner call.
+documented in `apps/api/src/routes/messaging.ts`.
+
+### The ack is a customer-facing agent surface — opt-in
+
+The "Got it, will follow up" ack is agent-authored SMS going to
+the customer without manager review. Under the manager-mediated
+model — agents help managers, never the customer directly — that
+is a violation of the default posture. So the ack is gated
+per-household by `households.instantAckEnabled` (migration
+0011), which defaults to **off**. `POST /households/:id/
+instant-ack` toggles it (`{ enabled: true | false }`), and the
+console renders an `InstantAckToggle` next to the autopilot
+switch with a short explainer. Recommended default is off: keep
+every customer-facing message manager-written; a household with
+a shared line or out-of-hours coverage where the customer
+expects an automated confirmation can opt in per-household.
+
+Legally / transactionally required confirmations are NOT gated
+by this flag and always fire regardless:
+
+- **STOP / START consent confirmations** — TCPA-required.
+- **Verification confirmations** — customer completed a binding
+  step (verification code) and expects immediate feedback.
+
+Same message the ack came from (`handleInbound`'s `ackMessage`
+field); the flag only decides whether to include one for the
+`dispatched` outcome.
 
 ## MMS attachments
 

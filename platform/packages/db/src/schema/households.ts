@@ -18,6 +18,18 @@ export const households = sqliteTable("households", {
   autopilotEnabled: text("autopilot_enabled", { enum: ["yes", "no"] })
     .notNull()
     .default("yes"),
+  // When true, the concierge line's inbound handler emits an
+  // instant "Got it, I'll follow up" reply to the customer before
+  // the manager reviews. That reply is agent-authored and goes to
+  // the customer without human approval — a violation of the
+  // manager-mediated-only model, so it defaults off. A household
+  // whose customer expects a fast automated ack (a shared line,
+  // out-of-hours coverage) can turn it on per household. STOP /
+  // START consent confirmations and verification confirmations
+  // are legally / transactionally required and remain unconditional.
+  instantAckEnabled: text("instant_ack_enabled", { enum: ["yes", "no"] })
+    .notNull()
+    .default("no"),
 });
 
 export type HouseholdRow = typeof households.$inferSelect;

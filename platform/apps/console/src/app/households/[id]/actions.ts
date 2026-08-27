@@ -718,6 +718,25 @@ export async function setAutopilot(
   }
 }
 
+export async function setInstantAck(
+  householdId: HouseholdId,
+  enabled: boolean,
+): Promise<{ message: string }> {
+  const token = await getSessionToken();
+  if (!token) return { message: "Session expired." };
+  try {
+    await api(token).setInstantAck(householdId, enabled);
+    return {
+      message: enabled
+        ? "Instant ack enabled — customer receives an automated confirmation SMS on inbound."
+        : "Instant ack off — no automated reply to customer.",
+    };
+  } catch (err) {
+    if (err instanceof ApiError) return { message: `Error: ${err.message}` };
+    return { message: `Error: ${(err as Error).message}` };
+  }
+}
+
 export async function planAndRun(
   householdId: HouseholdId,
   prompt: string,

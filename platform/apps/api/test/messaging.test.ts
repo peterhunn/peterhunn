@@ -35,6 +35,11 @@ beforeAll(async () => {
   const household = householdRepo(db).create({ name: "H", tier: "life" });
   hh = household.id;
   identity.grantHousehold({ managerId: m.id, householdId: hh, role: "primary" });
+  // Legacy assumption for this file's tests: the concierge line
+  // fires an instant ack. Opt this household in explicitly so the
+  // ack shape assertions below stay stable. The default (off) is
+  // exercised separately in messaging-instant-ack.test.ts.
+  householdRepo(db).setInstantAck(hh, true);
   contactEndpointRepo(db).create({
     householdId: hh,
     channel: "sms",
