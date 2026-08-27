@@ -7,6 +7,11 @@ import { households } from "./households.js";
 // extracted from a message land in the graph as candidates; pointers
 // back to the message live via the message id in an extracted node's
 // sourceRef.
+//
+// Despite the name, this table holds email in BOTH directions. The
+// `direction` column was added when we started syncing the SENT
+// label to fill in the outbound half of a customer's timeline; the
+// table's kept its name to avoid renaming through every downstream.
 export const inboxMessages = sqliteTable(
   "inbox_messages",
   {
@@ -17,6 +22,15 @@ export const inboxMessages = sqliteTable(
 
     fromName: text("from_name").notNull(),
     fromAddress: text("from_address").notNull(),
+    // Outbound-only. Inbound rows leave this null — the recipient
+    // there is the household's own Gmail account, not a fact the
+    // manager needs to see on every row.
+    toAddress: text("to_address"),
+    // Which way the mail is flowing relative to the household. Legacy
+    // rows written before this column existed default to 'inbound'.
+    direction: text("direction", { enum: ["inbound", "outbound"] })
+      .notNull()
+      .default("inbound"),
     recipientPrincipalId: text("recipient_principal_id"),
     subject: text("subject").notNull(),
     body: text("body").notNull(),

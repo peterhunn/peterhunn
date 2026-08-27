@@ -110,6 +110,21 @@ beforeAll(async () => {
     body: "8pm works. Where should we meet?",
     receivedAt: iso(-45 * 60 * 1000),
   });
+  // Outbound email sent TO Alex (from the household's Gmail
+  // account) — matched by toAddress against Alex's email endpoint.
+  // This mirrors what a `mailbox: "sent"` sync would insert.
+  inbox.upsertExternal({
+    householdId: hh,
+    externalProvider: "gmail",
+    externalMessageId: "gm_alex_sent_1",
+    direction: "outbound",
+    fromName: "Household",
+    fromAddress: "household@atelier.example",
+    toAddress: "alex@example.com",
+    subject: "Re: dinner Friday",
+    body: "Sounds great — see you at the wine bar on 5th.",
+    receivedAt: iso(-15 * 60 * 1000),
+  });
   // Vendor email — no endpoint match, no recipientPrincipalId. Must
   // not show on any principal's feed.
   inbox.upsertExternal({
@@ -168,11 +183,10 @@ describe("GET /households/:id/customers/:principalId/activity", () => {
     expect(body.endpoints.some((e) => e.channel === "sms")).toBe(true);
     expect(body.endpoints.some((e) => e.channel === "email")).toBe(true);
 
-    // Counts: 2 SMS + 2 email = 4 total. Bob's SMS, vendor email are
-    // excluded.
+    // Counts: 2 SMS + 3 email (1 outbound + 2 inbound) = 5.
     expect(body.counts.sms).toBe(2);
-    expect(body.counts.email).toBe(2);
-    expect(body.items).toHaveLength(4);
+    expect(body.counts.email).toBe(3);
+    expect(body.items).toHaveLength(5);
     for (const item of body.items) {
       expect(["sms", "email"]).toContain(item.source);
     }
@@ -181,15 +195,22 @@ describe("GET /households/:id/customers/:principalId/activity", () => {
     for (let i = 1; i < body.items.length; i++) {
       expect(body.items[i - 1]!.at >= body.items[i]!.at).toBe(true);
     }
-    // The most recent item is the -45m email match (fromAddress).
+    // The most recent item is the -15m outbound email (SENT-sync
+    // path), matched via toAddress = Alex's email.
     expect(body.items[0]!.source).toBe("email");
-    expect(body.items[0]!.refKind).toBe("inbox_message");
-    expect(body.items[0]!.body).toContain("8pm");
+    expect(body.items[0]!.direction).toBe("outbound");
+    expect(body.items[0]!.body).toContain("wine bar");
 
-    // Second — Alex's outbound SMS from -1h.
-    expect(body.items[1]!.source).toBe("sms");
-    expect(body.items[1]!.direction).toBe("outbound");
-    expect(body.items[1]!.body).toContain("Thursday");
+    // Second — the -45m inbound email match (fromAddress).
+    expect(body.items[1]!.source).toBe("email");
+    expect(body.items[1]!.direction).toBe("inbound");
+    expect(body.items[1]!.refKind).toBe("inbox_message");
+    expect(body.items[1]!.body).toContain("8pm");
+
+    // Third — Alex's outbound SMS from -1h.
+    expect(body.items[2]!.source).toBe("sms");
+    expect(body.items[2]!.direction).toBe("outbound");
+    expect(body.items[2]!.body).toContain("Thursday");
 
     // Manager-created inbox with recipientPrincipalId=Alex is also
     // included (matched by the principalId path, no endpoint needed).

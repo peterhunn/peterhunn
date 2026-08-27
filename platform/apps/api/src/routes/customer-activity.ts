@@ -113,27 +113,38 @@ export const customerActivityRoutes = (db: Db): FastifyPluginAsync => async (app
         });
       }
 
-      // Email from inbox_messages. Match by recipientPrincipalId (the
-      // manager-created path) OR by fromAddress matching one of the
-      // principal's registered email endpoints.
+      // Email from inbox_messages. Match rules by direction:
+      //   * inbound rows (direction='inbound') — the sender is
+      //     the customer, so match by fromAddress against their
+      //     endpoint list. `recipientPrincipalId` covers the
+      //     manager-created path where the endpoint join isn't
+      //     available.
+      //   * outbound rows (direction='outbound') — the sender is
+      //     the household's own Gmail account, so match by
+      //     toAddress against the customer's endpoint list.
       for (const m of inbox.list(householdId, 500)) {
         const fromNormalized = normalizeAddress("email", m.fromAddress);
-        const matches =
-          m.recipientPrincipalId === principalId ||
-          emailAddresses.has(fromNormalized);
-        if (!matches) continue;
+        const toNormalized = m.toAddress
+          ? normalizeAddress("email", m.toAddress)
+          : null;
+        const matchesInbound =
+          m.direction === "inbound" &&
+          (m.recipientPrincipalId === principalId ||
+            emailAddresses.has(fromNormalized));
+        const matchesOutbound =
+          m.direction === "outbound" &&
+          toNormalized !== null &&
+          emailAddresses.has(toNormalized);
+        if (!matchesInbound && !matchesOutbound) continue;
         const summary = m.subject || (m.body.length > 80 ? `${m.body.slice(0, 80)}…` : m.body);
         items.push({
           source: "email",
-          // inbox_messages is inbound-only today; the outbound side
-          // lives in Gmail itself. When we add a sent-mail sync, an
-          // outbound direction here follows the same shape.
-          direction: "inbound",
+          direction: m.direction,
           at: m.receivedAt,
           summary,
           body: m.body,
           from: m.fromAddress,
-          to: emailAddresses.values().next().value ?? "",
+          to: m.toAddress ?? (emailAddresses.values().next().value ?? ""),
           endpointId: null,
           refId: m.id,
           refKind: "inbox_message",

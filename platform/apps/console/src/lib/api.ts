@@ -277,20 +277,37 @@ export const api = (token: string) => ({
     }>(token, "GET", `/households/${id}/inference-budget`),
   listInbox: (id: HouseholdId) =>
     request<{ messages: InboxMessageSummary[] }>(token, "GET", `/households/${id}/inbox`),
-  syncGmailInbox: (id: HouseholdId, maxResults?: number) =>
-    request<{
-      sync: {
-        consulted: boolean;
-        listed: number;
-        fetched: number;
-        inserted: number;
-        skippedDuplicates: number;
-      };
-    }>(
+  syncGmailInbox: (
+    id: HouseholdId,
+    opts?: { maxResults?: number; mailbox?: "inbox" | "sent" | "both" },
+  ) =>
+    request<
+      | {
+          sync: {
+            consulted: boolean;
+            listed: number;
+            fetched: number;
+            inserted: number;
+            skippedDuplicates: number;
+          };
+        }
+      | {
+          mailboxes: Array<{
+            mailbox: "inbox" | "sent";
+            result: {
+              consulted: boolean;
+              listed: number;
+              fetched: number;
+              inserted: number;
+              skippedDuplicates: number;
+            };
+          }>;
+        }
+    >(
       token,
       "POST",
       `/households/${id}/inbox/sync`,
-      maxResults !== undefined ? { maxResults } : {},
+      opts ?? {},
     ),
   listMessagingEndpoints: (id: HouseholdId) =>
     request<{
@@ -664,6 +681,8 @@ export interface InboxMessageSummary {
   readonly id: string;
   readonly fromName: string;
   readonly fromAddress: string;
+  readonly toAddress: string | null;
+  readonly direction: "inbound" | "outbound";
   readonly subject: string;
   readonly body: string;
   readonly receivedAt: string;

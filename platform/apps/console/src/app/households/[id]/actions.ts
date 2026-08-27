@@ -111,7 +111,23 @@ export async function syncGmail(
   const token = await getSessionToken();
   if (!token) return { message: "Session expired." };
   try {
-    const res = await api(token).syncGmailInbox(householdId);
+    // Pull both mailboxes in one action so the unified per-customer
+    // timeline picks up both halves of a conversation. Backend
+    // fires two syncs back-to-back with independent cursors.
+    const res = await api(token).syncGmailInbox(householdId, {
+      mailbox: "both",
+    });
+    if ("mailboxes" in res) {
+      const parts = res.mailboxes
+        .map(
+          (m) =>
+            `${m.mailbox}: ${m.result.inserted} new / ${m.result.skippedDuplicates} seen`,
+        )
+        .join(" · ");
+      return { message: `Synced Gmail — ${parts}.` };
+    }
+    // Server ran in single-mailbox mode (shouldn't happen while we
+    // ask for "both", but the union type lets us stay safe).
     const s = res.sync;
     return {
       message: `Synced Gmail — listed ${s.listed}, fetched ${s.fetched}, ${

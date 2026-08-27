@@ -64,6 +64,13 @@
       "when": 1787830000000,
       "tag": "0008_approvals_origin",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1787840000000,
+      "tag": "0009_inbox_direction",
+      "breakpoints": true
     }
   ]
 }

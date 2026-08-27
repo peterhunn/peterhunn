@@ -20,7 +20,31 @@ import type { StoredCredential } from "../types.js";
 // Google OAuth helper as the message.send path so token refresh +
 // persistence work identically.
 
-const LIST_QUERY = "is:unread label:INBOX";
+// Which mailbox we're pulling from. Two flavors today:
+//   inbox — unread INBOX; the classic "new mail to triage" path.
+//   sent — recent SENT; used to fill in the customer's outbound
+//     half of the per-person timeline. Only fetching the last 100
+//     by default; the sent side is context, not a work queue.
+export type GmailMailbox = "inbox" | "sent";
+
+const LIST_QUERY: Record<GmailMailbox, string> = {
+  inbox: "is:unread label:INBOX",
+  sent: "in:sent",
+};
+
+const INCREMENTAL_LABEL: Record<GmailMailbox, string> = {
+  inbox: "INBOX",
+  sent: "SENT",
+};
+
+// Cursor label per mailbox — inbox and sent each get their own
+// history cursor. Keeping the on-disk key stable ("gmail" for
+// inbox) means the incremental cursor from the pre-mailbox world
+// still resumes correctly; the sent side gets a fresh key.
+const CURSOR_PROVIDER: Record<GmailMailbox, "gmail" | "gmail_sent"> = {
+  inbox: "gmail",
+  sent: "gmail_sent",
+};
 
 export interface GmailSyncSink {
   upsertMessage(input: {
@@ -28,8 +52,10 @@ export interface GmailSyncSink {
     externalProvider: "gmail";
     externalMessageId: string;
     externalThreadId?: string;
+    direction?: "inbound" | "outbound";
     fromName: string;
     fromAddress: string;
+    toAddress?: string;
     subject: string;
     body: string;
     receivedAt: string;
@@ -37,14 +63,17 @@ export interface GmailSyncSink {
 }
 
 export interface GmailSyncCursor {
-  read(householdId: HouseholdId, provider: "gmail"): { historyId?: string } | null;
+  read(
+    householdId: HouseholdId,
+    provider: "gmail" | "gmail_sent",
+  ): { historyId?: string } | null;
   save(
     householdId: HouseholdId,
-    provider: "gmail",
+    provider: "gmail" | "gmail_sent",
     cursor: { historyId: string },
     lastResult?: unknown,
   ): void;
-  clear(householdId: HouseholdId, provider: "gmail"): void;
+  clear(householdId: HouseholdId, provider: "gmail" | "gmail_sent"): void;
 }
 
 export interface GmailSyncContext {
@@ -158,6 +187,7 @@ const fetchAndParse = async (
       externalThreadId: string | undefined;
       fromName: string;
       fromAddress: string;
+      toAddress: string | undefined;
       subject: string;
       body: string;
       receivedAt: string;
@@ -181,9 +211,14 @@ const fetchAndParse = async (
   }
   const headers = msg.payload?.headers ?? [];
   const fromRaw = headerValue(headers, "From");
+  const toRaw = headerValue(headers, "To");
   const subject = headerValue(headers, "Subject") || "(no subject)";
   const dateHeader = headerValue(headers, "Date");
   const { fromName, fromAddress } = parseFrom(fromRaw);
+  // Multi-recipient To headers keep the first address only —
+  // enough to route into a customer's per-person timeline.
+  // Cc / Bcc live on the raw message if a downstream needs them.
+  const firstTo = toRaw ? parseFrom(toRaw.split(",")[0] ?? "").fromAddress : "";
   const body = extractBody(msg.payload ?? undefined);
   const receivedAt = msg.internalDate
     ? new Date(Number(msg.internalDate)).toISOString()
@@ -195,6 +230,7 @@ const fetchAndParse = async (
     externalThreadId: msg.threadId ?? undefined,
     fromName,
     fromAddress,
+    toAddress: firstTo || undefined,
     subject,
     body,
     receivedAt,
@@ -205,8 +241,20 @@ const fetchAndParse = async (
 export const syncGmailInbox = async (
   ctx: GmailSyncContext,
   sink: GmailSyncSink,
-  opts: { maxResults?: number; cursorStore?: GmailSyncCursor } = {},
+  opts: {
+    maxResults?: number;
+    cursorStore?: GmailSyncCursor;
+    mailbox?: GmailMailbox;
+  } = {},
 ): Promise<GmailSyncResult> => {
+  const mailbox: GmailMailbox = opts.mailbox ?? "inbox";
+  const listQuery = LIST_QUERY[mailbox];
+  const incrementalLabel = INCREMENTAL_LABEL[mailbox];
+  const cursorProvider = CURSOR_PROVIDER[mailbox];
+  // Sent-mail messages are inserted as outbound so the console can
+  // interleave them alongside inbound in the customer timeline.
+  const direction: "inbound" | "outbound" =
+    mailbox === "sent" ? "outbound" : "inbound";
   const auth = await readGoogleAuth<GoogleOAuthFields>(
     { ...ctx, authorityId: undefined, proposedBy: { actor: "gmail_sync", version: "0.1.0" } },
     "gmail",
@@ -224,7 +272,7 @@ export const syncGmailInbox = async (
 
   const gmail = gmailApi.gmail({ version: "v1", auth: auth.client });
   const cursorStore = opts.cursorStore;
-  const existingCursor = cursorStore?.read(ctx.householdId, "gmail") ?? null;
+  const existingCursor = cursorStore?.read(ctx.householdId, cursorProvider) ?? null;
 
   // ── Incremental path: history API ────────────────────────────
   if (cursorStore && existingCursor?.historyId) {
@@ -233,7 +281,7 @@ export const syncGmailInbox = async (
         userId: "me",
         startHistoryId: existingCursor.historyId,
         historyTypes: ["messageAdded"],
-        labelId: "INBOX",
+        labelId: incrementalLabel,
       });
       const json = historyRes.data;
       const addedIds = new Set<string>();
@@ -241,15 +289,15 @@ export const syncGmailInbox = async (
         for (const ma of h.messagesAdded ?? []) {
           const id = ma.message?.id;
           const labels = ma.message?.labelIds ?? [];
-          if (id && labels.includes("INBOX")) addedIds.add(id);
+          if (id && labels.includes(incrementalLabel)) addedIds.add(id);
         }
       }
       if (addedIds.size === 0) {
         cursorStore.save(
           ctx.householdId,
-          "gmail",
+          cursorProvider,
           { historyId: json.historyId ?? existingCursor.historyId },
-          { at: new Date().toISOString(), mode: "up_to_date" },
+          { at: new Date().toISOString(), mode: "up_to_date", mailbox },
         );
         return {
           consulted: true,
@@ -278,8 +326,10 @@ export const syncGmailInbox = async (
           ...(parsed.externalThreadId
             ? { externalThreadId: parsed.externalThreadId }
             : {}),
+          direction,
           fromName: parsed.fromName,
           fromAddress: parsed.fromAddress,
+          ...(parsed.toAddress ? { toAddress: parsed.toAddress } : {}),
           subject: parsed.subject,
           body: parsed.body,
           receivedAt: parsed.receivedAt,
@@ -290,9 +340,9 @@ export const syncGmailInbox = async (
       if (newHistoryId) {
         cursorStore.save(
           ctx.householdId,
-          "gmail",
+          cursorProvider,
           { historyId: newHistoryId },
-          { at: new Date().toISOString(), mode: "incremental", inserted },
+          { at: new Date().toISOString(), mode: "incremental", inserted, mailbox },
         );
       }
       return {
@@ -308,9 +358,10 @@ export const syncGmailInbox = async (
       const status = gmailErrCode(err);
       if (status === 404) {
         // Cursor too old — wipe and fall through to the full path.
-        cursorStore.clear(ctx.householdId, "gmail");
+        cursorStore.clear(ctx.householdId, cursorProvider);
         ctx.logger?.info("gmail history cursor expired; resetting to full sync", {
           oldHistoryId: existingCursor.historyId,
+          mailbox,
         });
       } else {
         return {
@@ -332,7 +383,7 @@ export const syncGmailInbox = async (
   try {
     const listRes = await gmail.users.messages.list({
       userId: "me",
-      q: LIST_QUERY,
+      q: listQuery,
       maxResults,
     });
     listJson = listRes.data;
@@ -366,8 +417,10 @@ export const syncGmailInbox = async (
       externalProvider: "gmail",
       externalMessageId: parsed.externalMessageId,
       ...(parsed.externalThreadId ? { externalThreadId: parsed.externalThreadId } : {}),
+      direction,
       fromName: parsed.fromName,
       fromAddress: parsed.fromAddress,
+      ...(parsed.toAddress ? { toAddress: parsed.toAddress } : {}),
       subject: parsed.subject,
       body: parsed.body,
       receivedAt: parsed.receivedAt,
@@ -379,13 +432,19 @@ export const syncGmailInbox = async (
   if (cursorStore && newHistoryId) {
     cursorStore.save(
       ctx.householdId,
-      "gmail",
+      cursorProvider,
       { historyId: newHistoryId },
-      { at: new Date().toISOString(), mode: existingCursor ? "cursor_reset" : "full", inserted },
+      {
+        at: new Date().toISOString(),
+        mode: existingCursor ? "cursor_reset" : "full",
+        inserted,
+        mailbox,
+      },
     );
   }
 
   ctx.logger?.info("gmail sync completed", {
+    mailbox,
     mode: existingCursor ? "cursor_reset" : "full",
     listed: ids.length,
     fetched,

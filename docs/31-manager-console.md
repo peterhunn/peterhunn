@@ -113,6 +113,19 @@ renders one collapsible per person that lazy-loads on expand.
 Downstream approvals are already consolidated in one table with
 `origin` telling the manager which channel drove them.
 
+Both halves of an email conversation land in the same store:
+`inbox_messages` carries a `direction` column (inbound / outbound)
+and a `toAddress`, and the Gmail sync pulls the INBOX label into
+inbound rows and the SENT label into outbound rows via a `mailbox`
+option on the sync call (`mailbox: "inbox" | "sent" | "both"`,
+default inbox). Each mailbox owns its own history cursor
+(`provider=gmail` for INBOX, `provider=gmail_sent` for SENT) so
+their incremental deltas never crosstalk. The per-customer
+timeline matches inbound rows by fromAddress against the
+customer's email endpoints and outbound rows by toAddress — the
+household's own Gmail is the sender on outbound, so
+fromAddress matching would find nothing there.
+
 ## Cross-household attention feed
 
 The `/dashboard` in the console is a manager-scoped view — approvals

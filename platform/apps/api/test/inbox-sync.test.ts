@@ -152,4 +152,100 @@ describe("Gmail inbox sync API", () => {
     const secondResult = second.json().sync;
     expect(secondResult.inserted).toBe(0);
   });
+
+  it("syncs the SENT mailbox with mailbox='sent', persists to_address + direction=outbound", async () => {
+    // Same credential + household already stored above. SENT sync
+    // stores its own history cursor under provider=gmail_sent, so
+    // the mock only needs to answer the "full pull" path.
+    server.use(
+      http.get(
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+        () =>
+          HttpResponse.json({
+            messages: [{ id: "gm_sent_1" }],
+            resultSizeEstimate: 1,
+          }),
+      ),
+      http.get(
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages/gm_sent_1",
+        () =>
+          HttpResponse.json({
+            id: "gm_sent_1",
+            threadId: "t_sent_1",
+            internalDate: String(Date.UTC(2026, 8, 2, 10, 0, 0)),
+            labelIds: ["SENT"],
+            payload: {
+              headers: [
+                { name: "From", value: '"Household" <household@atelier.example>' },
+                { name: "To", value: '"Sam" <sam@example.com>' },
+                { name: "Subject", value: "Re: Estimate" },
+              ],
+              mimeType: "text/plain",
+              body: { data: b64url("Thanks Sam — will confirm today.") },
+            },
+          }),
+      ),
+    );
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/households/${hh}/inbox/sync`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { mailbox: "sent" },
+    });
+    expect(res.statusCode).toBe(200);
+    const sync = res.json().sync;
+    expect(sync.listed).toBe(1);
+    expect(sync.inserted).toBe(1);
+
+    // The sent row lands in inbox_messages with direction=outbound
+    // and toAddress populated. The inbox listing returns both.
+    const list = await app.inject({
+      method: "GET",
+      url: `/households/${hh}/inbox`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const messages: Array<{
+      externalMessageId: string | null;
+      direction: string;
+      fromAddress: string;
+      toAddress: string | null;
+      subject: string;
+    }> = list.json().messages;
+    const sent = messages.find((m) => m.externalMessageId === "gm_sent_1");
+    expect(sent).toBeDefined();
+    expect(sent!.direction).toBe("outbound");
+    expect(sent!.fromAddress).toBe("household@atelier.example");
+    expect(sent!.toAddress).toBe("sam@example.com");
+  });
+
+  it("mailbox='both' runs inbox + sent back to back and returns per-mailbox results", async () => {
+    // Fresh household — otherwise the earlier tests' history
+    // cursors would flip the mode to incremental.
+    server.use(
+      http.get(
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+        () =>
+          HttpResponse.json({ messages: [], resultSizeEstimate: 0 }),
+      ),
+    );
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/households/${hh}/inbox/sync`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { mailbox: "both" },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as {
+      mailboxes: Array<{
+        mailbox: "inbox" | "sent";
+        result: { mode: string; consulted: boolean };
+      }>;
+    };
+    expect(body.mailboxes.map((m) => m.mailbox)).toEqual(["inbox", "sent"]);
+    for (const m of body.mailboxes) {
+      expect(m.result.consulted).toBe(true);
+    }
+  });
 });

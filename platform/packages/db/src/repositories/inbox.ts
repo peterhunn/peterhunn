@@ -9,8 +9,10 @@ export interface UpsertExternalInboxInput {
   readonly externalProvider: "gmail";
   readonly externalMessageId: string;
   readonly externalThreadId?: string;
+  readonly direction?: "inbound" | "outbound";
   readonly fromName: string;
   readonly fromAddress: string;
+  readonly toAddress?: string;
   readonly subject: string;
   readonly body: string;
   readonly receivedAt: string;
@@ -129,6 +131,8 @@ export const inboxRepo = (db: Db) => ({
         householdId: input.householdId,
         fromName: input.fromName,
         fromAddress: input.fromAddress,
+        toAddress: input.toAddress ?? null,
+        direction: input.direction ?? "inbound",
         recipientPrincipalId: null,
         subject: input.subject,
         body: input.body,

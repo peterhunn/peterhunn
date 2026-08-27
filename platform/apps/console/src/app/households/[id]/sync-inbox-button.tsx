@@ -24,7 +24,7 @@ export function SyncInboxButton({
         disabled={pending || !gmailConnected}
         title={
           gmailConnected
-            ? "Pull unread INBOX messages from Gmail"
+            ? "Pull unread INBOX + recent SENT from Gmail"
             : "Connect Google first"
         }
         onClick={() => {
