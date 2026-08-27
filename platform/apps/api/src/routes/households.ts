@@ -79,4 +79,31 @@ export const householdRoutes = (db: Db): FastifyPluginAsync => async (app) => {
       return { household };
     },
   );
+
+  // Turn agent-authored sends on or off for this household. Off
+  // by default. When off, sendOutboundMessage refuses any send
+  // whose authoredBy.type === "agent" (and the orchestrator
+  // refuses auto-execute of any communication-class tool). See
+  // docs/32-customer-messaging.md §"Manager-mediated-only".
+  app.post<{ Params: { householdId: string }; Body: { enabled: boolean } }>(
+    "/households/:householdId/agent-sending",
+    {
+      config: {
+        audit: {
+          action: "household.agent_sending.set",
+          resourceType: "household",
+        },
+      },
+    },
+    async (req, reply) => {
+      const body = z.object({ enabled: z.boolean() }).safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ error: "invalid_body" });
+      repo.setAgentSending(
+        req.householdContext as HouseholdId,
+        body.data.enabled,
+      );
+      const household = repo.get(req.householdContext as HouseholdId);
+      return { household };
+    },
+  );
 };

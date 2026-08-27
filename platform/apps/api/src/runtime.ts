@@ -202,6 +202,17 @@ export const buildOrchestrator = (db: Db): Orchestrator => {
             refusedFor: "opted_out",
           };
         }
+        if (out.refused === "agent_sending_disabled") {
+          return {
+            provider: "mock",
+            externalMessageId: "refused-agent-disabled",
+            from: "",
+            to: input.to,
+            eventId: "",
+            reason: out.refusedReason ?? "agent_sending_disabled",
+            refusedFor: "agent_sending_disabled",
+          };
+        }
         return {
           provider: out.provider!,
           externalMessageId: out.externalMessageId!,
@@ -212,6 +223,10 @@ export const buildOrchestrator = (db: Db): Orchestrator => {
           ...(out.reason ? { reason: out.reason } : {}),
         };
       },
+    },
+    householdAllowsAgentSending: (id) => {
+      const hh = households.get(id);
+      return hh?.agentSendingEnabled === true;
     },
     models: {
       callModel: async (

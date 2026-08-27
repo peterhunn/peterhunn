@@ -27,7 +27,7 @@ export interface SmsSendOutputs {
   readonly provider: "twilio" | "mock";
   readonly to: string;
   readonly from: string;
-  readonly refused?: "opted_out";
+  readonly refused?: "opted_out" | "agent_sending_disabled";
 }
 
 export const smsSendTool: Tool<SmsSendInputs, SmsSendOutputs> = {
@@ -76,6 +76,20 @@ export const smsSendTool: Tool<SmsSendInputs, SmsSendOutputs> = {
         },
         outcome: "failed_permanent",
         summary: `Refused to send ${inputs.channel} to ${inputs.to} — recipient opted out.`,
+      };
+    }
+    if (out.refusedFor === "agent_sending_disabled") {
+      return {
+        outputs: {
+          sentMessageId: out.externalMessageId,
+          sentAt: new Date().toISOString(),
+          provider: out.provider,
+          to: inputs.to,
+          from: out.from,
+          refused: "agent_sending_disabled",
+        },
+        outcome: "failed_permanent",
+        summary: `Refused to send ${inputs.channel} to ${inputs.to} — household has agent-authored sends disabled.`,
       };
     }
 

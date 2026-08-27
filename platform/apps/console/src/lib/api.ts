@@ -56,6 +56,7 @@ export interface Household {
   readonly frozenReason?: string;
   readonly autopilotEnabled?: boolean;
   readonly instantAckEnabled?: boolean;
+  readonly agentSendingEnabled?: boolean;
 }
 
 export interface NodeSummary {
@@ -667,6 +668,13 @@ export const api = (token: string) => ({
       token,
       "POST",
       `/households/${id}/instant-ack`,
+      { enabled },
+    ),
+  setAgentSending: (id: HouseholdId, enabled: boolean) =>
+    request<{ household: { id: string; agentSendingEnabled: boolean } }>(
+      token,
+      "POST",
+      `/households/${id}/agent-sending`,
       { enabled },
     ),
   listCredentials: (id: HouseholdId) =>

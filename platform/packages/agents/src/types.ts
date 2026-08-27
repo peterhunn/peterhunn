@@ -80,7 +80,7 @@ export interface ToolContext {
     readonly eventId: string;
     readonly status?: string;
     readonly reason?: string;
-    readonly refusedFor?: "opted_out";
+    readonly refusedFor?: "opted_out" | "agent_sending_disabled";
   }>;
   readonly logger?: { info: (msg: string, ctx?: unknown) => void };
 }

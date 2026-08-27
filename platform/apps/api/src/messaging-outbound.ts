@@ -2,6 +2,7 @@ import {
   contactEndpointRepo,
   conversationSessionRepo,
   credentialRepo,
+  householdRepo,
   inboxRepo,
   messagingEventRepo,
   type Db,
@@ -106,7 +107,7 @@ const conciergeStatusCallback = (): string | undefined => {
 };
 
 export interface SendOutboundResult {
-  readonly refused?: "opted_out";
+  readonly refused?: "opted_out" | "agent_sending_disabled";
   readonly refusedReason?: string;
   readonly provider?: "twilio" | "mock";
   readonly externalMessageId?: string;
@@ -119,9 +120,9 @@ export interface SendOutboundResult {
 
 // Send an outbound message on behalf of a household. The one
 // place agent-authored and manager-authored sends converge.
-// Applies the consent gate; refused sends return
-// { refused: "opted_out", ... } with no messaging_event
-// recorded and no Twilio API call made.
+// Applies the consent gate + the manager-mediated-only gate;
+// refused sends return { refused: <reason>, ... } with no
+// messaging_event recorded and no Twilio API call made.
 export const sendOutboundMessage = async (
   db: Db,
   input: SendOutboundInput,
@@ -129,6 +130,35 @@ export const sendOutboundMessage = async (
   const endpoints = contactEndpointRepo(db);
   const events = messagingEventRepo(db);
   const sessions = conversationSessionRepo(db);
+  const households = householdRepo(db);
+
+  // Manager-mediated-only gate. Agent-authored sends need the
+  // household to have explicitly opted in — even when the policy
+  // engine allowed the tool call. This is defense in depth
+  // catching (a) policy misconfigs that grant execute on
+  // communication actions, (b) code paths that bypass the policy
+  // engine, and (c) future tools that forget to route through
+  // approvals. Manager-authored and system-authored sends
+  // (verification confirmations, STOP acks) are never gated.
+  if (input.authoredBy?.type === "agent") {
+    const hh = households.get(input.householdId);
+    if (!hh?.agentSendingEnabled) {
+      input.logger?.info(
+        "outbound refused: agent-authored send blocked by household policy",
+        {
+          householdId: input.householdId,
+          channel: input.channel,
+          to: input.to,
+          authoredBy: input.authoredBy,
+        },
+      );
+      return {
+        refused: "agent_sending_disabled",
+        refusedReason:
+          "household.agentSendingEnabled is false; agent-authored outbound is refused at the wire",
+      };
+    }
+  }
 
   const ep = endpoints.resolve(input.channel, input.to);
   if (ep && ep.householdId === input.householdId && ep.consentStatus === "opted_out") {
@@ -205,7 +235,13 @@ export interface SendOutboundEmailInput {
   // Gmail-side thread id — server-side threading.
   readonly threadId?: string;
   readonly authoredBy?: {
-    readonly type: "manager" | "system";
+    // "agent" is included here so a future agent-side email path
+    // (e.g. an email autoresponder tool that skips the current
+    // trySendViaGmail-directly path) still hits the same gate.
+    // No caller passes "agent" today; if you're wiring one, check
+    // that the household's agentSendingEnabled flag is on before
+    // firing this function.
+    readonly type: "manager" | "agent" | "system";
     readonly id: string;
     readonly label?: string;
   };
@@ -220,7 +256,7 @@ export interface SendOutboundEmailResult {
   readonly from: string;
   readonly inboxMessageId: string;
   readonly reason?: string;
-  readonly refused?: "gmail_not_connected";
+  readonly refused?: "gmail_not_connected" | "agent_sending_disabled";
 }
 
 // Manager-authored email send. Reuses the agent tool's Gmail
@@ -234,6 +270,31 @@ export const sendOutboundEmail = async (
 ): Promise<SendOutboundEmailResult> => {
   const credentials = credentialRepo(db);
   const inbox = inboxRepo(db);
+  const households = householdRepo(db);
+
+  // Same manager-mediated gate the SMS path uses. Refuse
+  // agent-authored email sends when the household hasn't opted
+  // in, no matter what the policy engine said upstream.
+  if (input.authoredBy?.type === "agent") {
+    const hh = households.get(input.householdId);
+    if (!hh?.agentSendingEnabled) {
+      input.logger?.info(
+        "outbound email refused: agent-authored send blocked by household policy",
+        {
+          householdId: input.householdId,
+          toAddress: input.toAddress,
+          authoredBy: input.authoredBy,
+        },
+      );
+      return {
+        provider: "mock",
+        sentMessageId: "",
+        from: "",
+        inboxMessageId: "",
+        refused: "agent_sending_disabled",
+      };
+    }
+  }
 
   const ctx = {
     householdId: input.householdId,

@@ -332,6 +332,50 @@ Same message the ack came from (`handleInbound`'s `ackMessage`
 field); the flag only decides whether to include one for the
 `dispatched` outcome.
 
+## Manager-mediated-only
+
+Agents don't reach the customer at this stage — the customer
+talks to a manager, the manager uses agents behind the scenes.
+Under that model, no agent-authored SMS or email leaves the
+platform unless the household has explicitly opted in.
+
+The gate lives in two coordinated places so a policy misconfig,
+a code path that skips the policy engine, or a future tool that
+forgets to route through approvals still can't leak:
+
+**Wire seam.** `sendOutboundMessage` (SMS/WhatsApp) and
+`sendOutboundEmail` refuse any input where
+`authoredBy.type === "agent"` unless the household's
+`agentSendingEnabled` flag is on. Refusal returns
+`{ refused: "agent_sending_disabled" }` — no Twilio call, no
+Gmail send, no messaging_events row. Manager- and system-
+authored sends (STOP acks, verification confirmations) bypass
+the flag entirely.
+
+**Orchestrator seam.** `Orchestrator.callTool` refuses
+auto-execute of any tool with `sideEffectClass === "communication"`
+when the household's `agentSendingEnabled` is off, even if the
+policy engine returned `auto_execute`. The refusal degrades the
+decision to `denied` with a `household_agent_sending_disabled`
+reason so the task ledger shows why nothing fired. Wired via
+`OrchestratorDeps.householdAllowsAgentSending`.
+
+Default off (migration 0012 — `households.agent_sending_enabled
+DEFAULT 'no'`). `POST /households/:id/agent-sending`
+`{ enabled: true | false }` toggles it. The console renders an
+`AgentSendingToggle` under the `InstantAckToggle` with an
+explainer that names the two seams.
+
+Two flags side by side because the concerns are separate:
+- `instantAckEnabled` — the "Got it, will follow up" TwiML reply
+  the customer sees on inbound.
+- `agentSendingEnabled` — every agent-authored send to any
+  recipient (customer or otherwise) that would otherwise reach
+  the wire.
+
+Enabling one does not enable the other. Recommended stance for
+this phase: both off.
+
 ## MMS attachments
 
 Twilio inbound webhooks include `NumMedia` + `MediaUrl<N>` +

@@ -1,0 +1,1 @@
+ALTER TABLE `households` ADD `agent_sending_enabled` text DEFAULT 'no' NOT NULL;

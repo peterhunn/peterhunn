@@ -36,10 +36,13 @@ beforeAll(async () => {
   hh = household.id;
   identity.grantHousehold({ managerId: m.id, householdId: hh, role: "primary" });
   // Legacy assumption for this file's tests: the concierge line
-  // fires an instant ack. Opt this household in explicitly so the
-  // ack shape assertions below stay stable. The default (off) is
-  // exercised separately in messaging-instant-ack.test.ts.
+  // fires an instant ack, and agent-authored sends actually reach
+  // the wire. Opt this household in to both flags so the assertions
+  // stay stable. The defaults (off) are exercised in dedicated
+  // test files: messaging-instant-ack.test.ts and
+  // messaging-agent-sending.test.ts.
   householdRepo(db).setInstantAck(hh, true);
+  householdRepo(db).setAgentSending(hh, true);
   contactEndpointRepo(db).create({
     householdId: hh,
     channel: "sms",

@@ -30,6 +30,18 @@ export const households = sqliteTable("households", {
   instantAckEnabled: text("instant_ack_enabled", { enum: ["yes", "no"] })
     .notNull()
     .default("no"),
+  // Guards the sendOutbound* seam — SMS and email — against
+  // agent-authored outbounds. Off by default: even if the policy
+  // engine happens to grant autonomy=execute on a communication
+  // action class (or a code path bypasses it), the actual wire
+  // send is refused unless the household has explicitly opted in.
+  // Manager-authored (authoredBy.type === "manager") and system-
+  // authored (verification confirmations, STOP acks) sends are
+  // never gated by this flag — the model is "agents don't reach
+  // the customer", not "nothing is automated".
+  agentSendingEnabled: text("agent_sending_enabled", { enum: ["yes", "no"] })
+    .notNull()
+    .default("no"),
 });
 
 export type HouseholdRow = typeof households.$inferSelect;

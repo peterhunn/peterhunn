@@ -12,6 +12,7 @@ import { ConnectProviders } from "./connect-providers";
 import { SyncInboxButton } from "./sync-inbox-button";
 import { AutopilotToggle } from "./autopilot-toggle";
 import { InstantAckToggle } from "./instant-ack-toggle";
+import { AgentSendingToggle } from "./agent-sending-toggle";
 import { MessagingEndpoints } from "./messaging-endpoints";
 import { MessagingEvents } from "./messaging-events";
 import { ConversationThreads } from "./conversation-threads";
@@ -168,6 +169,11 @@ export default async function HouseholdPage({
         <InstantAckToggle
           householdId={hh.id as HouseholdId}
           initialEnabled={hh.instantAckEnabled ?? false}
+        />
+
+        <AgentSendingToggle
+          householdId={hh.id as HouseholdId}
+          initialEnabled={hh.agentSendingEnabled ?? false}
         />
 
 

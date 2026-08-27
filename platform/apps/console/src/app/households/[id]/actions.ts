@@ -737,6 +737,25 @@ export async function setInstantAck(
   }
 }
 
+export async function setAgentSending(
+  householdId: HouseholdId,
+  enabled: boolean,
+): Promise<{ message: string }> {
+  const token = await getSessionToken();
+  if (!token) return { message: "Session expired." };
+  try {
+    await api(token).setAgentSending(householdId, enabled);
+    return {
+      message: enabled
+        ? "Agent-authored sends allowed. Communication-class tools can fire when a policy grants execute."
+        : "Agent-authored sends refused at the wire. Every customer outbound is manager-typed.",
+    };
+  } catch (err) {
+    if (err instanceof ApiError) return { message: `Error: ${err.message}` };
+    return { message: `Error: ${(err as Error).message}` };
+  }
+}
+
 export async function planAndRun(
   householdId: HouseholdId,
   prompt: string,

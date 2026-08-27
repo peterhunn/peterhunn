@@ -136,7 +136,7 @@ export interface MessagingOutboundSink {
     eventId: string;
     status?: string;
     reason?: string;
-    refusedFor?: "opted_out";
+    refusedFor?: "opted_out" | "agent_sending_disabled";
   }>;
 }
 
@@ -206,6 +206,16 @@ export interface OrchestratorDeps {
   readonly models: ModelRuntime;
   readonly credentials?: CredentialSource;
   readonly messagingOutbound?: MessagingOutboundSink;
+  // Household-wide safety net for agent-authored sends to the
+  // customer. Return false to refuse any auto-execute of a
+  // communication-class tool for the given household, regardless
+  // of what the policy engine said. The runtime wires this from
+  // households.agentSendingEnabled — see docs/32-customer-
+  // messaging.md §"Manager-mediated-only". Undefined = no gate,
+  // policy engine's verdict stands.
+  readonly householdAllowsAgentSending?: (
+    householdId: HouseholdId,
+  ) => boolean;
   readonly logger?: { info: (msg: string, ctx?: unknown) => void };
 }
 
@@ -572,6 +582,40 @@ export class Orchestrator {
 
     if (decision.decision !== "auto_execute") {
       return { decision, action: null, outputs: null, approvalId: null };
+    }
+
+    // Manager-mediated-only gate for customer-facing sends. Even
+    // when policy said auto_execute, refuse when the household
+    // hasn't opted in. Defense in depth against a policy
+    // misconfigured to grant execute on a communication-class
+    // action. See docs/32 §"Manager-mediated-only".
+    if (
+      tool.sideEffectClass === "communication" &&
+      this.deps.householdAllowsAgentSending &&
+      !this.deps.householdAllowsAgentSending(input.householdId)
+    ) {
+      this.deps.logger?.info(
+        "agent-authored send refused by household policy",
+        {
+          householdId: input.householdId,
+          tool: tool.name,
+          agent: input.agent.name,
+        },
+      );
+      const denied: PolicyDecision = {
+        ...decision,
+        decision: "denied",
+        reasons: [
+          ...decision.reasons,
+          "household_agent_sending_disabled",
+        ],
+      };
+      return {
+        decision: denied,
+        action: null,
+        outputs: null,
+        approvalId: null,
+      };
     }
 
     const inputsHash = hash(input.inputs);

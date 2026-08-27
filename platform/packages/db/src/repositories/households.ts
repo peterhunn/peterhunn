@@ -21,6 +21,7 @@ export interface HouseholdState extends Household {
   readonly frozenReason: string | undefined;
   readonly autopilotEnabled: boolean;
   readonly instantAckEnabled: boolean;
+  readonly agentSendingEnabled: boolean;
 }
 
 const toHousehold = (row: typeof households.$inferSelect): HouseholdState => ({
@@ -36,6 +37,7 @@ const toHousehold = (row: typeof households.$inferSelect): HouseholdState => ({
   // via the migration DEFAULT clause, matching the intent that the
   // ack is opt-in per household.
   instantAckEnabled: row.instantAckEnabled === "yes",
+  agentSendingEnabled: row.agentSendingEnabled === "yes",
 });
 
 export const householdRepo = (db: Db) => ({
@@ -55,6 +57,7 @@ export const householdRepo = (db: Db) => ({
       frozenReason: null,
       autopilotEnabled: "yes",
       instantAckEnabled: "no",
+      agentSendingEnabled: "no",
     });
   },
 
@@ -68,6 +71,13 @@ export const householdRepo = (db: Db) => ({
   setInstantAck(id: HouseholdId, enabled: boolean): void {
     db.update(households)
       .set({ instantAckEnabled: enabled ? "yes" : "no" })
+      .where(eq(households.id, id))
+      .run();
+  },
+
+  setAgentSending(id: HouseholdId, enabled: boolean): void {
+    db.update(households)
+      .set({ agentSendingEnabled: enabled ? "yes" : "no" })
       .where(eq(households.id, id))
       .run();
   },
