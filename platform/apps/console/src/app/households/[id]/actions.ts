@@ -315,6 +315,48 @@ export async function resolveDocumentExtraction(
   }
 }
 
+export interface CustomerActivityResponse {
+  principalId: string;
+  endpoints: Array<{
+    id: string;
+    channel: "sms" | "whatsapp" | "imessage" | "email";
+    address: string;
+    consentStatus: "unknown" | "opted_in" | "opted_out";
+  }>;
+  items: Array<{
+    source: "sms" | "whatsapp" | "imessage" | "email";
+    direction: "inbound" | "outbound";
+    at: string;
+    summary: string;
+    body: string;
+    from: string;
+    to: string;
+    endpointId: string | null;
+    refId: string;
+    refKind: "messaging_event" | "inbox_message";
+    detail: Record<string, unknown>;
+  }>;
+  counts: { sms: number; whatsapp: number; imessage: number; email: number };
+}
+
+export async function loadCustomerActivity(
+  householdId: HouseholdId,
+  principalId: string,
+): Promise<{ message: string; data?: CustomerActivityResponse }> {
+  const token = await getSessionToken();
+  if (!token) return { message: "Session expired." };
+  try {
+    const res = await api(token).customerActivity(householdId, principalId);
+    return {
+      message: `Loaded ${res.items.length} item${res.items.length === 1 ? "" : "s"}.`,
+      data: res,
+    };
+  } catch (err) {
+    if (err instanceof ApiError) return { message: `Error: ${err.message}` };
+    return { message: `Error: ${(err as Error).message}` };
+  }
+}
+
 export interface DocumentAuditEvent {
   id: string;
   actorType: string;

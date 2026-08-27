@@ -592,6 +592,30 @@ export const api = (token: string) => ({
         authoredByLabel: string | null;
       }>;
     }>(token, "GET", `/households/${id}/messaging/events`),
+  customerActivity: (id: HouseholdId, principalId: string) =>
+    request<{
+      principalId: string;
+      endpoints: Array<{
+        id: string;
+        channel: "sms" | "whatsapp" | "imessage" | "email";
+        address: string;
+        consentStatus: "unknown" | "opted_in" | "opted_out";
+      }>;
+      items: Array<{
+        source: "sms" | "whatsapp" | "imessage" | "email";
+        direction: "inbound" | "outbound";
+        at: string;
+        summary: string;
+        body: string;
+        from: string;
+        to: string;
+        endpointId: string | null;
+        refId: string;
+        refKind: "messaging_event" | "inbox_message";
+        detail: Record<string, unknown>;
+      }>;
+      counts: { sms: number; whatsapp: number; imessage: number; email: number };
+    }>(token, "GET", `/households/${id}/customers/${principalId}/activity`),
   setAutopilot: (id: HouseholdId, enabled: boolean) =>
     request<{ household: { id: string; autopilotEnabled: boolean } }>(
       token,

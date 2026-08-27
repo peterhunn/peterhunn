@@ -99,6 +99,20 @@ Composition is agent-assisted (the drafts from the Draft/Ask rungs
 land here pre-filled) but the manager owns every outgoing character.
 No message leaves this surface without an explicit send.
 
+Inside a household, activity for one person is consolidated into a
+single per-customer timeline: SMS/WhatsApp/iMessage bubbles from
+`messaging_events` and Gmail-synced email from `inbox_messages` are
+joined via `contact_endpoints.principalId` (SMS) or fromAddress-
+matching against the principal's email endpoints, then interleaved
+by `receivedAt`. The raw stores stay separate — SMS carries consent
+tracking, session windows, and delivery status; email carries Gmail
+thread ids and inbox status — because merging them would either
+flatten those or bloat one schema. `GET /households/:id/customers
+/:principalId/activity` is the projection; the household page
+renders one collapsible per person that lazy-loads on expand.
+Downstream approvals are already consolidated in one table with
+`origin` telling the manager which channel drove them.
+
 ## Cross-household attention feed
 
 The `/dashboard` in the console is a manager-scoped view — approvals

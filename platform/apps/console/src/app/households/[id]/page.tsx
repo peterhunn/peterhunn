@@ -14,6 +14,7 @@ import { AutopilotToggle } from "./autopilot-toggle";
 import { MessagingEndpoints } from "./messaging-endpoints";
 import { MessagingEvents } from "./messaging-events";
 import { ConversationThreads } from "./conversation-threads";
+import { CustomerActivity } from "./customer-activity";
 import { VerifyEndpoint } from "./verify-endpoint";
 import { InviteCustomer } from "./invite-customer";
 import { PlaybooksPanel } from "./playbooks-panel";
@@ -247,6 +248,8 @@ export default async function HouseholdPage({
           endpoints={messagingEndpoints}
           people={people}
         />
+
+        <CustomerActivity householdId={hh.id as HouseholdId} people={people} />
 
         <details className="raw-events-details">
           <summary>Raw messaging events ({messagingEvents.length})</summary>

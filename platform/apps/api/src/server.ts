@@ -24,6 +24,7 @@ import { calendarRoutes } from "./routes/calendar.js";
 import { messagingRoutes } from "./routes/messaging.js";
 import { playbookRoutes } from "./routes/playbooks.js";
 import { peopleRoutes } from "./routes/people.js";
+import { customerActivityRoutes } from "./routes/customer-activity.js";
 import { assetRoutes } from "./routes/assets.js";
 import { graphByCategoryRoutes } from "./routes/graph-by-category.js";
 import { documentRoutes } from "./routes/documents.js";
@@ -252,6 +253,7 @@ export const buildServer = (db: Db) => {
   app.register(messagingRoutes(db));
   app.register(playbookRoutes(db));
   app.register(peopleRoutes(db));
+  app.register(customerActivityRoutes(db));
   app.register(assetRoutes(db));
   app.register(graphByCategoryRoutes(db));
   app.register(documentRoutes(db));

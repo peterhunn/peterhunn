@@ -1156,6 +1156,89 @@ form.login {
   background: #f3f4f6;
   color: #4b5563;
 }
+
+/* Per-customer unified activity — SMS + email interleaved */
+.activity-people {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.activity-person {
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--paper);
+}
+.activity-person-header {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+.activity-person-header:hover {
+  background: var(--paper-hover, #f9f7f2);
+}
+.activity-person-name {
+  font-weight: 600;
+}
+.activity-body {
+  padding: 8px 12px 12px;
+  border-top: 1px dashed var(--rule);
+}
+.activity-endpoints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.activity-items {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.activity-item {
+  padding: 8px 10px;
+  border-radius: 4px;
+  background: var(--paper);
+  border-left: 3px solid var(--rule);
+  font-size: 14px;
+}
+.activity-item.activity-sms,
+.activity-item.activity-whatsapp,
+.activity-item.activity-imessage {
+  border-left-color: #16a34a;
+}
+.activity-item.activity-email {
+  border-left-color: #2563eb;
+}
+.activity-item.activity-outbound {
+  background: rgba(148, 163, 184, 0.08);
+}
+.activity-item-head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+.activity-item-body {
+  font-family: var(--serif);
+  line-height: 1.4;
+  color: var(--ink);
+}
 .tag-attached {
   margin-left: 0.35rem;
   padding: 0.05rem 0.35rem;
