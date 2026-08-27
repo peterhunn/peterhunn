@@ -642,6 +642,29 @@ export async function sendMessage(
   }
 }
 
+export async function sendEmail(
+  householdId: HouseholdId,
+  input: {
+    toName: string;
+    toAddress: string;
+    subject: string;
+    body: string;
+    inReplyToMessageId?: string;
+  },
+): Promise<{ message: string }> {
+  const token = await getSessionToken();
+  if (!token) return { message: "Session expired." };
+  try {
+    const res = await api(token).sendEmail(householdId, input);
+    return {
+      message: `Sent email to ${input.toAddress} via Gmail (${res.sent.sentMessageId.slice(0, 12)}).`,
+    };
+  } catch (err) {
+    if (err instanceof ApiError) return { message: `Error: ${err.message}` };
+    return { message: `Error: ${(err as Error).message}` };
+  }
+}
+
 export async function addMessagingEndpoint(
   householdId: HouseholdId,
   input: {

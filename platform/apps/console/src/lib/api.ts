@@ -587,6 +587,25 @@ export const api = (token: string) => ({
         reason?: string;
       };
     }>(token, "POST", `/households/${id}/messaging/send`, input),
+  sendEmail: (
+    id: HouseholdId,
+    input: {
+      toName: string;
+      toAddress: string;
+      subject: string;
+      body: string;
+      inReplyToMessageId?: string;
+    },
+  ) =>
+    request<{
+      sent: {
+        provider: "gmail" | "mock";
+        sentMessageId: string;
+        threadId?: string;
+        from: string;
+        inboxMessageId: string;
+      };
+    }>(token, "POST", `/households/${id}/messaging/send-email`, input),
   listMessagingEvents: (id: HouseholdId) =>
     request<{
       events: Array<{

@@ -126,6 +126,19 @@ customer's email endpoints and outbound rows by toAddress — the
 household's own Gmail is the sender on outbound, so
 fromAddress matching would find nothing there.
 
+Every per-customer panel ships with a reply composer that auto-
+picks the channel from the last inbound message (SMS if the
+customer last texted, email if they last emailed; falls back to
+the first available endpoint). SMS routes through
+`POST /messaging/send` and lands a `messaging_events` row; email
+routes through `POST /messaging/send-email`, which reuses the
+same Gmail helper the `message.send` agent tool uses, then
+inserts a `direction=outbound` row into `inbox_messages` so the
+timeline reflects the send immediately without waiting for the
+next SENT sync. Opted-out SMS numbers refuse composition
+locally; a household without a connected Gmail credential
+refuses email sends with a `gmail_not_connected` message.
+
 ## Cross-household attention feed
 
 The `/dashboard` in the console is a manager-scoped view — approvals

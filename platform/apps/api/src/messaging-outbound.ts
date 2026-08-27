@@ -2,11 +2,12 @@ import {
   contactEndpointRepo,
   conversationSessionRepo,
   credentialRepo,
+  inboxRepo,
   messagingEventRepo,
   type Db,
   type MessagingChannel,
 } from "@atelier/db";
-import { sendTwilioMessage } from "@atelier/agents";
+import { sendTwilioMessage, trySendViaGmail } from "@atelier/agents";
 import type { HouseholdId } from "@atelier/domain";
 
 // Shared outbound-message orchestration for the concierge line.
@@ -190,5 +191,114 @@ export const sendOutboundMessage = async (
     eventId: record.row.id,
     ...(out.status ? { status: out.status } : {}),
     ...(out.reason ? { reason: out.reason } : {}),
+  };
+};
+
+export interface SendOutboundEmailInput {
+  readonly householdId: HouseholdId;
+  readonly toName: string;
+  readonly toAddress: string;
+  readonly subject: string;
+  readonly body: string;
+  readonly inReplyToMessageId?: string;
+  readonly authoredBy?: {
+    readonly type: "manager" | "system";
+    readonly id: string;
+    readonly label?: string;
+  };
+  readonly logger?: { info: (msg: string, ctx?: unknown) => void };
+}
+
+export interface SendOutboundEmailResult {
+  readonly provider: "gmail" | "mock";
+  readonly sentMessageId: string;
+  readonly threadId?: string;
+  readonly from: string;
+  readonly inboxMessageId: string;
+  readonly reason?: string;
+  readonly refused?: "gmail_not_connected";
+}
+
+// Manager-authored email send. Reuses the agent tool's Gmail
+// helper so the RFC-822 build + auth stay in one place, then
+// records the outbound row in inbox_messages with direction=
+// "outbound" so the customer-activity timeline reflects it
+// without waiting for the next SENT sync.
+export const sendOutboundEmail = async (
+  db: Db,
+  input: SendOutboundEmailInput,
+): Promise<SendOutboundEmailResult> => {
+  const credentials = credentialRepo(db);
+  const inbox = inboxRepo(db);
+
+  const ctx = {
+    householdId: input.householdId,
+    authorityId: undefined,
+    readCredential: (provider: string) =>
+      credentials.getSecret(input.householdId, provider),
+    persistAccessToken: (id: string, at: string, exp: string) =>
+      credentials.updateAccessToken(id, at, exp),
+    proposedBy: { actor: "manager_email_send", version: "0.1.0" },
+    ...(input.logger ? { logger: input.logger } : {}),
+  };
+
+  let sent: Awaited<ReturnType<typeof trySendViaGmail>> = null;
+  try {
+    sent = await trySendViaGmail(ctx, {
+      toName: input.toName,
+      toAddress: input.toAddress,
+      subject: input.subject,
+      body: input.body,
+      ...(input.inReplyToMessageId
+        ? { inReplyToMessageId: input.inReplyToMessageId }
+        : {}),
+    });
+  } catch (err) {
+    input.logger?.info("manager gmail send failed — mock fallback", {
+      error: (err as Error).message,
+    });
+  }
+
+  if (!sent) {
+    // No gmail credential (or the SDK threw) — refuse cleanly so
+    // the console can surface "Connect Google first" instead of
+    // silently succeeding with a mock id. The customer-activity
+    // timeline stays empty rather than fake-showing a send.
+    return {
+      provider: "mock",
+      sentMessageId: "",
+      from: "",
+      inboxMessageId: "",
+      refused: "gmail_not_connected",
+    };
+  }
+
+  // Pull from_address off the gmail credential so the from
+  // address on the persisted inbox row matches what actually
+  // landed on the wire.
+  const cred = credentials.getSecret(input.householdId, "gmail");
+  const fromAddress =
+    (cred?.credential as { from_address?: string } | undefined)?.from_address ??
+    "unknown@unknown";
+  const recorded = inbox.upsertExternal({
+    householdId: input.householdId,
+    externalProvider: "gmail",
+    externalMessageId: sent.sentMessageId,
+    ...(sent.threadId ? { externalThreadId: sent.threadId } : {}),
+    direction: "outbound",
+    fromName: "",
+    fromAddress,
+    toAddress: input.toAddress,
+    subject: input.subject,
+    body: input.body,
+    receivedAt: new Date().toISOString(),
+  });
+
+  return {
+    provider: sent.provider,
+    sentMessageId: sent.sentMessageId,
+    ...(sent.threadId ? { threadId: sent.threadId } : {}),
+    from: fromAddress,
+    inboxMessageId: recorded.row.id,
   };
 };

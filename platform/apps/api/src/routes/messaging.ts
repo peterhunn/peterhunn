@@ -20,7 +20,7 @@ import { getBlobStore } from "../blob-store.js";
 import { sendTwilioMessage, verifyTwilioInboundSignature } from "@atelier/agents";
 import { buildGraphView, buildGraphWriter, buildOrchestrator } from "../runtime.js";
 import { stripUndefined } from "../util.js";
-import { sendOutboundMessage } from "../messaging-outbound.js";
+import { sendOutboundEmail, sendOutboundMessage } from "../messaging-outbound.js";
 
 // Customer messaging surface.
 //
@@ -48,6 +48,14 @@ const SendMessageBody = z.object({
   to: z.string().min(3),
   body: z.string().min(1).max(1600),
   inReplyToEventId: z.string().optional(),
+});
+
+const SendEmailBody = z.object({
+  toName: z.string().min(1),
+  toAddress: z.string().email(),
+  subject: z.string().min(1).max(240),
+  body: z.string().min(1).max(50_000),
+  inReplyToMessageId: z.string().optional(),
 });
 
 const CreateVerificationBody = z.object({
@@ -815,6 +823,67 @@ export const messagingRoutes = (db: Db): FastifyPluginAsync => async (app) => {
           eventId: result.eventId,
           ...(result.status ? { status: result.status } : {}),
           ...(result.reason ? { reason: result.reason } : {}),
+        },
+      };
+    },
+  );
+
+  // Manager-authored email reply. Sends through the same Gmail
+  // path the agent tool uses, then records the outbound row in
+  // inbox_messages with direction=outbound so the customer-
+  // activity timeline reflects it without waiting for the next
+  // SENT sync to pull it back through Gmail.
+  app.post<{ Params: { householdId: string } }>(
+    "/households/:householdId/messaging/send-email",
+    {
+      config: {
+        audit: {
+          action: "messaging.send_email",
+          resourceType: "inbox_message",
+          sensitive: true,
+        },
+      },
+    },
+    async (req, reply) => {
+      const parsed = SendEmailBody.safeParse(req.body);
+      if (!parsed.success) {
+        return reply
+          .code(400)
+          .send({ error: "invalid_body", issues: parsed.error.issues });
+      }
+      const householdId = req.householdContext as HouseholdId;
+      const result = await sendOutboundEmail(db, {
+        householdId,
+        toName: parsed.data.toName,
+        toAddress: parsed.data.toAddress,
+        subject: parsed.data.subject,
+        body: parsed.data.body,
+        ...(parsed.data.inReplyToMessageId
+          ? { inReplyToMessageId: parsed.data.inReplyToMessageId }
+          : {}),
+        authoredBy: {
+          type: req.actor.type === "manager" ? "manager" : "system",
+          id: req.actor.id,
+          ...(req.actor.displayName ? { label: req.actor.displayName } : {}),
+        },
+        logger: {
+          info: (msg, ctx) => req.log.info({ ...(ctx as object) }, msg),
+        },
+      });
+      if (result.refused === "gmail_not_connected") {
+        return reply.code(400).send({
+          error: "gmail_not_connected",
+          message:
+            "This household hasn't connected Gmail. Connect Google before sending email.",
+        });
+      }
+      return {
+        sent: {
+          provider: result.provider,
+          sentMessageId: result.sentMessageId,
+          ...(result.threadId ? { threadId: result.threadId } : {}),
+          from: result.from,
+          inboxMessageId: result.inboxMessageId,
         },
       };
     },

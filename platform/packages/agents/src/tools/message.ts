@@ -64,7 +64,12 @@ const rfc822Message = (opts: {
   return `${headers.join("\r\n")}\r\n\r\n${opts.body}`;
 };
 
-const trySendViaGmail = async (
+// Exported so the API's manager-facing email composer route can
+// send through the same Gmail path as the agent tool without
+// re-implementing the auth + RFC-822 build. Returns null when the
+// household hasn't connected Gmail; throws on Gmail-side errors so
+// the caller can decide whether to fall back to mock or surface.
+export const trySendViaGmail = async (
   ctx: ToolContext,
   inputs: MessageSendInputs,
 ): Promise<

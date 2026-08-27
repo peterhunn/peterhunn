@@ -3,7 +3,12 @@
 import { useState, useTransition } from "react";
 import type { HouseholdId } from "@atelier/domain";
 import type { Person } from "./invite-customer";
-import { loadCustomerActivity, type CustomerActivityResponse } from "./actions";
+import {
+  loadCustomerActivity,
+  sendEmail,
+  sendMessage,
+  type CustomerActivityResponse,
+} from "./actions";
 
 // Per-customer unified activity — SMS + email interleaved by
 // receivedAt for one principal at a time. Fetches lazily on
@@ -20,6 +25,190 @@ const personName = (p: Person): string => {
 
 const sourceLabel = (s: ActivityItem["source"]): string =>
   s === "sms" ? "SMS" : s === "whatsapp" ? "WhatsApp" : s === "imessage" ? "iMessage" : "Email";
+
+type Channel = "sms" | "email";
+
+interface Endpoint {
+  id: string;
+  channel: "sms" | "whatsapp" | "imessage" | "email";
+  address: string;
+  consentStatus: "unknown" | "opted_in" | "opted_out";
+}
+
+// Pick the reply channel + address the composer should default to.
+// Rule: most recent INBOUND item wins — if the last thing the
+// customer did was text, reply by SMS; if they emailed, reply by
+// email. Falls back to the first available endpoint of either kind
+// if there's no inbound history. Returns null when neither exists
+// or an SMS endpoint is opted-out (opted-out numbers can't receive
+// outbound at all).
+const pickReplyChannel = (
+  items: ActivityItem[],
+  endpoints: Endpoint[],
+): { channel: Channel; address: string; endpoint: Endpoint | null } | null => {
+  const smsEp = endpoints.find(
+    (e) => e.channel === "sms" && e.consentStatus !== "opted_out",
+  );
+  const emailEp = endpoints.find((e) => e.channel === "email");
+  const lastInbound = items.find((i) => i.direction === "inbound");
+  if (lastInbound?.source === "sms" && smsEp) {
+    return { channel: "sms", address: smsEp.address, endpoint: smsEp };
+  }
+  if (lastInbound?.source === "email" && emailEp) {
+    return { channel: "email", address: emailEp.address, endpoint: emailEp };
+  }
+  if (smsEp) return { channel: "sms", address: smsEp.address, endpoint: smsEp };
+  if (emailEp)
+    return { channel: "email", address: emailEp.address, endpoint: emailEp };
+  return null;
+};
+
+// Best-effort subject when the manager doesn't type one — pick the
+// most recent email's subject and prefix Re: if it doesn't already
+// start with it. Fallback to a bland default.
+const defaultSubject = (items: ActivityItem[]): string => {
+  const lastEmail = items.find((i) => i.source === "email");
+  const subj = (lastEmail?.detail?.["subject"] as string | undefined) ?? "";
+  if (!subj) return "Following up";
+  return /^re:/i.test(subj) ? subj : `Re: ${subj}`;
+};
+
+function ReplyComposer({
+  householdId,
+  personName: name,
+  items,
+  endpoints,
+  onSent,
+}: {
+  householdId: HouseholdId;
+  personName: string;
+  items: ActivityItem[];
+  endpoints: Endpoint[];
+  onSent: () => void;
+}) {
+  const pick = pickReplyChannel(items, endpoints);
+  const [channel, setChannel] = useState<Channel>(pick?.channel ?? "sms");
+  const [subject, setSubject] = useState<string>(defaultSubject(items));
+  const [body, setBody] = useState<string>("");
+  const [message, setMessage] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  const target = endpoints.find((e) =>
+    channel === "sms" ? e.channel === "sms" : e.channel === "email",
+  );
+
+  if (!pick) {
+    return (
+      <div className="activity-composer-disabled muted">
+        No SMS or email endpoint registered for this person. Add one from the
+        Messaging endpoints panel to reply.
+      </div>
+    );
+  }
+
+  const disabledReason =
+    channel === "sms" && target?.consentStatus === "opted_out"
+      ? "This number opted out. Ask the customer to text START to opt back in."
+      : !target
+        ? `No ${channel === "sms" ? "SMS" : "email"} endpoint registered.`
+        : null;
+
+  return (
+    <form
+      className="activity-composer"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!body.trim() || !target || disabledReason) return;
+        startTransition(async () => {
+          if (channel === "sms") {
+            const res = await sendMessage(householdId, {
+              channel: "sms",
+              to: target.address,
+              body,
+            });
+            setMessage(res.message);
+            if (!res.message.startsWith("Error")) {
+              setBody("");
+              onSent();
+            }
+          } else {
+            const res = await sendEmail(householdId, {
+              toName: name,
+              toAddress: target.address,
+              subject: subject || "Following up",
+              body,
+            });
+            setMessage(res.message);
+            if (!res.message.startsWith("Error")) {
+              setBody("");
+              onSent();
+            }
+          }
+        });
+      }}
+    >
+      <div className="activity-composer-head">
+        <label>
+          <input
+            type="radio"
+            name={`ch-${target?.id ?? "none"}`}
+            checked={channel === "sms"}
+            onChange={() => setChannel("sms")}
+            disabled={!endpoints.some((e) => e.channel === "sms")}
+          />
+          <span>SMS</span>
+        </label>
+        <label>
+          <input
+            type="radio"
+            name={`ch-${target?.id ?? "none"}`}
+            checked={channel === "email"}
+            onChange={() => setChannel("email")}
+            disabled={!endpoints.some((e) => e.channel === "email")}
+          />
+          <span>Email</span>
+        </label>
+        {target ? (
+          <span className="mono muted">→ {target.address}</span>
+        ) : null}
+      </div>
+      {channel === "email" ? (
+        <input
+          type="text"
+          className="activity-composer-subject"
+          value={subject}
+          placeholder="Subject"
+          onChange={(e) => setSubject(e.target.value)}
+          disabled={isPending}
+        />
+      ) : null}
+      <textarea
+        value={body}
+        placeholder={
+          channel === "sms"
+            ? `SMS reply to ${name}…`
+            : `Email reply to ${name}…`
+        }
+        rows={channel === "email" ? 4 : 2}
+        onChange={(e) => setBody(e.target.value)}
+        disabled={isPending || Boolean(disabledReason)}
+      />
+      <div className="activity-composer-actions">
+        <button
+          type="submit"
+          disabled={isPending || !body.trim() || Boolean(disabledReason)}
+        >
+          Send {channel === "sms" ? "SMS" : "email"}
+        </button>
+        {disabledReason ? (
+          <span className="mono muted">{disabledReason}</span>
+        ) : message ? (
+          <span className="mono muted">{message}</span>
+        ) : null}
+      </div>
+    </form>
+  );
+}
 
 export function CustomerActivity({
   householdId,
@@ -45,21 +234,22 @@ export function CustomerActivity({
 
   if (customers.length === 0) return null;
 
+  const load = (id: string): void => {
+    startTransition(async () => {
+      const res = await loadCustomerActivity(householdId, id);
+      setCache((prev) => ({
+        ...prev,
+        [id]: res.data ?? { error: res.message },
+      }));
+    });
+  };
   const toggle = (id: string): void => {
     if (expanded === id) {
       setExpanded(null);
       return;
     }
     setExpanded(id);
-    if (!cache[id]) {
-      startTransition(async () => {
-        const res = await loadCustomerActivity(householdId, id);
-        setCache((prev) => ({
-          ...prev,
-          [id]: res.data ?? { error: res.message },
-        }));
-      });
-    }
+    if (!cache[id]) load(id);
   };
 
   return (
@@ -128,6 +318,13 @@ export function CustomerActivity({
                           </li>
                         ))}
                       </ol>
+                      <ReplyComposer
+                        householdId={householdId}
+                        personName={personName(p)}
+                        items={cached.items}
+                        endpoints={cached.endpoints}
+                        onSent={() => load(p.id)}
+                      />
                     </>
                   )}
                 </div>
