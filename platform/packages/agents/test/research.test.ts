@@ -71,7 +71,7 @@ const mkResearchModels = (): ModelRuntime & {
   turns: Array<{ withHandler: boolean; toolCallsIssued: string[] }>;
 } => {
   const turns: Array<{ withHandler: boolean; toolCallsIssued: string[] }> = [];
-  return {
+  const runtime: ModelRuntime = {
     callModel: async () => {
       throw new Error("plain callModel not expected in research tests");
     },
@@ -124,6 +124,11 @@ const mkResearchModels = (): ModelRuntime & {
       };
     },
   };
+  // Expose the captured turns array on the returned runtime.
+  // Object.assign would work here (arrays are value-descriptor-
+  // safe by reference), but keep the pattern consistent with the
+  // other test helpers that use defineProperty for accessors.
+  return Object.assign(runtime, { turns });
 };
 
 // Keep the research agent's real web tools hermetic in tests:

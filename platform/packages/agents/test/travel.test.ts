@@ -102,10 +102,10 @@ const mkTravelGraph = (opts: {
 });
 
 const mkTravelModels = (canned: string): ModelRuntime & { called: number } => {
-  let called = 0;
+  const state = { called: 0 };
   const runtime: ModelRuntime = {
     callModel: async (_hh, _run, _task, call): Promise<ModelResponse> => {
-      called++;
+      state.called++;
       expect(["travel.plan.multi", "travel.match"]).toContain(call.taskClass);
       return {
         modelCallId: "mcl_1",
@@ -129,11 +129,10 @@ const mkTravelModels = (canned: string): ModelRuntime & { called: number } => {
       throw new Error("callModelWithTools not expected");
     },
   };
-  return Object.assign(runtime, {
-    get called() {
-      return called;
-    },
-  });
+  return Object.defineProperty(runtime, "called", {
+    enumerable: true,
+    get: () => state.called,
+  }) as ModelRuntime & { called: number };
 };
 
 describe("travel agent — trip.plan", () => {

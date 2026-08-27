@@ -115,10 +115,10 @@ const mkGraph = (): GraphView => ({
 });
 
 const mkAdminModels = (): ModelRuntime & { called: number } => {
-  let called = 0;
+  const state = { called: 0 };
   const runtime: ModelRuntime = {
     callModel: async (_hh, _run, _task, call): Promise<ModelResponse> => {
-      called++;
+      state.called++;
       expect(call.taskClass).toBe("admin.renewal.detect");
       const userMsg = call.messages.find((m) => m.role === "user")?.content ?? "";
       const parsed = JSON.parse(userMsg) as {
@@ -154,11 +154,14 @@ const mkAdminModels = (): ModelRuntime & { called: number } => {
       throw new Error("callModelWithTools not expected");
     },
   };
-  return Object.assign(runtime, {
-    get called() {
-      return called;
-    },
-  });
+  // Object.assign copies value descriptors, not accessors — a
+  // getter defined here would be evaluated once and frozen at 0.
+  // Use Object.defineProperty so `models.called` reads through to
+  // the live counter each time the test asserts it.
+  return Object.defineProperty(runtime, "called", {
+    enumerable: true,
+    get: () => state.called,
+  }) as ModelRuntime & { called: number };
 };
 
 const reviewIntent: Intent = {

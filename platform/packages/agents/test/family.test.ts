@@ -87,10 +87,10 @@ const mkFamilyGraph = (): GraphView => ({
 });
 
 const mkCoverageModels = (canned: string): ModelRuntime & { called: number } => {
-  let called = 0;
+  const state = { called: 0 };
   const runtime: ModelRuntime = {
     callModel: async (_hh, _run, _task, call): Promise<ModelResponse> => {
-      called++;
+      state.called++;
       expect(call.taskClass).toBe("family.coverage_plan");
       return {
         modelCallId: "mcl_1",
@@ -114,11 +114,12 @@ const mkCoverageModels = (canned: string): ModelRuntime & { called: number } => 
       throw new Error("callModelWithTools not expected");
     },
   };
-  return Object.assign(runtime, {
-    get called() {
-      return called;
-    },
-  });
+  // Object.assign copies value descriptors, not accessors — a
+  // getter defined here would be evaluated once and frozen at 0.
+  return Object.defineProperty(runtime, "called", {
+    enumerable: true,
+    get: () => state.called,
+  }) as ModelRuntime & { called: number };
 };
 
 describe("family agent — coverage", () => {
