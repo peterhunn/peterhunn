@@ -152,6 +152,19 @@ Every outbound also gets a freshly generated Message-ID header
 persisted on its own row, so a customer replying downstream is
 threaded back to the outbound.
 
+The timeline renders threads as one card, not N rows. Any two
+emails that share an `externalThreadId` collapse into a single
+"Email thread" card anchored at the newest message's timestamp
+— a customer with 10 back-and-forths on one topic takes one row
+in the timeline until the manager expands it. Grouping is
+aggressive: an SMS interleaved between two email replies doesn't
+split the thread; the SMS stays as its own row and the thread
+sits at whichever time-slot its newest message occupies. Emails
+without a threadId (legacy inbox rows) render as singletons.
+The composer still walks the raw item list to pick a reply
+target, so threading works before, during, and after
+collapsing.
+
 ## Cross-household attention feed
 
 The `/dashboard` in the console is a manager-scoped view — approvals

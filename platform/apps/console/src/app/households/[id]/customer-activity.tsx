@@ -73,6 +73,84 @@ const defaultSubject = (items: ActivityItem[]): string => {
   return /^re:/i.test(subj) ? subj : `Re: ${subj}`;
 };
 
+// One entry in the rendered timeline. Either a single non-thread
+// activity item (SMS, or an email with no threadId), or an email
+// thread groupCard collecting every email with the same
+// externalThreadId. The thread is anchored at the newest email's
+// timestamp so the timeline order stays chronological.
+type TimelineEntry =
+  | { kind: "single"; item: ActivityItem }
+  | {
+      kind: "thread";
+      threadId: string;
+      subject: string;
+      items: ActivityItem[]; // newest first
+      newestAt: string;
+      inboundCount: number;
+      outboundCount: number;
+    };
+
+// Group emails by externalThreadId. Aggressive — every email with
+// the same threadId collapses into one card regardless of what
+// gets interleaved between them (an SMS in the middle doesn't
+// split the thread). The thread anchors at its newest message's
+// timestamp so the timeline stays chronological. Emails with no
+// threadId (legacy inbox rows) render as their own singletons.
+const buildTimeline = (items: ActivityItem[]): TimelineEntry[] => {
+  const threads = new Map<string, TimelineEntry & { kind: "thread" }>();
+  const entries: TimelineEntry[] = [];
+  const anchoredThreadIds = new Set<string>();
+  for (const item of items) {
+    const threadId =
+      item.source === "email"
+        ? (item.detail?.["externalThreadId"] as string | undefined)
+        : undefined;
+    if (!threadId) {
+      entries.push({ kind: "single", item });
+      continue;
+    }
+    let thread = threads.get(threadId);
+    if (!thread) {
+      thread = {
+        kind: "thread",
+        threadId,
+        subject:
+          (item.detail?.["subject"] as string | undefined) || "(no subject)",
+        items: [],
+        newestAt: item.at,
+        inboundCount: 0,
+        outboundCount: 0,
+      };
+      threads.set(threadId, thread);
+    }
+    thread.items.push(item);
+    if (item.at > thread.newestAt) {
+      thread.newestAt = item.at;
+      // The most recent message's subject is the one worth showing
+      // — a "Re: Re: Re:" chain settles at whatever the last
+      // person actually wrote.
+      const subj = item.detail?.["subject"] as string | undefined;
+      if (subj) thread.subject = subj;
+    }
+    if (item.direction === "inbound") thread.inboundCount++;
+    else thread.outboundCount++;
+    if (!anchoredThreadIds.has(threadId)) {
+      anchoredThreadIds.add(threadId);
+      entries.push(thread);
+    }
+  }
+  // Re-sort so threads sit at their newestAt position rather than
+  // at the first-seen position. A thread whose newest message is
+  // older than a subsequent single item still slots in the right
+  // chronological place.
+  entries.sort((a, b) => {
+    const aAt = a.kind === "single" ? a.item.at : a.newestAt;
+    const bAt = b.kind === "single" ? b.item.at : b.newestAt;
+    return aAt < bAt ? 1 : aAt > bAt ? -1 : 0;
+  });
+  return entries;
+};
+
 // Find the most recent inbound email in the timeline. That's the
 // message we're threading against — its Message-ID becomes
 // In-Reply-To / References, and its Gmail threadId is passed to
@@ -98,6 +176,69 @@ const findEmailReplyTarget = (
   if (threadId) out.threadId = threadId;
   return out;
 };
+
+function ActivityItemRow({ item }: { item: ActivityItem }) {
+  return (
+    <li
+      className={`activity-item activity-${item.source} activity-${item.direction}`}
+    >
+      <div className="activity-item-head">
+        <span className={`tag tag-${item.source}`}>{sourceLabel(item.source)}</span>
+        <span className="mono muted">{item.direction}</span>
+        <span className="mono muted">
+          {new Date(item.at).toLocaleString()}
+        </span>
+      </div>
+      <div className="activity-item-body">{item.summary}</div>
+    </li>
+  );
+}
+
+function ThreadCard({
+  thread,
+}: {
+  thread: Extract<TimelineEntry, { kind: "thread" }>;
+}) {
+  const [open, setOpen] = useState(false);
+  const newest = thread.items.reduce(
+    (best, i) => (i.at > best.at ? i : best),
+    thread.items[0]!,
+  );
+  const sortedItems = [...thread.items].sort((a, b) =>
+    a.at < b.at ? 1 : a.at > b.at ? -1 : 0,
+  );
+  const inboundLabel = `${thread.inboundCount} in`;
+  const outboundLabel = `${thread.outboundCount} out`;
+  return (
+    <li className="activity-thread">
+      <button
+        type="button"
+        className="activity-thread-header"
+        onClick={() => setOpen((prev) => !prev)}
+        aria-expanded={open}
+      >
+        <span className="tag tag-email">Email</span>
+        <span className="activity-thread-subject">{thread.subject}</span>
+        <span className="mono muted">
+          {thread.items.length} · {inboundLabel} · {outboundLabel}
+        </span>
+        <span className="mono muted">
+          {new Date(thread.newestAt).toLocaleString()}
+        </span>
+        <span className="mono muted">{open ? "collapse" : "expand"}</span>
+      </button>
+      {!open ? (
+        <div className="activity-thread-preview">{newest.summary}</div>
+      ) : (
+        <ol className="activity-thread-items">
+          {sortedItems.map((item) => (
+            <ActivityItemRow key={`${item.refKind}-${item.refId}`} item={item} />
+          ))}
+        </ol>
+      )}
+    </li>
+  );
+}
 
 function ReplyComposer({
   householdId,
@@ -328,23 +469,19 @@ export function CustomerActivity({
                         ))}
                       </div>
                       <ol className="activity-items">
-                        {cached.items.map((item) => (
-                          <li
-                            key={`${item.refKind}-${item.refId}`}
-                            className={`activity-item activity-${item.source} activity-${item.direction}`}
-                          >
-                            <div className="activity-item-head">
-                              <span className={`tag tag-${item.source}`}>
-                                {sourceLabel(item.source)}
-                              </span>
-                              <span className="mono muted">{item.direction}</span>
-                              <span className="mono muted">
-                                {new Date(item.at).toLocaleString()}
-                              </span>
-                            </div>
-                            <div className="activity-item-body">{item.summary}</div>
-                          </li>
-                        ))}
+                        {buildTimeline(cached.items).map((entry) =>
+                          entry.kind === "single" ? (
+                            <ActivityItemRow
+                              key={`${entry.item.refKind}-${entry.item.refId}`}
+                              item={entry.item}
+                            />
+                          ) : (
+                            <ThreadCard
+                              key={`thread-${entry.threadId}`}
+                              thread={entry}
+                            />
+                          ),
+                        )}
                       </ol>
                       <ReplyComposer
                         householdId={householdId}

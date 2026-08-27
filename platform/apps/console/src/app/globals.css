@@ -1239,6 +1239,62 @@ form.login {
   line-height: 1.4;
   color: var(--ink);
 }
+.activity-thread {
+  border: 1px solid var(--rule);
+  border-left: 3px solid #2563eb;
+  border-radius: 4px;
+  background: var(--paper);
+  overflow: hidden;
+}
+.activity-thread-header {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto auto;
+  gap: 10px;
+  align-items: baseline;
+  width: 100%;
+  padding: 8px 10px;
+  background: transparent;
+  border: none;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+.activity-thread-header:hover {
+  background: var(--paper-hover, #f9f7f2);
+}
+.activity-thread-subject {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.activity-thread-preview {
+  padding: 4px 10px 10px 10px;
+  font-family: var(--serif);
+  color: var(--ink-muted);
+  font-size: 14px;
+  line-height: 1.4;
+  border-top: 1px dashed var(--rule);
+}
+.activity-thread-items {
+  list-style: none;
+  padding: 0 0 4px 0;
+  margin: 0;
+  border-top: 1px dashed var(--rule);
+  display: flex;
+  flex-direction: column;
+}
+.activity-thread-items .activity-item {
+  border-left: 0;
+  border-radius: 0;
+  border-top: 1px solid var(--rule);
+  padding: 6px 12px;
+}
+.activity-thread-items .activity-item:first-child {
+  border-top: 0;
+}
+
 .activity-composer {
   margin-top: 12px;
   padding: 10px 12px;
