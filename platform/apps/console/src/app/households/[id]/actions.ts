@@ -756,6 +756,23 @@ export async function setAgentSending(
   }
 }
 
+export async function adoptPolicySuggestion(
+  householdId: HouseholdId,
+  input: { actionClass: string; subjectPrincipalId: string | null },
+): Promise<{ message: string }> {
+  const token = await getSessionToken();
+  if (!token) return { message: "Session expired." };
+  try {
+    const res = await api(token).adoptPolicySuggestion(householdId, input);
+    return {
+      message: `Promoted "${res.policy.spec.label}" → autonomy: execute.`,
+    };
+  } catch (err) {
+    if (err instanceof ApiError) return { message: `Error: ${err.message}` };
+    return { message: `Error: ${(err as Error).message}` };
+  }
+}
+
 export async function planAndRun(
   householdId: HouseholdId,
   prompt: string,

@@ -226,3 +226,53 @@ Progressive autonomy is a customer choice, not a system push. A
 household that never wants to leave Draft/Ask should experience the
 service as equally proactive; the difference is where the approval
 lands.
+
+## Promotion loop (autonomy ladder suggestions)
+
+The manager doesn't have to guess when a policy is ready to move up
+the ladder. When the same `(action_class, subject_principal_id)`
+pattern is approved cleanly N times in a row within a rolling
+window (default: 5 approvals, 60 days), the API surfaces a
+**suggestion** to promote the underlying policy's autonomy to
+`execute`. The suggestion is a proposal — nothing changes until the
+manager adopts it.
+
+Rules the suggestion engine follows:
+
+- Only clean approvals count. `approved_with_edit`, `rejected`,
+  `expired`, and `canceled` break the streak — a manager who edited
+  the agent's proposal wasn't fully satisfied, and that signal is
+  worth more than the raw approval count.
+- Suggestions never appear if an `execute` (or higher) policy
+  already covers the pattern. A more-specific policy on
+  `any_principal` for the same action class also counts as coverage.
+- The suggested spec is cloned from the most recent authority
+  policy that OK'd an approval in the streak. Escalation conditions,
+  limits, and scope carry over verbatim; only `autonomy` is raised.
+  A message-send policy that escalates on
+  `attr_in employer/counsel/medical` keeps that escalation after
+  promotion — so "auto-execute" still asks for approval on the
+  sensitive slice.
+- Adopting a suggestion creates a **new** policy; the old
+  draft/ask policy is left in place. If the manager wants the older
+  version revoked, they revoke it separately. This preserves the
+  audit trail — any historical action that cited the older policy
+  still resolves.
+
+Endpoints:
+
+- `GET /households/:id/policies/suggestions` — returns
+  `{ suggestions: [{ actionClass, subjectPrincipalId, nApprovals,
+  windowDays, currentRung, suggestedRung, proposedPolicySpec,
+  basisApprovalIds, basisPolicyId, basisPolicyLabel }] }`. Optional
+  `?threshold=N&windowDays=N` overrides.
+- `POST /households/:id/policies/suggestions/adopt` — body
+  `{ actionClass, subjectPrincipalId }` — creates the promoted
+  policy and returns `{ policy }`. Returns 404 when the named
+  pattern is not currently suggested (e.g., a rejection landed in
+  the window since the suggestion was computed).
+
+The promotion loop only ever raises autonomy toward `execute`; it
+never suggests `manage_autonomously`, and it never proposes new
+subjects or new action classes. It's a paved path for "this pattern
+has proven itself", not a replacement for manager judgement.

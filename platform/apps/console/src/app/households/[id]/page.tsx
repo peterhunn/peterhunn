@@ -24,6 +24,7 @@ import { PeoplePanel } from "./people-panel";
 import { AssetsPanel } from "./assets-panel";
 import { DocumentsPanel } from "./documents-panel";
 import { CostDashboard } from "./cost-dashboard";
+import { PolicySuggestionsPanel } from "./policy-suggestions-panel";
 
 export default async function HouseholdPage({
   params,
@@ -112,6 +113,10 @@ export default async function HouseholdPage({
       scopes: [],
     })),
   ]);
+
+  const policySuggestionsRes = await client
+    .policySuggestions(id as HouseholdId)
+    .catch(() => ({ suggestions: [] }));
 
   const messagingCfg = await client.messagingConfig().catch(() => ({
     conciergeNumber: null,
@@ -337,6 +342,11 @@ export default async function HouseholdPage({
             ))}
           </div>
         )}
+
+        <PolicySuggestionsPanel
+          householdId={hh.id as HouseholdId}
+          suggestions={policySuggestionsRes.suggestions}
+        />
 
         <div className="section-head">
           <h2>Policies</h2>

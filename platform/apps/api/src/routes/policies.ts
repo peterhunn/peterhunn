@@ -8,6 +8,10 @@ import {
   type PolicyId,
 } from "@atelier/domain";
 import { evaluate } from "@atelier/policy";
+import {
+  adoptSuggestion,
+  computeSuggestions,
+} from "../policy-suggestions.js";
 
 const CreatePolicyBody = z.object({
   spec: PolicySpec,
@@ -142,6 +146,77 @@ export const policyRoutes = (db: Db): FastifyPluginAsync => async (app) => {
         ...(approvalChannel !== undefined && { approvalChannel }),
       });
       return reply.code(201).send({ action: row });
+    },
+  );
+
+  // Autonomy ladder — suggest promoting an established approval
+  // pattern to auto-execute. See apps/api/src/policy-suggestions.ts
+  // and docs/33-permissions-and-autonomy.md §"Promotion loop".
+  app.get<{
+    Params: { householdId: string };
+    Querystring: { threshold?: string; windowDays?: string };
+  }>(
+    "/households/:householdId/policies/suggestions",
+    {
+      config: {
+        audit: {
+          action: "policy.suggestions.list",
+          resourceType: "policy",
+        },
+      },
+    },
+    async (req) => {
+      const opts: { threshold?: number; windowDays?: number } = {};
+      if (req.query.threshold) {
+        const n = Number(req.query.threshold);
+        if (Number.isFinite(n) && n >= 1) opts.threshold = Math.floor(n);
+      }
+      if (req.query.windowDays) {
+        const n = Number(req.query.windowDays);
+        if (Number.isFinite(n) && n >= 1) opts.windowDays = Math.floor(n);
+      }
+      const suggestions = computeSuggestions(
+        db,
+        req.householdContext as HouseholdId,
+        opts,
+      );
+      return { suggestions };
+    },
+  );
+
+  const AdoptSuggestionBody = z.object({
+    actionClass: z.string().min(1),
+    subjectPrincipalId: z.string().nullable().optional(),
+  });
+
+  app.post<{ Params: { householdId: string } }>(
+    "/households/:householdId/policies/suggestions/adopt",
+    {
+      config: {
+        audit: {
+          action: "policy.suggestions.adopt",
+          resourceType: "policy",
+          sensitive: true,
+        },
+      },
+    },
+    async (req, reply) => {
+      const body = AdoptSuggestionBody.safeParse(req.body);
+      if (!body.success) {
+        return reply
+          .code(400)
+          .send({ error: "invalid_body", issues: body.error.issues });
+      }
+      const result = adoptSuggestion(db, {
+        householdId: req.householdContext as HouseholdId,
+        actionClass: body.data.actionClass,
+        subjectPrincipalId: body.data.subjectPrincipalId ?? null,
+        assertedBy: req.actor.id,
+      });
+      if ("error" in result) {
+        return reply.code(404).send({ error: result.error });
+      }
+      return reply.code(201).send({ policy: result.adopted });
     },
   );
 

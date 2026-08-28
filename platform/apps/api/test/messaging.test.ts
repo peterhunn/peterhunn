@@ -189,15 +189,22 @@ describe("messaging inbound", () => {
     expect(elapsed).toBeLessThan(5000);
   });
 
-  it("twilio webhook records MMS attachments as document.record candidates", async () => {
+  it("twilio webhook records MMS attachments as document.record candidates", { timeout: 15_000 }, async () => {
     contactEndpointRepo(db).create({
       householdId: hh,
       channel: "sms",
       address: "+14158675801",
     });
     // MSW: mock the Twilio media CDN. Two attachments.
-    const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-    const pdfBytes = Buffer.from("%PDF-1.4\nfake\n");
+    // Give each response its own dedicated ArrayBuffer, not a
+    // slice of a pooled node.js Buffer. Buffer.from([…]).buffer
+    // returns the WHOLE pool (typically 8192 bytes), and under
+    // vitest's parallel workers MSW can hand out two overlapping
+    // views into the same pool — the API then hashes both to the
+    // same sha256 and the storedAt collide. Uint8Array-backed
+    // buffers each get their own memory, which sidesteps the race.
+    const pngBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const pdfBytes = new TextEncoder().encode("%PDF-1.4\nfake\n");
     server.use(
       http.get("https://api.twilio.com/photo.png", () =>
         HttpResponse.arrayBuffer(pngBytes.buffer as ArrayBuffer, {
@@ -244,10 +251,15 @@ describe("messaging inbound", () => {
           if (!notes.startsWith("MMS attachment from messaging event ")) return false;
           return title.startsWith("Photo —") || title.startsWith("PDF —");
         });
-      // Unique by storedAt (dedupe across polling iterations).
-      const uniq = Array.from(
-        new Map(found.map((n) => [(n.data as { storedAt: string }).storedAt, n])).values(),
-      );
+      // Dedupe across polling iterations by node id — NOT by
+      // storedAt. Under vitest's parallel workers, MSW's
+      // HttpResponse.arrayBuffer(Buffer.buffer, …) can hand out
+      // views into the same pooled node.js memory for two
+      // concurrent responses, which makes both attachments hash
+      // to the same sha256 in about 1/3 of runs. The nodes are
+      // still distinct (different type-titles, different rows);
+      // deduping by id keeps both in the poll result.
+      const uniq = Array.from(new Map(found.map((n) => [n.id, n])).values());
       return uniq.length >= 2 ? uniq : null;
     });
     expect(docs).not.toBeNull();
@@ -265,10 +277,14 @@ describe("messaging inbound", () => {
   });
 });
 
-// Tiny polling helper — bails after ~1s. Used to wait on
-// fire-and-forget background work in the twilio path.
+// Tiny polling helper — waits up to ~10s at 50ms cadence. Used to
+// wait on fire-and-forget background work in the twilio path.
+// The upper bound is generous because when the whole suite runs
+// under vitest's parallel workers the CPU is loaded and MSW
+// handlers can stall behind other tests' fetches; the 1s ceiling
+// this used to have made this test flaky under that load.
 const pollFor = async <T>(fn: () => T | null): Promise<T | null> => {
-  for (let i = 0; i < 20; i++) {
+  for (let i = 0; i < 200; i++) {
     const v = fn();
     if (v !== null && !(Array.isArray(v) && v.length === 0)) return v;
     await new Promise((r) => setTimeout(r, 50));

@@ -699,6 +699,32 @@ export const api = (token: string) => ({
       redirectUri: string;
       scopes: string[];
     }>(token, "GET", "/oauth/google/config"),
+  policySuggestions: (id: HouseholdId) =>
+    request<{
+      suggestions: Array<{
+        actionClass: string;
+        domain: string;
+        subjectPrincipalId: string | null;
+        nApprovals: number;
+        windowDays: number;
+        currentRung: string;
+        suggestedRung: "execute";
+        proposedPolicySpec: PolicySpec;
+        basisApprovalIds: string[];
+        basisPolicyId: string;
+        basisPolicyLabel: string;
+      }>;
+    }>(token, "GET", `/households/${id}/policies/suggestions`),
+  adoptPolicySuggestion: (
+    id: HouseholdId,
+    body: { actionClass: string; subjectPrincipalId: string | null },
+  ) =>
+    request<{ policy: PolicySummary }>(
+      token,
+      "POST",
+      `/households/${id}/policies/suggestions/adopt`,
+      body,
+    ),
 });
 
 export interface CredentialSummary {
