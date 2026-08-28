@@ -7,6 +7,7 @@ import {
 } from "@atelier/domain";
 import type { Db } from "../client.js";
 import { auditEvents, type AuditEventRow } from "../schema/audit.js";
+import { auditChainRepo, extractPrincipalIds } from "./audit_chain.js";
 
 export interface RecordAuditInput {
   readonly householdId: HouseholdId;
@@ -16,15 +17,21 @@ export interface RecordAuditInput {
   readonly resourceId: string;
   readonly sensitive?: boolean;
   readonly metadata?: Record<string, unknown>;
+  // Explicit principals this event feeds into, in addition to
+  // the ones inferred from the event content (resource_type ===
+  // "principal", metadata.route.principalIds). Callers that
+  // already know the person set can pass it directly.
+  readonly principalIds?: readonly string[];
 }
 
 const newAuditId = (): string => `aud_${randomBytes(12).toString("hex")}`;
 
 export const auditRepo = (db: Db) => ({
   record(input: RecordAuditInput): void {
+    const id = newAuditId();
     db.insert(auditEvents)
       .values({
-        id: newAuditId(),
+        id,
         householdId: input.householdId,
         actorType: input.actor.type,
         actorId: input.actor.id,
@@ -36,6 +43,21 @@ export const auditRepo = (db: Db) => ({
         at: nowIso(),
       })
       .run();
+    // Append to the Merkle DAG — every audit event feeds the
+    // household chain plus the chain of every principal it
+    // references. See docs/52-observability.md §"Audit chain".
+    const event = db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.id, id))
+      .get();
+    if (event) {
+      const inferred = extractPrincipalIds(event);
+      const merged = Array.from(
+        new Set([...(input.principalIds ?? []), ...inferred]),
+      );
+      auditChainRepo(db).append({ event, principalIds: merged });
+    }
   },
 
   listForHousehold(householdId: HouseholdId, limit = 100): AuditEventRow[] {

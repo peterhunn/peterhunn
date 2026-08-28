@@ -3,6 +3,7 @@ export * from "./nodes.js";
 export * from "./edges.js";
 export * from "./actions.js";
 export * from "./audit.js";
+export * from "./audit_chain.js";
 export * from "./audit_export.js";
 export * from "./identity.js";
 export * from "./manager_credentials.js";

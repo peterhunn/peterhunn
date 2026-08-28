@@ -166,6 +166,94 @@ Cleared by (a) waiting for the 30-day rollup window to slide,
 one-off temporary bump via env. The "manager approves a
 specific overrun in the UI" flow is not built yet.
 
+## Audit chain (Merkle DAG)
+
+Every `audit_events` row is chained into a cryptographic Merkle
+DAG so tampering with any past row breaks the chain
+downstream and is detectable at verification time. Two chain
+scopes per household coexist and share hashes:
+
+- **Household chain.** Every audit event on a household feeds
+  its one household chain, in append order. Verifying the
+  chain confirms "no event on this household was modified,
+  deleted, or inserted out of band."
+- **Per-principal chains.** Every event that references a
+  principal (via `resource_type === "principal"` or explicit
+  `principalIds` in the record input / `metadata.route
+  .principalIds`) ALSO feeds that principal's chain. Verifying
+  a person chain confirms "no event on this customer's slice
+  was tampered with." A single event's hash appears in both
+  chains, so a tamper on one shows in both.
+
+The hash is `SHA-256(canonicalJSON(event_content ∪
+prev_household_hash ∪ prev_person_hashes ∪ principal_ids))`.
+Canonical JSON sorts object keys alphabetically; person
+parents are sorted by `principalId` in the preimage so
+ordering is deterministic. Angle-bracket-free hex.
+
+Storage lives in two tables:
+
+- `audit_event_hashes` — one row per event, with `hash`,
+  `prev_household_hash`, `prev_person_hashes` (array of
+  `{principalId, hash}`), `principal_ids`, and
+  `household_sequence` (monotonic ordinal within the
+  household chain — walking by this avoids ordering ties on
+  the ms-precision `at` field).
+- `audit_chain_heads` — one row per active chain, keyed
+  `(household_id, chain_key)`. `chain_key` is the literal
+  string `household` for the whole-household chain or a
+  principal id for a person chain. Row carries `head_hash`,
+  `head_event_id`, `head_at`, and `event_count`.
+
+`auditRepo.record()` appends to every relevant chain in the
+same transaction as the audit row insert. Callers that already
+know the principal set can pass `principalIds: string[]` to
+the record input; the repo also infers from
+`resource_type === "principal"` and `metadata.route
+.principalIds`. Extending the inference (a new resource
+type that implies a person) is a matter of adding rules to
+`extractPrincipalIds` — the persisted chain doesn't migrate.
+
+**Backfill.** On server startup, `auditChainRepo.backfill()`
+walks every `audit_events` row without a hash yet, in
+`(at, id) ASC` order, and appends each to the chain. Idempotent
+— re-runs on every boot are no-ops after the first. History
+prior to migration 0013 gets covered on the first boot after
+upgrading.
+
+**Verification.** `verifyHouseholdChain(householdId)` and
+`verifyPersonChain(householdId, principalId)` walk the chain
+from oldest to newest, re-hashing every event from its stored
+content + stored parent hashes, and check each recomputed
+hash against the stored one AND the tail hash against the
+current head. Return `{ valid, eventCount, headHash,
+brokenAtEventId?, brokenReason? }`. `brokenReason` is
+`hash_mismatch` (event content changed after hashing),
+`event_row_missing` (the underlying audit_events row was
+deleted), or `head_hash_diverges_from_tail` (the head pointer
+was rewritten independently of the chain).
+
+Exposed via HTTP:
+
+- `GET /households/:id/audit/chain/head` — household head
+  hash + event count.
+- `GET /households/:id/audit/chain/verify` — runs full
+  verification, returns the result.
+- `GET /households/:id/audit/chain/person/:principalId/head`
+- `GET /households/:id/audit/chain/person/:principalId/verify`
+
+All four are `sensitive: true` audit-recorded.
+
+**External anchoring.** The local chain catches tampering by
+anyone without DB write access; an operator who can rewrite
+`audit_events` can also rewrite `audit_event_hashes` and
+`audit_chain_heads` to stay internally consistent. External
+anchoring closes this: publish the daily household head hash
+somewhere the platform doesn't control (signed with a platform
+key the customer holds, emailed to the customer, OpenTimestamps
+→ Bitcoin). Not built yet; the local chain is the base primitive
+that the anchoring layer consumes.
+
 ## Audit export
 
 `audit_events` streams out of the app database on its own

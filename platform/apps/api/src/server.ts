@@ -2,7 +2,7 @@ import Fastify from "fastify";
 import rateLimit from "@fastify/rate-limit";
 import helmet from "@fastify/helmet";
 import cors from "@fastify/cors";
-import type { Db } from "@atelier/db";
+import { auditChainRepo, type Db } from "@atelier/db";
 import "./types.js";
 import { authPlugin } from "./auth.js";
 import { auditPlugin } from "./audit.js";
@@ -259,6 +259,25 @@ export const buildServer = (db: Db) => {
   app.register(documentRoutes(db));
   app.register(documentFileRoutes(db));
   app.register(observabilityRoutes(db));
+
+  // Backfill the audit Merkle DAG for any events written before
+  // the chain existed (or before this server generation started).
+  // Idempotent — safe to run on every boot. See migration 0013
+  // and docs/52-observability.md §"Audit chain (Merkle DAG)".
+  try {
+    const { processed } = auditChainRepo(db).backfill();
+    if (processed > 0) {
+      app.log.info(
+        { processed },
+        "audit chain: backfilled pre-existing audit_events into the Merkle DAG",
+      );
+    }
+  } catch (err) {
+    app.log.error(
+      { error: (err as Error).message },
+      "audit chain: backfill failed on startup",
+    );
+  }
 
   return app;
 };

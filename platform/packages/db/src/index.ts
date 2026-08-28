@@ -5,6 +5,7 @@ export * from "./repositories/graph.js";
 export * from "./repositories/identity.js";
 export * from "./repositories/manager-credentials.js";
 export * from "./repositories/audit.js";
+export * from "./repositories/audit_chain.js";
 export * from "./repositories/audit-export.js";
 export * from "./audit-export/index.js";
 export * from "./repositories/policies.js";
