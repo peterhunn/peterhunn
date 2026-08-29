@@ -758,14 +758,36 @@ export async function setAgentSending(
 
 export async function adoptPolicySuggestion(
   householdId: HouseholdId,
-  input: { actionClass: string; subjectPrincipalId: string | null },
+  input: {
+    actionClass: string;
+    subjectPrincipalId: string | null;
+    kind?: "promote" | "demote";
+  },
 ): Promise<{ message: string }> {
   const token = await getSessionToken();
   if (!token) return { message: "Session expired." };
   try {
     const res = await api(token).adoptPolicySuggestion(householdId, input);
+    const verb = input.kind === "demote" ? "Demoted" : "Promoted";
     return {
-      message: `Promoted "${res.policy.spec.label}" → autonomy: execute.`,
+      message: `${verb} "${res.policy.spec.label}" → autonomy: ${res.policy.spec.autonomy}.`,
+    };
+  } catch (err) {
+    if (err instanceof ApiError) return { message: `Error: ${err.message}` };
+    return { message: `Error: ${(err as Error).message}` };
+  }
+}
+
+export async function dismissPolicySuggestion(
+  householdId: HouseholdId,
+  input: { actionClass: string; subjectPrincipalId: string | null },
+): Promise<{ message: string }> {
+  const token = await getSessionToken();
+  if (!token) return { message: "Session expired." };
+  try {
+    await api(token).dismissPolicySuggestion(householdId, input);
+    return {
+      message: "Suggestion dismissed. It will return if the streak breaks.",
     };
   } catch (err) {
     if (err instanceof ApiError) return { message: `Error: ${err.message}` };

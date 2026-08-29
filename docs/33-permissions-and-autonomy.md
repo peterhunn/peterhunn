@@ -259,20 +259,68 @@ Rules the suggestion engine follows:
   audit trail — any historical action that cited the older policy
   still resolves.
 
-Endpoints:
+### Dismissal
+
+A manager can dismiss a suggestion when "not right now" is the
+answer — the streak is real but the pattern isn't ready to run
+without a check (a policy the customer explicitly said should stay
+on manual, an action class the manager wants to keep watching
+personally). Dismissals are persistent per
+`(household_id, action_class, subject_principal_id)` and stored in
+`policy_suggestion_dismissals`. The suggestion won't reappear on
+that pattern until the streak breaks — a `rejected` or
+`approved_with_edit` in the window clears the dismissal
+automatically, so a re-earned clean run can re-emerge without the
+manager having to manually re-arm anything.
+
+### Demotion signal
+
+The inverse loop watches existing `execute` (and `manage_autonomously`)
+policies for signs they're miscalibrated. When escalation
+conditions on such a policy fire and the manager keeps overriding
+them — `rejected` or `approved_with_edit` at least 3 times in the
+window — the API surfaces a **demotion suggestion**: drop back to
+`draft` so every action goes through the manager again. Adopting a
+demotion **revokes** the misconfigured execute policy at the same
+time as creating the draft one; two conflicting rungs on the same
+class + subject would just confuse a later reader.
+
+Promotion suggestions are additive (keep the old, add the new);
+demotions are corrective (replace the old). That asymmetry matches
+their intent — promotion is a widening of authority the customer
+has earned, demotion is a fix for a mistake.
+
+### Endpoints
 
 - `GET /households/:id/policies/suggestions` — returns
-  `{ suggestions: [{ actionClass, subjectPrincipalId, nApprovals,
-  windowDays, currentRung, suggestedRung, proposedPolicySpec,
-  basisApprovalIds, basisPolicyId, basisPolicyLabel }] }`. Optional
-  `?threshold=N&windowDays=N` overrides.
+  `{ suggestions: [<promote> | <demote> …] }`. Each item is a
+  discriminated union on `kind`:
+  - `promote`: `{ kind, actionClass, subjectPrincipalId,
+    nApprovals, windowDays, currentRung, suggestedRung: "execute",
+    proposedPolicySpec, basisApprovalIds, basisPolicyId,
+    basisPolicyLabel }`.
+  - `demote`: `{ kind, actionClass, subjectPrincipalId, nProblems,
+    windowDays, currentRung, suggestedRung: "draft",
+    proposedPolicySpec, basisApprovalIds, basisPolicyId,
+    basisPolicyLabel, summary }`.
+  Query params: `?threshold=N&windowDays=N`.
 - `POST /households/:id/policies/suggestions/adopt` — body
-  `{ actionClass, subjectPrincipalId }` — creates the promoted
-  policy and returns `{ policy }`. Returns 404 when the named
-  pattern is not currently suggested (e.g., a rejection landed in
-  the window since the suggestion was computed).
+  `{ actionClass, subjectPrincipalId, kind? }`. Creates the new
+  policy and returns `{ policy }`. On `kind: "demote"` the basis
+  execute policy is revoked as part of the same operation. Returns
+  404 when the named pattern is not currently suggested (e.g., a
+  rejection landed in the window since the suggestion was computed,
+  or the pattern was dismissed).
+- `POST /households/:id/policies/suggestions/dismiss` — body
+  `{ actionClass, subjectPrincipalId }`. Hides the promotion
+  suggestion until the streak breaks. Demotions aren't
+  dismissible: an over-firing execute policy warrants visibility
+  until it's either revoked or the pattern truly stabilises.
 
 The promotion loop only ever raises autonomy toward `execute`; it
 never suggests `manage_autonomously`, and it never proposes new
-subjects or new action classes. It's a paved path for "this pattern
-has proven itself", not a replacement for manager judgement.
+subjects or new action classes. The demotion loop only ever lowers
+to `draft` — never to `observe`, never all the way off — so the
+manager still sees every proposal and can restore autonomy
+manually. Both are paved paths for the paved cases, not a
+replacement for manager judgement.

@@ -21,3 +21,4 @@ export * from "./repositories/messaging.js";
 export * from "./repositories/verifications.js";
 export * from "./repositories/household_playbooks.js";
 export * from "./repositories/document_blobs.js";
+export * from "./repositories/policy_suggestion_dismissals.js";

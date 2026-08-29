@@ -11,6 +11,7 @@ import { evaluate } from "@atelier/policy";
 import {
   adoptSuggestion,
   computeSuggestions,
+  dismissSuggestion,
 } from "../policy-suggestions.js";
 
 const CreatePolicyBody = z.object({
@@ -187,6 +188,11 @@ export const policyRoutes = (db: Db): FastifyPluginAsync => async (app) => {
   const AdoptSuggestionBody = z.object({
     actionClass: z.string().min(1),
     subjectPrincipalId: z.string().nullable().optional(),
+    // Optional discriminator so a demotion adopt never accidentally
+    // picks up a promotion suggestion for the same pattern (they
+    // can't both exist today, but future config could produce
+    // overlapping kinds — pin what the manager clicked).
+    kind: z.enum(["promote", "demote"]).optional(),
   });
 
   app.post<{ Params: { householdId: string } }>(
@@ -212,11 +218,47 @@ export const policyRoutes = (db: Db): FastifyPluginAsync => async (app) => {
         actionClass: body.data.actionClass,
         subjectPrincipalId: body.data.subjectPrincipalId ?? null,
         assertedBy: req.actor.id,
+        ...(body.data.kind !== undefined && { kind: body.data.kind }),
       });
       if ("error" in result) {
         return reply.code(404).send({ error: result.error });
       }
       return reply.code(201).send({ policy: result.adopted });
+    },
+  );
+
+  const DismissSuggestionBody = z.object({
+    actionClass: z.string().min(1),
+    subjectPrincipalId: z.string().nullable().optional(),
+  });
+
+  app.post<{ Params: { householdId: string } }>(
+    "/households/:householdId/policies/suggestions/dismiss",
+    {
+      config: {
+        audit: {
+          action: "policy.suggestions.dismiss",
+          resourceType: "policy",
+        },
+      },
+    },
+    async (req, reply) => {
+      const body = DismissSuggestionBody.safeParse(req.body);
+      if (!body.success) {
+        return reply
+          .code(400)
+          .send({ error: "invalid_body", issues: body.error.issues });
+      }
+      const result = dismissSuggestion(db, {
+        householdId: req.householdContext as HouseholdId,
+        actionClass: body.data.actionClass,
+        subjectPrincipalId: body.data.subjectPrincipalId ?? null,
+        dismissedBy: req.actor.id,
+      });
+      if ("error" in result) {
+        return reply.code(404).send({ error: result.error });
+      }
+      return reply.code(204).send();
     },
   );
 

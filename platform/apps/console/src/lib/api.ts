@@ -701,28 +701,60 @@ export const api = (token: string) => ({
     }>(token, "GET", "/oauth/google/config"),
   policySuggestions: (id: HouseholdId) =>
     request<{
-      suggestions: Array<{
-        actionClass: string;
-        domain: string;
-        subjectPrincipalId: string | null;
-        nApprovals: number;
-        windowDays: number;
-        currentRung: string;
-        suggestedRung: "execute";
-        proposedPolicySpec: PolicySpec;
-        basisApprovalIds: string[];
-        basisPolicyId: string;
-        basisPolicyLabel: string;
-      }>;
+      suggestions: Array<
+        | {
+            kind: "promote";
+            actionClass: string;
+            domain: string;
+            subjectPrincipalId: string | null;
+            nApprovals: number;
+            windowDays: number;
+            currentRung: string;
+            suggestedRung: "execute";
+            proposedPolicySpec: PolicySpec;
+            basisApprovalIds: string[];
+            basisPolicyId: string;
+            basisPolicyLabel: string;
+          }
+        | {
+            kind: "demote";
+            actionClass: string;
+            domain: string;
+            subjectPrincipalId: string | null;
+            nProblems: number;
+            windowDays: number;
+            currentRung: "execute" | "manage_autonomously";
+            suggestedRung: "draft";
+            proposedPolicySpec: PolicySpec;
+            basisApprovalIds: string[];
+            basisPolicyId: string;
+            basisPolicyLabel: string;
+            summary: string;
+          }
+      >;
     }>(token, "GET", `/households/${id}/policies/suggestions`),
   adoptPolicySuggestion: (
     id: HouseholdId,
-    body: { actionClass: string; subjectPrincipalId: string | null },
+    body: {
+      actionClass: string;
+      subjectPrincipalId: string | null;
+      kind?: "promote" | "demote";
+    },
   ) =>
     request<{ policy: PolicySummary }>(
       token,
       "POST",
       `/households/${id}/policies/suggestions/adopt`,
+      body,
+    ),
+  dismissPolicySuggestion: (
+    id: HouseholdId,
+    body: { actionClass: string; subjectPrincipalId: string | null },
+  ) =>
+    request<void>(
+      token,
+      "POST",
+      `/households/${id}/policies/suggestions/dismiss`,
       body,
     ),
 });
