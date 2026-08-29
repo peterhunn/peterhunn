@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNotNull, lte } from "drizzle-orm";
 import {
   nowIso,
   type ApprovalItem,
@@ -155,6 +155,54 @@ export const approvalRepo = (db: Db) => ({
     }
     return rows
       .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+      .map(toItem);
+  },
+
+  // Pending approvals whose deadline has slipped — the caller
+  // walks these to auto-expire each and shelve its escalated task.
+  // Cross-household read; the sweeper caller aggregates by household
+  // for its own logging + attention rollups. Empty when nothing is
+  // due.
+  listExpirable(nowIsoTs: string, limit = 500): ApprovalItem[] {
+    return db
+      .select()
+      .from(approvals)
+      .where(
+        and(
+          eq(approvals.state, "pending"),
+          isNotNull(approvals.deadlineAt),
+          lte(approvals.deadlineAt, nowIsoTs),
+        ),
+      )
+      .orderBy(desc(approvals.deadlineAt))
+      .limit(limit)
+      .all()
+      .map(toItem);
+  },
+
+  // Currently-pending approvals whose deadline lands between `nowIso`
+  // and `nowIso + horizonMs` — the attention view surfaces these so
+  // a manager sees "there are 3 approvals about to expire in the
+  // next 24h" before the sweeper acts. Includes already-past-
+  // deadline pending rows too (deadlineAt <= nowIso) — those are
+  // slipping and haven't been swept yet.
+  listPendingWithDeadlineWithin(
+    householdId: HouseholdId,
+    horizonIso: string,
+  ): ApprovalItem[] {
+    return db
+      .select()
+      .from(approvals)
+      .where(
+        and(
+          eq(approvals.householdId, householdId),
+          eq(approvals.state, "pending"),
+          isNotNull(approvals.deadlineAt),
+          lte(approvals.deadlineAt, horizonIso),
+        ),
+      )
+      .orderBy(desc(approvals.deadlineAt))
+      .all()
       .map(toItem);
   },
 

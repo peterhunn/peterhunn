@@ -17,6 +17,7 @@ import {
 import type { HouseholdId } from "@atelier/domain";
 import type { Autopilot } from "./autopilot.js";
 import type { PlaybookRunner } from "./playbook-runner.js";
+import { runExpirationPass } from "./approval-expiry.js";
 
 // Background sync scheduler. Every intervalSeconds it walks every
 // household and, per provider it has an unrevoked credential for,
@@ -232,6 +233,25 @@ export const buildScheduler = (db: Db, opts: SchedulerOptions): Scheduler => {
 
         synced++;
         perHousehold.push({ householdId: hh.id, result });
+      }
+
+      // Sweep expired approvals before playbook fires so a
+      // playbook can't pick up an already-slipped ask this tick.
+      // Failures inside runExpirationPass log per-row and the
+      // sweep continues; a whole-sweep exception is caught and
+      // the tick moves on.
+      try {
+        const exp = runExpirationPass(db, { logger: opts.logger });
+        if (exp.expired > 0) {
+          opts.logger.info("scheduler approval expiry applied", {
+            expired: exp.expired,
+            households: Object.keys(exp.byHousehold).length,
+          });
+        }
+      } catch (err) {
+        opts.logger.error("scheduler approval expiry threw", {
+          error: (err as Error).message,
+        });
       }
 
       let playbooksFired = 0;

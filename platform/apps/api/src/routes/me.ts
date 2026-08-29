@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import {
+  approvalRepo,
   contactEndpointRepo,
   graphRepo,
   householdRepo,
@@ -82,7 +83,7 @@ export const meRoutes = (db: Db): FastifyPluginAsync => async (app) => {
   // grant on. Approvals stay on their own /me/approvals
   // endpoint — the dashboard fetches both and stacks them.
   //
-  // Four attention kinds today:
+  // Five attention kinds today:
   //   delivery_failure — an outbound we sent that Twilio marked
   //     failed or undelivered in the last 24h. Something we did
   //     didn't reach the customer; needs manager triage.
@@ -93,6 +94,10 @@ export const meRoutes = (db: Db): FastifyPluginAsync => async (app) => {
   //     dueAt lands in the next 14 days. Proactive nudge.
   //   frozen_household — the household is frozen; every agent
   //     action is shelved until unblocked.
+  //   stale_approval — a pending approval whose deadline lands in
+  //     the next 24h (or has already slipped and the sweeper
+  //     hasn't run yet). Manager should decide before it
+  //     auto-expires.
   //
   // Ranked delivery-failure first, then unread threads, then
   // upcoming obligations. Each entry carries the household id +
@@ -106,7 +111,8 @@ export const meRoutes = (db: Db): FastifyPluginAsync => async (app) => {
         | "delivery_failure"
         | "unread_thread"
         | "upcoming_obligation"
-        | "frozen_household";
+        | "frozen_household"
+        | "stale_approval";
       householdId: string;
       householdName: string;
       sortAt: string;
@@ -118,6 +124,7 @@ export const meRoutes = (db: Db): FastifyPluginAsync => async (app) => {
       unreadThreads: number;
       upcomingObligations: number;
       frozenHouseholds: number;
+      staleApprovals: number;
     };
   }> => {
     if (req.actor.type !== "manager") {
@@ -129,6 +136,7 @@ export const meRoutes = (db: Db): FastifyPluginAsync => async (app) => {
           unreadThreads: 0,
           upcomingObligations: 0,
           frozenHouseholds: 0,
+          staleApprovals: 0,
         },
       };
     }
@@ -136,13 +144,22 @@ export const meRoutes = (db: Db): FastifyPluginAsync => async (app) => {
     const events = messagingEventRepo(db);
     const endpoints = contactEndpointRepo(db);
     const graph = graphRepo(db);
+    const approvals = approvalRepo(db);
 
     const nowIso = new Date().toISOString();
     const dayAgoIso = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const dayAheadIso = new Date(
+      Date.now() + 24 * 60 * 60 * 1000,
+    ).toISOString();
     const fortnightMs = 14 * 24 * 60 * 60 * 1000;
 
     const items: {
-      kind: "delivery_failure" | "unread_thread" | "upcoming_obligation" | "frozen_household";
+      kind:
+        | "delivery_failure"
+        | "unread_thread"
+        | "upcoming_obligation"
+        | "frozen_household"
+        | "stale_approval";
       householdId: string;
       householdName: string;
       sortAt: string;
@@ -154,6 +171,7 @@ export const meRoutes = (db: Db): FastifyPluginAsync => async (app) => {
       unreadThreads: 0,
       upcomingObligations: 0,
       frozenHouseholds: 0,
+      staleApprovals: 0,
     };
 
     for (const rawHh of req.actor.householdIds) {
@@ -250,6 +268,43 @@ export const meRoutes = (db: Db): FastifyPluginAsync => async (app) => {
         }
       }
 
+      // Pending approvals whose deadline lands in the next 24h
+      // (or has already slipped and the sweeper hasn't run yet).
+      // Sort by deadline ascending so most-urgent floats to the
+      // top within the stale_approval group.
+      const stale = approvals.listPendingWithDeadlineWithin(
+        hh.id as HouseholdId,
+        dayAheadIso,
+      );
+      for (const a of stale) {
+        counts.staleApprovals++;
+        const nowMs = Date.now();
+        const dueMs = a.deadlineAt ? Date.parse(a.deadlineAt) : NaN;
+        const overdue = Number.isFinite(dueMs) && dueMs < nowMs;
+        const hoursLeft = Number.isFinite(dueMs)
+          ? Math.round((dueMs - nowMs) / 3_600_000)
+          : null;
+        items.push({
+          kind: "stale_approval",
+          householdId: hh.id,
+          householdName: hhName,
+          sortAt: a.deadlineAt ?? a.createdAt,
+          summary: overdue
+            ? `Approval overdue — ${a.summary}`
+            : `Approval due in ${hoursLeft}h — ${a.summary}`,
+          detail: {
+            approvalId: a.id,
+            actionClass: a.actionClass,
+            subjectPrincipalId: a.subjectPrincipalId ?? null,
+            deadlineAt: a.deadlineAt,
+            hoursLeft,
+            overdue,
+            proposedByAgent: a.proposedBy.agent,
+            authorityPolicyId: a.authorityPolicyId ?? null,
+          },
+        });
+      }
+
       // Upcoming obligations in the next 14 days.
       const now = Date.now();
       const soonest: {
@@ -292,19 +347,24 @@ export const meRoutes = (db: Db): FastifyPluginAsync => async (app) => {
       }
     }
 
-    // Rank order: delivery_failure > unread_thread > upcoming_obligation > frozen_household.
-    // Within a kind, sortAt desc for reactive items (customer
-    // waiting / delivery broken NOW) and asc for proactive
-    // (obligation dueAt) so what's due soonest floats up.
+    // Rank order: delivery_failure > frozen_household >
+    // stale_approval > unread_thread > upcoming_obligation.
+    // stale_approval sits above unread_thread because a slipping
+    // approval will silently auto-expire; an unread thread stays
+    // visible until answered. Within stale_approval + upcoming_
+    // obligation, ascending sortAt so most-urgent floats up.
     const kindRank: Record<string, number> = {
       delivery_failure: 0,
       frozen_household: 1,
-      unread_thread: 2,
-      upcoming_obligation: 3,
+      stale_approval: 2,
+      unread_thread: 3,
+      upcoming_obligation: 4,
     };
     items.sort((a, b) => {
       if (kindRank[a.kind] !== kindRank[b.kind]) return kindRank[a.kind]! - kindRank[b.kind]!;
-      if (a.kind === "upcoming_obligation") return a.sortAt.localeCompare(b.sortAt);
+      if (a.kind === "upcoming_obligation" || a.kind === "stale_approval") {
+        return a.sortAt.localeCompare(b.sortAt);
+      }
       return b.sortAt.localeCompare(a.sortAt);
     });
 

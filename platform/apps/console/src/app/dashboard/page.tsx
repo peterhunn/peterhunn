@@ -22,6 +22,7 @@ export default async function Dashboard() {
         unreadThreads: 0,
         upcomingObligations: 0,
         frozenHouseholds: 0,
+        staleApprovals: 0,
       },
     })),
   ]);
@@ -73,6 +74,9 @@ export default async function Dashboard() {
                   : null,
                 attention.counts.upcomingObligations > 0
                   ? `${attention.counts.upcomingObligations} upcoming obligation${attention.counts.upcomingObligations === 1 ? "" : "s"}`
+                  : null,
+                attention.counts.staleApprovals > 0
+                  ? `${attention.counts.staleApprovals} stale approval${attention.counts.staleApprovals === 1 ? "" : "s"}`
                   : null,
               ]
                 .filter(Boolean)
@@ -142,7 +146,8 @@ function attentionLabel(
     | "delivery_failure"
     | "unread_thread"
     | "upcoming_obligation"
-    | "frozen_household",
+    | "frozen_household"
+    | "stale_approval",
 ): string {
   switch (kind) {
     case "delivery_failure":
@@ -153,5 +158,7 @@ function attentionLabel(
       return "upcoming";
     case "frozen_household":
       return "frozen";
+    case "stale_approval":
+      return "expiring";
   }
 }

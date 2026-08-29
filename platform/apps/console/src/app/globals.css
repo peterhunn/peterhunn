@@ -1737,3 +1737,8 @@ form.login {
 .lineage-authority-link:hover {
   text-decoration: underline solid;
 }
+
+.attention-tag-stale_approval {
+  background: #fef3c7;
+  color: #92400e;
+}

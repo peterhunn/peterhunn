@@ -169,7 +169,8 @@ export const api = (token: string) => ({
           | "delivery_failure"
           | "unread_thread"
           | "upcoming_obligation"
-          | "frozen_household";
+          | "frozen_household"
+          | "stale_approval";
         householdId: string;
         householdName: string;
         sortAt: string;
@@ -181,6 +182,7 @@ export const api = (token: string) => ({
         unreadThreads: number;
         upcomingObligations: number;
         frozenHouseholds: number;
+        staleApprovals: number;
       };
     }>(token, "GET", "/me/attention"),
   approveApproval: (id: HouseholdId, approvalId: string, body: { note?: string }) =>

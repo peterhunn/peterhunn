@@ -168,6 +168,33 @@ Approvals arrive through the manager channel (SMS/email/app), never as
 raw agent output. The customer answers a manager; the manager relays
 to the system.
 
+### Expiration sweeper
+
+The `deadlineAt` on an approval is enforced by a scheduler pass
+(`apps/api/src/approval-expiry.ts`) that runs on every tick.
+Any pending approval whose deadline has slipped is:
+
+1. Transitioned to `state = "expired"` with a synthetic system
+   resolver stamp (`resolvedByType = "manager"`,
+   `resolvedById = "system:approval-expiry"`) and a resolution
+   note pointing back at the deadline.
+2. Its escalated task is shelved (`state = "shelved"`) with a
+   decision summary explaining why — the run is closed.
+3. An `approval.expired` audit event is written (which
+   automatically appends to the household + per-person Merkle
+   chains, so tamper evidence extends to the expiration itself).
+
+The sweep is idempotent: a second call moments later finds no
+more pending-past-deadline rows and returns `{expired: 0}`.
+
+Before the sweeper acts — and to keep managers ahead of it — the
+`/me/attention` view surfaces a `stale_approval` item for every
+pending approval whose deadline lands in the next 24 hours (or
+has already slipped without a sweep run). Overdue items are
+marked with `detail.overdue: true` and the summary reads
+"Approval overdue — …" instead of "Approval due in Nh — …". The
+count rolls up into `counts.staleApprovals` on the dashboard.
+
 ## Audit
 
 Every action, whether autonomous or approved, produces:

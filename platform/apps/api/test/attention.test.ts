@@ -227,6 +227,7 @@ describe("GET /me/attention", () => {
         unreadThreads: number;
         upcomingObligations: number;
         frozenHouseholds: number;
+        staleApprovals: number;
       };
     };
 
@@ -234,6 +235,9 @@ describe("GET /me/attention", () => {
     expect(body.counts.unreadThreads).toBe(1);
     expect(body.counts.upcomingObligations).toBe(1);
     expect(body.counts.frozenHouseholds).toBe(1);
+    // Nothing seeded → stale approvals stay at 0. The
+    // approval-expiry test file exercises the non-zero path.
+    expect(body.counts.staleApprovals).toBe(0);
 
     // hhC must not appear.
     expect(
