@@ -381,18 +381,26 @@ describe("autonomy ladder — policy promotion suggestions", () => {
       expect(a.state).toBe("approved");
     }
 
-    // Hand-written policy → 404 with a "no_lineage" reason so the
-    // console can render "manual" rather than a spurious error.
-    const noLineageRes = await app.inject({
+    // Hand-written policy → 200 with lineage: null. The endpoint
+    // doubles as the reverse-audit target ("this action ran under
+    // policy X — what is X?"), so it must return details even for
+    // manually-authored policies, not 404.
+    const handWrittenRes = await app.inject({
       method: "GET",
       url: `/households/${isolated}/policies/${p.id}/lineage`,
       headers: { authorization: `Bearer ${token}` },
     });
-    expect(noLineageRes.statusCode).toBe(404);
-    expect(noLineageRes.json()).toEqual({
-      error: "no_lineage",
-      message: "Hand-written policy.",
-    });
+    expect(handWrittenRes.statusCode).toBe(200);
+    const handWritten: {
+      policy: { id: string; label: string; autonomy: string };
+      lineage: unknown;
+      basisPolicy: unknown;
+      basisApprovals: unknown[];
+    } = handWrittenRes.json();
+    expect(handWritten.policy.id).toBe(p.id);
+    expect(handWritten.lineage).toBeNull();
+    expect(handWritten.basisPolicy).toBeNull();
+    expect(handWritten.basisApprovals).toEqual([]);
 
     // Cross-household read is refused — the policy belongs to
     // `isolated`, not `hh`, so the auth-scoped lookup misses.

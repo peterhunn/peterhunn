@@ -772,14 +772,16 @@ export const api = (token: string) => ({
         actionClass: string;
         domain: string;
         subject: string;
+        effect: string;
         createdAt: string;
+        revokedAt: string | null;
       };
       lineage: {
         kind: "promote" | "demote";
         basisPolicyId: string;
         basisApprovalIds: string[];
         suggestedAt: string;
-      };
+      } | null;
       basisPolicy: {
         id: string;
         label: string;

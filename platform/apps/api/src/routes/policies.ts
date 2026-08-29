@@ -108,16 +108,21 @@ export const policyRoutes = (db: Db): FastifyPluginAsync => async (app) => {
       if (!policy || policy.householdId !== householdId) {
         return reply.code(404).send({ error: "not_found" });
       }
-      if (!policy.suggestionLineage) {
-        return reply
-          .code(404)
-          .send({ error: "no_lineage", message: "Hand-written policy." });
-      }
-      const basis = policies.get(policy.suggestionLineage.basisPolicyId);
+      // Always return the policy details; lineage + basis are
+      // populated only when the policy was adopted from a
+      // suggestion. This lets the same endpoint back the reverse-
+      // audit case (action → authorizing policy) where the policy
+      // may be hand-written — the console renders the "manual"
+      // variant instead of a spurious error.
+      const lineage = policy.suggestionLineage ?? null;
+      const basis =
+        lineage ? policies.get(lineage.basisPolicyId) : null;
       const approvalsRepo = approvalRepo(db);
-      const basisApprovals = policy.suggestionLineage.basisApprovalIds
-        .map((id) => approvalsRepo.get(id))
-        .filter((a): a is NonNullable<typeof a> => a !== null);
+      const basisApprovals = lineage
+        ? lineage.basisApprovalIds
+            .map((id) => approvalsRepo.get(id))
+            .filter((a): a is NonNullable<typeof a> => a !== null)
+        : [];
       return {
         policy: {
           id: policy.id,
@@ -126,12 +131,11 @@ export const policyRoutes = (db: Db): FastifyPluginAsync => async (app) => {
           actionClass: policy.spec.actionClass,
           domain: policy.spec.domain,
           subject: policy.spec.subject,
+          effect: policy.spec.effect,
           createdAt: policy.createdAt,
+          revokedAt: policy.revokedAt ?? null,
         },
-        lineage: policy.suggestionLineage,
-        // Basis policy may be null when it was revoked and later
-        // hard-deleted; leave null so the console can render
-        // "basis policy no longer available" rather than break.
+        lineage,
         basisPolicy: basis
           ? {
               id: basis.id,
@@ -143,11 +147,6 @@ export const policyRoutes = (db: Db): FastifyPluginAsync => async (app) => {
               revokedAt: basis.revokedAt ?? null,
             }
           : null,
-        // Approvals are hydrated from the audit-log-adjacent
-        // approvals table. Any that have been cascade-deleted
-        // (household purge, etc.) are silently omitted; the
-        // basisApprovalIds on lineage still enumerates them for a
-        // strict auditor.
         basisApprovals: basisApprovals.map((a) => ({
           id: a.id,
           state: a.state,

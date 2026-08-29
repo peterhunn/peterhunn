@@ -315,17 +315,27 @@ A companion endpoint hydrates the stamped ids into full records
 in one round-trip:
 
 - `GET /households/:id/policies/:policyId/lineage` — returns
-  `{ policy, lineage, basisPolicy, basisApprovals }`. `basisPolicy`
-  is null when the parent has been cascade-deleted (household
-  purge); `basisApprovals` silently omits any approvals that no
-  longer exist, though `lineage.basisApprovalIds` still enumerates
-  them for a strict auditor. Returns 404 with `{error:"no_lineage"}`
-  on a hand-written policy so the console can render "manual"
-  rather than a spurious error. Cross-household reads return 404
-  `not_found`.
+  `{ policy, lineage, basisPolicy, basisApprovals }`. `policy` is
+  always populated so the endpoint doubles as a plain
+  policy-details lookup for the reverse-audit case ("this action
+  ran under policy X — what is X?"); `lineage`, `basisPolicy`,
+  and `basisApprovals` populate only when the policy was adopted
+  from a suggestion (hand-written policies read `lineage: null`).
+  `basisPolicy` is null when the parent has been cascade-deleted
+  (household purge); `basisApprovals` silently omits any approvals
+  that no longer exist, though `lineage.basisApprovalIds` still
+  enumerates them for a strict auditor. Cross-household reads
+  return 404 `not_found`.
 
-The console renders the Origin tag on each Policies row as a
-clickable link that opens a modal with this hydration.
+Two console entry points open the same modal:
+
+- Origin tag on the Policies table — for adopted policies, shows
+  the promote/demote chain of custody.
+- Authority link on the Recent actions table — clicks the short
+  policy id, opens the modal on that policy. When the policy is
+  itself adopted, the auditor walks
+  `action → policy → basis approvals` in one drill-in without
+  ever touching a raw id.
 
 ### Endpoints
 

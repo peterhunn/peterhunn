@@ -26,7 +26,10 @@ import { DocumentsPanel } from "./documents-panel";
 import { CostDashboard } from "./cost-dashboard";
 import { PolicySuggestionsPanel } from "./policy-suggestions-panel";
 import { PlaybookSuggestionsPanel } from "./playbook-suggestions-panel";
-import { PolicyLineageLink } from "./policy-lineage-link";
+import {
+  PolicyAuthorityLink,
+  PolicyLineageLink,
+} from "./policy-lineage-link";
 
 export default async function HouseholdPage({
   params,
@@ -440,7 +443,14 @@ export default async function HouseholdPage({
                     {a.amountUsd !== null ? `$${a.amountUsd.toFixed(2)}` : "—"}
                   </td>
                   <td className="mono">
-                    {a.policyIdAuthorizing ? shortId(a.policyIdAuthorizing) : "—"}
+                    {a.policyIdAuthorizing ? (
+                      <PolicyAuthorityLink
+                        householdId={hh.id as HouseholdId}
+                        policyId={a.policyIdAuthorizing}
+                      />
+                    ) : (
+                      "—"
+                    )}
                   </td>
                 </tr>
               ))}

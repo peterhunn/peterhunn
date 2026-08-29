@@ -1724,3 +1724,16 @@ form.login {
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
+
+.lineage-authority-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline dotted;
+}
+.lineage-authority-link:hover {
+  text-decoration: underline solid;
+}
