@@ -89,6 +89,12 @@ export interface PolicySummary {
   readonly spec: PolicySpec;
   readonly createdAt: string;
   readonly revokedAt?: string;
+  readonly suggestionLineage?: {
+    readonly kind: "promote" | "demote";
+    readonly basisPolicyId: string;
+    readonly basisApprovalIds: readonly string[];
+    readonly suggestedAt: string;
+  };
 }
 
 export interface ActionSummary {

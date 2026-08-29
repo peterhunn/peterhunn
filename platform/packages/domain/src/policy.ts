@@ -136,6 +136,18 @@ export const PolicySpec = z.object({
 });
 export type PolicySpec = z.infer<typeof PolicySpec>;
 
+// When a policy was created by adopting an autonomy-ladder
+// suggestion, this block records the chain-of-custody: which
+// approvals (promotion) or which policy (demotion) motivated it.
+// Written once at adopt time and never updated; the auditor's
+// answer to "why does this execute policy exist?".
+export interface PolicySuggestionLineage {
+  readonly kind: "promote" | "demote";
+  readonly basisPolicyId: PolicyId;
+  readonly basisApprovalIds: readonly string[];
+  readonly suggestedAt: string;
+}
+
 export interface Policy {
   readonly id: PolicyId;
   readonly householdId: HouseholdId;
@@ -149,6 +161,7 @@ export interface Policy {
   readonly createdAt: string;
   readonly revokedAt: string | undefined;
   readonly consumedByActionId: ActionId | undefined;
+  readonly suggestionLineage: PolicySuggestionLineage | undefined;
 }
 
 // Requests from the caller (agent/manager/customer channel) to the

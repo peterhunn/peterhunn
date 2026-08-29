@@ -6,9 +6,11 @@ import {
 } from "@atelier/db";
 import {
   AUTONOMY_RANK,
+  nowIso,
   type ApprovalItem,
   type HouseholdId,
   type Policy,
+  type PolicyId,
   type PolicySpec,
 } from "@atelier/domain";
 
@@ -328,6 +330,17 @@ export const adoptSuggestion = (
       source: "manager_observed",
       assertedBy: input.assertedBy,
       confidence: 1,
+    },
+    // Stamp the new policy with the chain of custody so a later
+    // auditor can walk "why does this policy exist?" back to the
+    // suggestion — and from there to the exact approvals that
+    // earned a promotion or the misconfigured execute policy that
+    // motivated a demotion.
+    suggestionLineage: {
+      kind: match.kind,
+      basisPolicyId: match.basisPolicyId as PolicyId,
+      basisApprovalIds: match.basisApprovalIds,
+      suggestedAt: nowIso(),
     },
   });
   // On demotion, revoke the misconfigured execute policy — leaving

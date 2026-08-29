@@ -290,6 +290,27 @@ demotions are corrective (replace the old). That asymmetry matches
 their intent — promotion is a widening of authority the customer
 has earned, demotion is a fix for a mistake.
 
+### Adopted-policy lineage
+
+When a suggestion is adopted, the new policy is stamped with a
+`suggestionLineage` block recording the chain of custody:
+
+```yaml
+suggestion_lineage:
+  kind: promote               # or demote
+  basis_policy_id: pol_...    # what the promotion was cloned from,
+                              # or what the demotion replaced
+  basis_approval_ids:         # the 5 approvals the promotion was
+    - apr_...                 # earned by, or the 3 overrides that
+    - apr_...                 # motivated the demotion
+    - ...
+  suggested_at: 2026-08-29T14:03:22Z
+```
+
+Written once at adopt time and never updated — the auditor's
+answer to "why does this execute policy exist?". Hand-written
+policies leave the block null.
+
 ### Endpoints
 
 - `GET /households/:id/policies/suggestions` — returns

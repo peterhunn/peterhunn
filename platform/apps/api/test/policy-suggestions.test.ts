@@ -324,10 +324,29 @@ describe("autonomy ladder — policy promotion suggestions", () => {
       },
     });
     expect(adoptRes.statusCode).toBe(201);
-    const adopted: { policy: { spec: { autonomy: string; actionClass: string } } } =
-      adoptRes.json();
+    const adopted: {
+      policy: {
+        spec: { autonomy: string; actionClass: string };
+        suggestionLineage?: {
+          kind: string;
+          basisPolicyId: string;
+          basisApprovalIds: string[];
+          suggestedAt: string;
+        };
+      };
+    } = adoptRes.json();
     expect(adopted.policy.spec.autonomy).toBe("execute");
     expect(adopted.policy.spec.actionClass).toBe("event.reschedule");
+    // Lineage is stamped on the adopted policy so a later
+    // auditor can walk "why does this execute policy exist?"
+    // back to the exact 5 approvals it was earned by.
+    expect(adopted.policy.suggestionLineage).toBeDefined();
+    expect(adopted.policy.suggestionLineage!.kind).toBe("promote");
+    expect(adopted.policy.suggestionLineage!.basisPolicyId).toBe(p.id);
+    expect(adopted.policy.suggestionLineage!.basisApprovalIds.length).toBe(5);
+    expect(adopted.policy.suggestionLineage!.suggestedAt).toMatch(
+      /^\d{4}-\d{2}-\d{2}T/,
+    );
 
     // Re-listing now finds no suggestion — the newly created
     // execute policy covers the pattern.
@@ -630,10 +649,23 @@ describe("dismissals and demotion", () => {
       },
     });
     expect(adoptRes.statusCode).toBe(201);
-    const adopted: { policy: { spec: { autonomy: string; label: string } } } =
-      adoptRes.json();
+    const adopted: {
+      policy: {
+        spec: { autonomy: string; label: string };
+        suggestionLineage?: {
+          kind: string;
+          basisPolicyId: string;
+          basisApprovalIds: string[];
+        };
+      };
+    } = adoptRes.json();
     expect(adopted.policy.spec.autonomy).toBe("draft");
     expect(adopted.policy.spec.label).toContain("demoted");
+    // Demotion lineage points back to the misconfigured execute
+    // policy plus the 3 rejected escalations that motivated it.
+    expect(adopted.policy.suggestionLineage!.kind).toBe("demote");
+    expect(adopted.policy.suggestionLineage!.basisPolicyId).toBe(executePolicy.id);
+    expect(adopted.policy.suggestionLineage!.basisApprovalIds.length).toBe(3);
     // Live policies list no longer contains the revoked execute policy.
     const live = policyRepo(db).list(misHh);
     expect(live.find((p) => p.id === executePolicy.id)).toBeUndefined();

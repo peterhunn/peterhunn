@@ -6,6 +6,7 @@ import {
   type Policy,
   type PolicySpec,
   type PolicyId,
+  type PolicySuggestionLineage,
   type HouseholdId,
   type Domain,
   type Provenance,
@@ -28,6 +29,8 @@ const toPolicy = (row: PolicyRow): Policy => ({
   consumedByActionId: (row.consumedByActionId ?? undefined) as
     | Policy["consumedByActionId"]
     | undefined,
+  suggestionLineage:
+    (row.suggestionLineage as PolicySuggestionLineage | null) ?? undefined,
 });
 
 export interface CreatePolicyInput {
@@ -38,6 +41,11 @@ export interface CreatePolicyInput {
     readonly assertedBy: string;
     readonly confidence: number;
   };
+  // Populated when the policy is created by adopting an
+  // autonomy-ladder suggestion. Stored verbatim on the row so an
+  // auditor can walk back to the basis approvals or the demoted
+  // execute policy without re-computing the suggestion.
+  readonly suggestionLineage?: PolicySuggestionLineage;
 }
 
 export const policyRepo = (db: Db) => ({
@@ -61,6 +69,7 @@ export const policyRepo = (db: Db) => ({
         provenanceAssertedAt: now,
         provenanceConfidence: input.provenance.confidence,
         createdAt: now,
+        suggestionLineage: input.suggestionLineage ?? null,
       })
       .run();
     const row = db.select().from(policies).where(eq(policies.id, id)).get();

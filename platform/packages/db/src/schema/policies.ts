@@ -32,6 +32,18 @@ export const policies = sqliteTable(
     createdAt: text("created_at").notNull(),
     revokedAt: text("revoked_at"),
     consumedByActionId: text("consumed_by_action_id"),
+
+    // Populated when the policy was adopted from an autonomy-ladder
+    // suggestion. JSON shape:
+    //   { kind: "promote" | "demote",
+    //     basisPolicyId: string,
+    //     basisApprovalIds: string[],
+    //     suggestedAt: string }
+    // An auditor tracing "why does this execute policy exist?"
+    // reads this column to walk back to the exact approvals that
+    // earned the promotion (or the misconfigured policy that
+    // motivated the demotion). Null on hand-written policies.
+    suggestionLineage: text("suggestion_lineage", { mode: "json" }),
   },
   (t) => ({
     matchIdx: index("policies_match_idx").on(

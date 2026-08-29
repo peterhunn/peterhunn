@@ -374,6 +374,7 @@ export default async function HouseholdPage({
                 <th>Rung</th>
                 <th>Effect</th>
                 <th>Subject</th>
+                <th>Origin</th>
               </tr>
             </thead>
             <tbody>
@@ -387,6 +388,26 @@ export default async function HouseholdPage({
                   </td>
                   <td className="mono">{p.spec.effect}</td>
                   <td className="mono">{p.spec.subject}</td>
+                  <td>
+                    {p.suggestionLineage ? (
+                      <span
+                        className="tag confirmed"
+                        title={`Adopted from ${p.suggestionLineage.kind} suggestion at ${new Date(
+                          p.suggestionLineage.suggestedAt,
+                        ).toLocaleString()} — based on ${p.suggestionLineage.basisApprovalIds.length} approval${
+                          p.suggestionLineage.basisApprovalIds.length === 1
+                            ? ""
+                            : "s"
+                        }. Basis policy: ${shortId(p.suggestionLineage.basisPolicyId)}.`}
+                      >
+                        {p.suggestionLineage.kind === "promote"
+                          ? `↑ from ${p.suggestionLineage.basisApprovalIds.length} approvals`
+                          : `↓ from override pattern`}
+                      </span>
+                    ) : (
+                      <span className="muted">manual</span>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
