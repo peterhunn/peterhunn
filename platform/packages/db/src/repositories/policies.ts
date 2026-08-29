@@ -104,6 +104,11 @@ export const policyRepo = (db: Db) => ({
     return rows.map(toPolicy);
   },
 
+  get(id: PolicyId): Policy | null {
+    const row = db.select().from(policies).where(eq(policies.id, id)).get();
+    return row ? toPolicy(row) : null;
+  },
+
   list(householdId: HouseholdId): Policy[] {
     const rows = db
       .select()

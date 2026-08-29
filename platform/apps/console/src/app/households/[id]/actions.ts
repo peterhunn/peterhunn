@@ -756,6 +756,61 @@ export async function setAgentSending(
   }
 }
 
+export interface PolicyLineage {
+  policy: {
+    id: string;
+    label: string;
+    autonomy: string;
+    actionClass: string;
+    domain: string;
+    subject: string;
+    createdAt: string;
+  };
+  lineage: {
+    kind: "promote" | "demote";
+    basisPolicyId: string;
+    basisApprovalIds: string[];
+    suggestedAt: string;
+  };
+  basisPolicy: {
+    id: string;
+    label: string;
+    autonomy: string;
+    actionClass: string;
+    domain: string;
+    subject: string;
+    revokedAt: string | null;
+  } | null;
+  basisApprovals: Array<{
+    id: string;
+    state: string;
+    summary: string;
+    actionClass: string;
+    subjectPrincipalId: string | null;
+    resolvedAt: string | null;
+    resolvedByType: string | null;
+    resolvedById: string | null;
+    amountUsd: number | null;
+  }>;
+}
+
+export async function loadPolicyLineage(
+  householdId: HouseholdId,
+  policyId: string,
+): Promise<
+  { ok: true; data: PolicyLineage } | { ok: false; message: string }
+> {
+  const token = await getSessionToken();
+  if (!token) return { ok: false, message: "Session expired." };
+  try {
+    const data = await api(token).policyLineage(householdId, policyId);
+    return { ok: true, data };
+  } catch (err) {
+    if (err instanceof ApiError) return { ok: false, message: err.message };
+    return { ok: false, message: (err as Error).message };
+  }
+}
+
 export async function adoptPolicySuggestion(
   householdId: HouseholdId,
   input: {

@@ -1,6 +1,12 @@
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
-import { policyRepo, actionRepo, householdRepo, type Db } from "@atelier/db";
+import {
+  approvalRepo,
+  policyRepo,
+  actionRepo,
+  householdRepo,
+  type Db,
+} from "@atelier/db";
 import {
   ActionRequest,
   PolicySpec,
@@ -78,6 +84,82 @@ export const policyRoutes = (db: Db): FastifyPluginAsync => async (app) => {
         },
       });
       return reply.code(201).send({ policy });
+    },
+  );
+
+  // Lineage drill-in — resolve the ids stamped in
+  // suggestion_lineage into the actual basis policy + basis
+  // approvals. An auditor answering "why does this execute policy
+  // exist?" reads the lineage tag on the row, then fetches this
+  // to walk the full chain of custody in one round-trip.
+  app.get<{ Params: { householdId: string; policyId: string } }>(
+    "/households/:householdId/policies/:policyId/lineage",
+    {
+      config: {
+        audit: {
+          action: "policy.lineage.read",
+          resourceType: "policy",
+        },
+      },
+    },
+    async (req, reply) => {
+      const householdId = req.householdContext as HouseholdId;
+      const policy = policies.get(req.params.policyId as PolicyId);
+      if (!policy || policy.householdId !== householdId) {
+        return reply.code(404).send({ error: "not_found" });
+      }
+      if (!policy.suggestionLineage) {
+        return reply
+          .code(404)
+          .send({ error: "no_lineage", message: "Hand-written policy." });
+      }
+      const basis = policies.get(policy.suggestionLineage.basisPolicyId);
+      const approvalsRepo = approvalRepo(db);
+      const basisApprovals = policy.suggestionLineage.basisApprovalIds
+        .map((id) => approvalsRepo.get(id))
+        .filter((a): a is NonNullable<typeof a> => a !== null);
+      return {
+        policy: {
+          id: policy.id,
+          label: policy.spec.label,
+          autonomy: policy.spec.autonomy,
+          actionClass: policy.spec.actionClass,
+          domain: policy.spec.domain,
+          subject: policy.spec.subject,
+          createdAt: policy.createdAt,
+        },
+        lineage: policy.suggestionLineage,
+        // Basis policy may be null when it was revoked and later
+        // hard-deleted; leave null so the console can render
+        // "basis policy no longer available" rather than break.
+        basisPolicy: basis
+          ? {
+              id: basis.id,
+              label: basis.spec.label,
+              autonomy: basis.spec.autonomy,
+              actionClass: basis.spec.actionClass,
+              domain: basis.spec.domain,
+              subject: basis.spec.subject,
+              revokedAt: basis.revokedAt ?? null,
+            }
+          : null,
+        // Approvals are hydrated from the audit-log-adjacent
+        // approvals table. Any that have been cascade-deleted
+        // (household purge, etc.) are silently omitted; the
+        // basisApprovalIds on lineage still enumerates them for a
+        // strict auditor.
+        basisApprovals: basisApprovals.map((a) => ({
+          id: a.id,
+          state: a.state,
+          summary: a.summary,
+          actionClass: a.actionClass,
+          subjectPrincipalId: a.subjectPrincipalId ?? null,
+          resolvedAt: a.resolvedAt ?? null,
+          resolvedByType: a.resolvedByType ?? null,
+          resolvedById: a.resolvedById ?? null,
+          amountUsd: a.amountUsd ?? null,
+        })),
+      };
     },
   );
 

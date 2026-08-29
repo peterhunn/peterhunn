@@ -763,6 +763,44 @@ export const api = (token: string) => ({
       `/households/${id}/policies/suggestions/dismiss`,
       body,
     ),
+  policyLineage: (id: HouseholdId, policyId: string) =>
+    request<{
+      policy: {
+        id: string;
+        label: string;
+        autonomy: string;
+        actionClass: string;
+        domain: string;
+        subject: string;
+        createdAt: string;
+      };
+      lineage: {
+        kind: "promote" | "demote";
+        basisPolicyId: string;
+        basisApprovalIds: string[];
+        suggestedAt: string;
+      };
+      basisPolicy: {
+        id: string;
+        label: string;
+        autonomy: string;
+        actionClass: string;
+        domain: string;
+        subject: string;
+        revokedAt: string | null;
+      } | null;
+      basisApprovals: Array<{
+        id: string;
+        state: string;
+        summary: string;
+        actionClass: string;
+        subjectPrincipalId: string | null;
+        resolvedAt: string | null;
+        resolvedByType: string | null;
+        resolvedById: string | null;
+        amountUsd: number | null;
+      }>;
+    }>(token, "GET", `/households/${id}/policies/${policyId}/lineage`),
   playbookSuggestions: (id: HouseholdId) =>
     request<{
       suggestions: Array<{

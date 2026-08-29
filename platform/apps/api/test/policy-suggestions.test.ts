@@ -326,6 +326,7 @@ describe("autonomy ladder — policy promotion suggestions", () => {
     expect(adoptRes.statusCode).toBe(201);
     const adopted: {
       policy: {
+        id: string;
         spec: { autonomy: string; actionClass: string };
         suggestionLineage?: {
           kind: string;
@@ -347,6 +348,61 @@ describe("autonomy ladder — policy promotion suggestions", () => {
     expect(adopted.policy.suggestionLineage!.suggestedAt).toMatch(
       /^\d{4}-\d{2}-\d{2}T/,
     );
+
+    // Lineage drill-in endpoint hydrates the ids the row carries.
+    const promotedId = (adopted.policy as { id: string }).id;
+    const lineageRes = await app.inject({
+      method: "GET",
+      url: `/households/${isolated}/policies/${promotedId}/lineage`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(lineageRes.statusCode).toBe(200);
+    const drill: {
+      policy: { id: string; label: string; autonomy: string };
+      lineage: {
+        kind: "promote" | "demote";
+        basisPolicyId: string;
+        basisApprovalIds: string[];
+      };
+      basisPolicy: { id: string; label: string } | null;
+      basisApprovals: Array<{
+        id: string;
+        state: string;
+        summary: string;
+      }>;
+    } = lineageRes.json();
+    expect(drill.lineage.kind).toBe("promote");
+    // Basis policy hydrates.
+    expect(drill.basisPolicy).not.toBeNull();
+    expect(drill.basisPolicy!.id).toBe(p.id);
+    // All 5 basis approvals hydrate with their state.
+    expect(drill.basisApprovals.length).toBe(5);
+    for (const a of drill.basisApprovals) {
+      expect(a.state).toBe("approved");
+    }
+
+    // Hand-written policy → 404 with a "no_lineage" reason so the
+    // console can render "manual" rather than a spurious error.
+    const noLineageRes = await app.inject({
+      method: "GET",
+      url: `/households/${isolated}/policies/${p.id}/lineage`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(noLineageRes.statusCode).toBe(404);
+    expect(noLineageRes.json()).toEqual({
+      error: "no_lineage",
+      message: "Hand-written policy.",
+    });
+
+    // Cross-household read is refused — the policy belongs to
+    // `isolated`, not `hh`, so the auth-scoped lookup misses.
+    const crossHhRes = await app.inject({
+      method: "GET",
+      url: `/households/${hh}/policies/${promotedId}/lineage`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(crossHhRes.statusCode).toBe(404);
+    expect(crossHhRes.json()).toEqual({ error: "not_found" });
 
     // Re-listing now finds no suggestion — the newly created
     // execute policy covers the pattern.

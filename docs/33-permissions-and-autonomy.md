@@ -311,6 +311,22 @@ Written once at adopt time and never updated — the auditor's
 answer to "why does this execute policy exist?". Hand-written
 policies leave the block null.
 
+A companion endpoint hydrates the stamped ids into full records
+in one round-trip:
+
+- `GET /households/:id/policies/:policyId/lineage` — returns
+  `{ policy, lineage, basisPolicy, basisApprovals }`. `basisPolicy`
+  is null when the parent has been cascade-deleted (household
+  purge); `basisApprovals` silently omits any approvals that no
+  longer exist, though `lineage.basisApprovalIds` still enumerates
+  them for a strict auditor. Returns 404 with `{error:"no_lineage"}`
+  on a hand-written policy so the console can render "manual"
+  rather than a spurious error. Cross-household reads return 404
+  `not_found`.
+
+The console renders the Origin tag on each Policies row as a
+clickable link that opens a modal with this hydration.
+
 ### Endpoints
 
 - `GET /households/:id/policies/suggestions` — returns

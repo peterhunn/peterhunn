@@ -26,6 +26,7 @@ import { DocumentsPanel } from "./documents-panel";
 import { CostDashboard } from "./cost-dashboard";
 import { PolicySuggestionsPanel } from "./policy-suggestions-panel";
 import { PlaybookSuggestionsPanel } from "./playbook-suggestions-panel";
+import { PolicyLineageLink } from "./policy-lineage-link";
 
 export default async function HouseholdPage({
   params,
@@ -390,20 +391,12 @@ export default async function HouseholdPage({
                   <td className="mono">{p.spec.subject}</td>
                   <td>
                     {p.suggestionLineage ? (
-                      <span
-                        className="tag confirmed"
-                        title={`Adopted from ${p.suggestionLineage.kind} suggestion at ${new Date(
-                          p.suggestionLineage.suggestedAt,
-                        ).toLocaleString()} — based on ${p.suggestionLineage.basisApprovalIds.length} approval${
-                          p.suggestionLineage.basisApprovalIds.length === 1
-                            ? ""
-                            : "s"
-                        }. Basis policy: ${shortId(p.suggestionLineage.basisPolicyId)}.`}
-                      >
-                        {p.suggestionLineage.kind === "promote"
-                          ? `↑ from ${p.suggestionLineage.basisApprovalIds.length} approvals`
-                          : `↓ from override pattern`}
-                      </span>
+                      <PolicyLineageLink
+                        householdId={hh.id as HouseholdId}
+                        policyId={p.id}
+                        kind={p.suggestionLineage.kind}
+                        approvalCount={p.suggestionLineage.basisApprovalIds.length}
+                      />
                     ) : (
                       <span className="muted">manual</span>
                     )}
