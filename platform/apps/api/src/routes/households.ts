@@ -4,6 +4,7 @@ import { householdRepo } from "@atelier/db";
 import { HouseholdTier, HouseholdRiskTier, type HouseholdId } from "@atelier/domain";
 import type { Db } from "@atelier/db";
 import { stripUndefined } from "../util.js";
+import { buildHouseholdSnapshot } from "../household-snapshot.js";
 
 const CreateHouseholdBody = z.object({
   name: z.string().min(1),
@@ -43,6 +44,27 @@ export const householdRoutes = (db: Db): FastifyPluginAsync => async (app) => {
     const household = repo.create(stripUndefined(body.data));
     return reply.code(201).send({ household });
   });
+
+  // Household health snapshot — a single-shot rollup meant to be
+  // shared with a customer as "here's what's happening across
+  // your household right now". Every field is live, nothing
+  // stored. See apps/api/src/household-snapshot.ts.
+  app.get<{ Params: { householdId: string } }>(
+    "/households/:householdId/snapshot",
+    {
+      config: {
+        audit: { action: "household.snapshot", resourceType: "household" },
+      },
+    },
+    async (req, reply) => {
+      const snapshot = buildHouseholdSnapshot(
+        db,
+        req.householdContext as HouseholdId,
+      );
+      if (!snapshot) return reply.code(404).send({ error: "not_found" });
+      return { snapshot };
+    },
+  );
 
   app.post<{ Params: { householdId: string }; Body: { enabled: boolean } }>(
     "/households/:householdId/autopilot",

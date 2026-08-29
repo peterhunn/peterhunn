@@ -161,6 +161,11 @@ export default async function HouseholdPage({
           <Link href="/dashboard">Households</Link> · {hh.tier}
         </p>
         <h1 className="display">{hh.name}</h1>
+        <p>
+          <Link href={`/households/${id}/snapshot`} className="mono">
+            → open the shareable health snapshot
+          </Link>
+        </p>
         <p className="subtitle">
           Since {new Date(hh.createdAt).toLocaleDateString()} · {nodes.length} node
           {nodes.length === 1 ? "" : "s"} · {policies.length} polic

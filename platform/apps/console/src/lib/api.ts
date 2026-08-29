@@ -805,6 +805,57 @@ export const api = (token: string) => ({
         amountUsd: number | null;
       }>;
     }>(token, "GET", `/households/${id}/policies/${policyId}/lineage`),
+  householdSnapshot: (id: HouseholdId) =>
+    request<{
+      snapshot: {
+        household: {
+          id: string;
+          name: string;
+          tier: string;
+          frozen: boolean;
+          frozenReason: string | null;
+          autopilotEnabled: boolean;
+          instantAckEnabled: boolean;
+          agentSendingEnabled: boolean;
+        };
+        auditChain: {
+          headHash: string | null;
+          eventCount: number;
+          headAt: string | null;
+          valid: boolean;
+          brokenAtEventId: string | null;
+        };
+        approvals: {
+          pending: number;
+          staleWithinDay: number;
+          overdue: number;
+          oldestPendingAt: string | null;
+        };
+        weekActivity: {
+          windowDays: number;
+          totalActions: number;
+          byOutcome: Record<string, number>;
+          topActionClasses: Array<{ actionClass: string; count: number }>;
+          topPolicies: Array<{ policyId: string; label: string; count: number }>;
+        };
+        messaging: {
+          unreadThreads: number;
+          deliveryFailuresLast24h: number;
+          lastInboundAt: string | null;
+          lastOutboundAt: string | null;
+        };
+        obligations: {
+          upcoming14d: number;
+          top: Array<{ title: string; dueAt: string; daysLeft: number }>;
+        };
+        policies: {
+          totalActive: number;
+          executeCount: number;
+        };
+        generatedAt: string;
+        lastActivityAt: string | null;
+      };
+    }>(token, "GET", `/households/${id}/snapshot`),
   playbookSuggestions: (id: HouseholdId) =>
     request<{
       suggestions: Array<{

@@ -336,6 +336,37 @@ A distinct **QA layer** exists parallel to line operations:
 QA reviewers see the same audit trail as line managers. Nothing is
 hidden from oversight.
 
+## Household health snapshot
+
+`/households/:id/snapshot` is a single-page rollup meant to be
+shared with a customer as "here's what's happening across your
+household right now". Every field is computed live from state on
+each request — nothing stored, no ids or free-form summaries that
+would leak sensitive detail:
+
+- **Audit chain** — head hash + event count + a ✓ verified /
+  ✗ broken checkmark. The chain is walked end-to-end on each
+  render, so the checkmark reflects the moment of the snapshot.
+- **Approvals** — pending count, count stale within the next 24h,
+  overdue count, oldest pending timestamp.
+- **Actions this week** — total, by outcome (succeeded / failed_*
+  / rolled_back), top three action classes, top three authority
+  policies (labels only, ids elided from the shareable page).
+- **Messaging** — unread threads count (24h), delivery failures
+  count (24h), most recent inbound + outbound timestamps.
+- **Upcoming obligations** — 14-day horizon count + top three by
+  due date.
+- **Policies** — total active, count auto-executing.
+- **Autonomy settings** — autopilot / instant-ack / agent-sending
+  toggles' live state.
+
+The console renders the snapshot as a spartan grid of tiles plus
+a couple of top-3 lists at
+`/households/:id/snapshot`, reachable from a link on the main
+household page. The backing endpoint is
+`GET /households/:id/snapshot` returning `{ snapshot: {…} }`;
+returns 404 for an unknown household id.
+
 ## What the console must not become
 
 - A chat window with an LLM. That is not the manager's job.

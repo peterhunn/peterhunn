@@ -1742,3 +1742,56 @@ form.login {
   background: #fef3c7;
   color: #92400e;
 }
+
+/* Household snapshot page — a screenshot-safe rollup shared with
+   customers. Grid of tiles + a couple of top-3 lists. */
+
+.snapshot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  margin: 24px 0;
+}
+.snapshot-tile {
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 16px;
+  background: var(--surface, #fff);
+}
+.snapshot-tile-warn {
+  border-color: #f59e0b;
+  background: #fffbeb;
+}
+.snapshot-tile-danger {
+  border-color: #dc2626;
+  background: #fef2f2;
+}
+.snapshot-tile-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-muted, #666);
+  margin-bottom: 8px;
+}
+.snapshot-tile-value {
+  font-size: 28px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.snapshot-tile-hint {
+  font-size: 13px;
+}
+.snapshot-section {
+  margin-top: 24px;
+}
+.snapshot-section h2 {
+  font-size: 16px;
+  margin-bottom: 8px;
+}
+.snapshot-top-list {
+  margin: 0;
+  padding-left: 20px;
+}
+.snapshot-top-list li {
+  margin: 4px 0;
+}
