@@ -324,3 +324,46 @@ to `draft` — never to `observe`, never all the way off — so the
 manager still sees every proposal and can restore autonomy
 manually. Both are paved paths for the paved cases, not a
 replacement for manager judgement.
+
+## Playbook suggestions
+
+The autonomy ladder promotes a single approval pattern to
+`execute`; a playbook enables a whole recurring workflow (weekly
+renewals scan, monthly coverage plan, Sunday travel prep sweep).
+The same "observe, don't push" posture applies: when the
+household's activity shape indicates a shipped playbook would
+earn its keep, the API surfaces a suggestion — the manager
+decides.
+
+Heuristics live in `apps/api/src/playbook-suggestions.ts`, one per
+playbook. They read from the graph and the action log rather than
+from any new bespoke table, and each is deliberately conservative:
+a wrong suggestion is worse than no suggestion because an enabled
+playbook fires on its own schedule forever until disabled.
+
+The three shipped playbooks and their signals today:
+
+- `admin.weekly-renewals-review` — earns its keep when the
+  household has enough documents on file that expiries become
+  work to track. Signal: ≥3 `document.*` nodes.
+- `travel.prep-sweep` — earns its keep when the household
+  actually travels. Signal: ≥2 actions in the `travel` domain in
+  the window (default 60 days).
+- `family.coverage-check` — earns its keep when there's a
+  family to coordinate. Signal: ≥2 people on the graph across
+  principal/member/staff/contact types.
+
+### Endpoint
+
+- `GET /households/:id/playbooks/suggestions` — returns
+  `{ suggestions: [{ playbookId, name, description, domain, reason,
+  signal: { count, threshold, unit } }] }`. `reason` is a human
+  one-liner the console renders next to the Enable button; the
+  `signal` triple is there for a numeric read-out.
+
+Enablement uses the existing `PUT /households/:id/playbooks/:playbookId`
+route — no new adopt endpoint — so an enabled playbook drops out
+of the suggestions list automatically on next compute. There's no
+dismissal for playbooks today: if the manager doesn't want a
+suggestion, they leave it. A dismissal table can land later on
+the same shape as the policy one if the noise becomes a problem.

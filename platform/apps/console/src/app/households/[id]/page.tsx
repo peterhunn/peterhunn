@@ -25,6 +25,7 @@ import { AssetsPanel } from "./assets-panel";
 import { DocumentsPanel } from "./documents-panel";
 import { CostDashboard } from "./cost-dashboard";
 import { PolicySuggestionsPanel } from "./policy-suggestions-panel";
+import { PlaybookSuggestionsPanel } from "./playbook-suggestions-panel";
 
 export default async function HouseholdPage({
   params,
@@ -116,6 +117,10 @@ export default async function HouseholdPage({
 
   const policySuggestionsRes = await client
     .policySuggestions(id as HouseholdId)
+    .catch(() => ({ suggestions: [] }));
+
+  const playbookSuggestionsRes = await client
+    .playbookSuggestions(id as HouseholdId)
     .catch(() => ({ suggestions: [] }));
 
   const messagingCfg = await client.messagingConfig().catch(() => ({
@@ -346,6 +351,11 @@ export default async function HouseholdPage({
         <PolicySuggestionsPanel
           householdId={hh.id as HouseholdId}
           suggestions={policySuggestionsRes.suggestions}
+        />
+
+        <PlaybookSuggestionsPanel
+          householdId={hh.id as HouseholdId}
+          suggestions={playbookSuggestionsRes.suggestions}
         />
 
         <div className="section-head">

@@ -757,6 +757,17 @@ export const api = (token: string) => ({
       `/households/${id}/policies/suggestions/dismiss`,
       body,
     ),
+  playbookSuggestions: (id: HouseholdId) =>
+    request<{
+      suggestions: Array<{
+        playbookId: string;
+        name: string;
+        description: string;
+        domain: string;
+        reason: string;
+        signal: { count: number; threshold: number; unit: string };
+      }>;
+    }>(token, "GET", `/households/${id}/playbooks/suggestions`),
 });
 
 export interface CredentialSummary {

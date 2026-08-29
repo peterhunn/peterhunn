@@ -4,6 +4,7 @@ import { householdPlaybookRepo, type Db } from "@atelier/db";
 import type { HouseholdId } from "@atelier/domain";
 import { buildPlaybookRegistry, computeNextFireAt } from "@atelier/agents";
 import { buildPlaybookRunner } from "../playbook-runner.js";
+import { computePlaybookSuggestions } from "../playbook-suggestions.js";
 
 // Playbooks — packaged autonomy templates. GET returns the catalog
 // with each entry annotated by this household's enablement state.
@@ -45,6 +46,39 @@ export const playbookRoutes = (db: Db): FastifyPluginAsync => async (app) => {
             lastRunId: state?.lastRunId ?? null,
           };
         }),
+      };
+    },
+  );
+
+  // Auto-enable suggestions — playbooks the household's activity
+  // shape indicates would earn their keep. See
+  // apps/api/src/playbook-suggestions.ts and
+  // docs/33-permissions-and-autonomy.md §"Playbook suggestions".
+  app.get<{
+    Params: { householdId: string };
+    Querystring: { windowDays?: string };
+  }>(
+    "/households/:householdId/playbooks/suggestions",
+    {
+      config: {
+        audit: {
+          action: "playbook.suggestions.list",
+          resourceType: "household_playbook",
+        },
+      },
+    },
+    async (req) => {
+      const opts: { windowDays?: number } = {};
+      if (req.query.windowDays) {
+        const n = Number(req.query.windowDays);
+        if (Number.isFinite(n) && n >= 1) opts.windowDays = Math.floor(n);
+      }
+      return {
+        suggestions: computePlaybookSuggestions(
+          db,
+          req.householdContext as HouseholdId,
+          opts,
+        ),
       };
     },
   );
