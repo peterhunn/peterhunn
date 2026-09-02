@@ -1,0 +1,1 @@
+ALTER TABLE `households` ADD `instant_ack_enabled` text DEFAULT 'no' NOT NULL;

@@ -1,0 +1,927 @@
+import type {
+  Actor,
+  ApprovalItem,
+  HouseholdId,
+  ModelSpec,
+  PolicyDecision,
+  PolicySpec,
+  TaskClassSpec,
+} from "@atelier/domain";
+
+const API_URL = process.env.ATELIER_API_URL ?? "http://localhost:3001";
+
+export class ApiError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+const request = async <T>(
+  token: string,
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<T> => {
+  const res = await fetch(`${API_URL}${path}`, {
+    method,
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${token}`,
+    },
+    ...(body !== undefined && { body: JSON.stringify(body) }),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    let msg = res.statusText;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      // ignore
+    }
+    throw new ApiError(res.status, msg);
+  }
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
+};
+
+export interface Household {
+  readonly id: HouseholdId;
+  readonly name: string;
+  readonly tier: "life" | "executive" | "private";
+  readonly riskTier: "standard" | "elevated" | "hnw";
+  readonly createdAt: string;
+  readonly frozenAt?: string;
+  readonly frozenReason?: string;
+  readonly autopilotEnabled?: boolean;
+  readonly instantAckEnabled?: boolean;
+  readonly agentSendingEnabled?: boolean;
+}
+
+export interface NodeSummary {
+  readonly id: string;
+  readonly type: string;
+  readonly data: Record<string, unknown>;
+  readonly provenance: {
+    readonly source: string;
+    readonly assertedBy: string;
+    readonly assertedAt: string;
+    readonly confidence: number;
+    readonly status: "candidate" | "confirmed" | "retired";
+  };
+  readonly createdAt: string;
+}
+
+export interface AuditEventSummary {
+  readonly id: string;
+  readonly actorType: string;
+  readonly actorId: string;
+  readonly action: string;
+  readonly resourceType: string;
+  readonly resourceId: string;
+  readonly sensitive: "yes" | "no";
+  readonly at: string;
+}
+
+export interface PolicySummary {
+  readonly id: string;
+  readonly spec: PolicySpec;
+  readonly createdAt: string;
+  readonly revokedAt?: string;
+  readonly suggestionLineage?: {
+    readonly kind: "promote" | "demote";
+    readonly basisPolicyId: string;
+    readonly basisApprovalIds: readonly string[];
+    readonly suggestedAt: string;
+  };
+}
+
+export interface ActionSummary {
+  readonly id: string;
+  readonly actionClass: string;
+  readonly domain: string;
+  readonly agent: string;
+  readonly outcome: string;
+  readonly summary: string;
+  readonly amountUsd: number | null;
+  readonly policyIdAuthorizing: string | null;
+  readonly createdAt: string;
+}
+
+export interface PasskeySummary {
+  readonly id: string;
+  readonly deviceLabel: string;
+  readonly createdAt: string;
+  readonly lastUsedAt: string | null;
+}
+
+export const api = (token: string) => ({
+  me: () => request<{ actor: Actor }>(token, "GET", "/me"),
+  listPasskeys: () =>
+    request<{ passkeys: PasskeySummary[] }>(token, "GET", "/me/passkeys"),
+  listHouseholds: () => request<{ households: Household[] }>(token, "GET", "/households"),
+  getHousehold: (id: HouseholdId) =>
+    request<{ household: Household }>(token, "GET", `/households/${id}`),
+  listNodes: (id: HouseholdId) =>
+    request<{ nodes: NodeSummary[] }>(token, "GET", `/households/${id}/nodes`),
+  listAudit: (id: HouseholdId) =>
+    request<{ events: AuditEventSummary[] }>(token, "GET", `/households/${id}/audit`),
+  listPolicies: (id: HouseholdId) =>
+    request<{ policies: PolicySummary[] }>(token, "GET", `/households/${id}/policies`),
+  listActions: (id: HouseholdId) =>
+    request<{ actions: ActionSummary[] }>(token, "GET", `/households/${id}/actions`),
+  evaluate: (id: HouseholdId, request_: unknown) =>
+    request<{ decision: PolicyDecision }>(
+      token,
+      "POST",
+      `/households/${id}/policies/evaluate`,
+      request_,
+    ),
+  freeze: (id: HouseholdId, reason: string) =>
+    request<void>(token, "POST", `/households/${id}/freeze`, { reason }),
+  unfreeze: (id: HouseholdId) =>
+    request<void>(token, "POST", `/households/${id}/unfreeze`),
+  listTasks: (id: HouseholdId) =>
+    request<{ tasks: TaskSummary[] }>(token, "GET", `/households/${id}/tasks`),
+  runIntent: (id: HouseholdId, intent: unknown) =>
+    request<{ run: RunResult }>(token, "POST", `/households/${id}/orchestrator/run`, intent),
+  planAndRun: (id: HouseholdId, body: { prompt: string; origin?: unknown }) =>
+    request<{
+      planAndRun: {
+        plan: {
+          reasoning: string;
+          intents: Array<{ kind: string; attrs: Record<string, unknown> }>;
+        };
+        plannerTaskClass: string;
+        runs: RunResult[];
+      };
+    }>(token, "POST", `/households/${id}/orchestrator/plan-and-run`, body),
+  listApprovals: (id: HouseholdId) =>
+    request<{ approvals: ApprovalItem[] }>(token, "GET", `/households/${id}/approvals`),
+  approvalInbox: () =>
+    request<{ approvals: ApprovalItem[] }>(token, "GET", "/approvals/inbox"),
+  attention: () =>
+    request<{
+      generatedAt: string;
+      items: Array<{
+        kind:
+          | "delivery_failure"
+          | "unread_thread"
+          | "upcoming_obligation"
+          | "frozen_household"
+          | "stale_approval";
+        householdId: string;
+        householdName: string;
+        sortAt: string;
+        summary: string;
+        detail: Record<string, unknown>;
+      }>;
+      counts: {
+        deliveryFailures: number;
+        unreadThreads: number;
+        upcomingObligations: number;
+        frozenHouseholds: number;
+        staleApprovals: number;
+      };
+    }>(token, "GET", "/me/attention"),
+  approveApproval: (id: HouseholdId, approvalId: string, body: { note?: string }) =>
+    request<{ approval: ApprovalItem }>(
+      token,
+      "POST",
+      `/households/${id}/approvals/${approvalId}/approve`,
+      body,
+    ),
+  rejectApproval: (id: HouseholdId, approvalId: string, body: { note: string }) =>
+    request<{ approval: ApprovalItem }>(
+      token,
+      "POST",
+      `/households/${id}/approvals/${approvalId}/reject`,
+      body,
+    ),
+  listModels: () => request<{ models: ModelSpec[] }>(token, "GET", "/models"),
+  listTaskClasses: () =>
+    request<{ taskClasses: TaskClassSpec[] }>(token, "GET", "/models/task-classes"),
+  modelCallsDaily: (id: HouseholdId, windowDays = 30) =>
+    request<{
+      windowDays: number;
+      days: Array<{
+        day: string;
+        totalUsd: number;
+        totalCalls: number;
+        byTier: Record<string, { usd: number; calls: number }>;
+      }>;
+    }>(
+      token,
+      "GET",
+      `/households/${id}/model-calls/daily?windowDays=${windowDays}`,
+    ),
+  taskModelCalls: (id: HouseholdId, taskId: string) =>
+    request<{
+      task: {
+        id: string;
+        agent: string;
+        kind: string;
+        state: string;
+        decisionSummary: string | null;
+        createdAt: string;
+      };
+      summary: {
+        totalCalls: number;
+        totalUsd: number;
+        totalTokensIn: number;
+        totalTokensOut: number;
+        totalCachedInputTokens: number;
+      };
+      calls: Array<{
+        id: string;
+        createdAt: string;
+        taskClass: string;
+        minTier: string;
+        selectedTier: string;
+        modelId: string;
+        provider: string;
+        inputTokens: number;
+        outputTokens: number;
+        cachedInputTokens: number;
+        cacheWriteInputTokens: number;
+        costUsdEstimated: number;
+        latencyMs: number;
+        finishReason: string;
+        routerReasons: string[];
+        summary: string;
+      }>;
+    }>(token, "GET", `/households/${id}/tasks/${taskId}/model-calls`),
+  runDetail: (id: HouseholdId, runId: string) =>
+    request<{
+      run: {
+        id: string;
+        intentKind: string;
+        intentAttrs: Record<string, unknown>;
+        origin: string;
+        originBy: string;
+        state: string;
+        createdAt: string;
+        finishedAt: string | null;
+      };
+      summary: {
+        taskCount: number;
+        modelCallCount: number;
+        actionCount: number;
+        totalUsd: number;
+      };
+      timeline: Array<{
+        at: string;
+        kind: "run" | "task" | "model_call" | "action";
+        summary: string;
+        detail?: Record<string, unknown>;
+      }>;
+    }>(token, "GET", `/households/${id}/runs/${runId}`),
+  inferenceBudget: (id: HouseholdId) =>
+    request<{
+      totalUsd: number;
+      totalCalls: number;
+      capUsd: number;
+      status: "under" | "approaching" | "over" | "over_hard";
+      byTier: Record<string, { calls: number; usd: number }>;
+    }>(token, "GET", `/households/${id}/inference-budget`),
+  listInbox: (id: HouseholdId) =>
+    request<{ messages: InboxMessageSummary[] }>(token, "GET", `/households/${id}/inbox`),
+  syncGmailInbox: (
+    id: HouseholdId,
+    opts?: { maxResults?: number; mailbox?: "inbox" | "sent" | "both" },
+  ) =>
+    request<
+      | {
+          sync: {
+            consulted: boolean;
+            listed: number;
+            fetched: number;
+            inserted: number;
+            skippedDuplicates: number;
+          };
+        }
+      | {
+          mailboxes: Array<{
+            mailbox: "inbox" | "sent";
+            result: {
+              consulted: boolean;
+              listed: number;
+              fetched: number;
+              inserted: number;
+              skippedDuplicates: number;
+            };
+          }>;
+        }
+    >(
+      token,
+      "POST",
+      `/households/${id}/inbox/sync`,
+      opts ?? {},
+    ),
+  listMessagingEndpoints: (id: HouseholdId) =>
+    request<{
+      endpoints: Array<{
+        id: string;
+        channel: "sms" | "whatsapp" | "imessage" | "email";
+        address: string;
+        label: string | null;
+        principalId: string | null;
+        createdAt: string;
+        revokedAt: string | null;
+        consentStatus: "unknown" | "opted_in" | "opted_out";
+        consentRecordedAt: string | null;
+        consentSource: string | null;
+      }>;
+    }>(token, "GET", `/households/${id}/messaging/endpoints`),
+  addMessagingEndpoint: (
+    id: HouseholdId,
+    input: {
+      channel: "sms" | "whatsapp" | "imessage" | "email";
+      address: string;
+      label?: string;
+      principalId?: string;
+    },
+  ) =>
+    request<{ endpoint: { id: string } }>(
+      token,
+      "POST",
+      `/households/${id}/messaging/endpoints`,
+      input,
+    ),
+  revokeMessagingEndpoint: (id: HouseholdId, endpointId: string) =>
+    request<void>(
+      token,
+      "DELETE",
+      `/households/${id}/messaging/endpoints/${endpointId}`,
+    ),
+  listPeople: (id: HouseholdId) =>
+    request<{
+      people: {
+        principal: Array<{ id: string; data: Record<string, unknown> }>;
+        member: Array<{ id: string; data: Record<string, unknown> }>;
+        staff: Array<{ id: string; data: Record<string, unknown> }>;
+        contact: Array<{ id: string; data: Record<string, unknown> }>;
+      };
+    }>(token, "GET", `/households/${id}/people`),
+  createPerson: (
+    id: HouseholdId,
+    input: {
+      kind: "principal" | "member" | "staff" | "contact";
+      data: Record<string, unknown>;
+    },
+  ) =>
+    request<{
+      person: { id: string; kind: string; data: Record<string, unknown> };
+    }>(token, "POST", `/households/${id}/people`, input),
+  updatePerson: (
+    id: HouseholdId,
+    nodeId: string,
+    data: Record<string, unknown>,
+  ) =>
+    request<{
+      person: { id: string; kind: string; data: Record<string, unknown> };
+    }>(token, "PATCH", `/households/${id}/people/${nodeId}`, { data }),
+  deletePerson: (id: HouseholdId, nodeId: string) =>
+    request<void>(token, "DELETE", `/households/${id}/people/${nodeId}`),
+  listDocuments: (id: HouseholdId) =>
+    request<{
+      documents: {
+        identity: Array<{ id: string; data: Record<string, unknown> }>;
+        legal: Array<{ id: string; data: Record<string, unknown> }>;
+        policy: Array<{ id: string; data: Record<string, unknown> }>;
+        record: Array<{ id: string; data: Record<string, unknown> }>;
+        receipt: Array<{ id: string; data: Record<string, unknown> }>;
+      };
+    }>(token, "GET", `/households/${id}/documents`),
+  createDocument: (
+    id: HouseholdId,
+    input: {
+      subcategory: "identity" | "legal" | "policy" | "record" | "receipt";
+      data: Record<string, unknown>;
+    },
+  ) =>
+    request<{
+      document: {
+        id: string;
+        subcategory: string;
+        data: Record<string, unknown>;
+      };
+    }>(token, "POST", `/households/${id}/documents`, input),
+  updateDocument: (
+    id: HouseholdId,
+    nodeId: string,
+    data: Record<string, unknown>,
+  ) =>
+    request<{
+      document: {
+        id: string;
+        subcategory: string;
+        data: Record<string, unknown>;
+      };
+    }>(token, "PATCH", `/households/${id}/documents/${nodeId}`, { data }),
+  deleteDocument: (id: HouseholdId, nodeId: string) =>
+    request<void>(token, "DELETE", `/households/${id}/documents/${nodeId}`),
+  resolveDocumentExtraction: (
+    id: HouseholdId,
+    nodeId: string,
+    body: { accept: string[]; edits?: Record<string, unknown> },
+  ) =>
+    request<{
+      document: { id: string; data: Record<string, unknown> };
+      accepted: string[];
+      acceptedCount: number;
+    }>(
+      token,
+      "POST",
+      `/households/${id}/documents/${nodeId}/extraction/resolve`,
+      body,
+    ),
+  documentAudit: (id: HouseholdId, nodeId: string) =>
+    request<{
+      lineage: string[];
+      events: Array<
+        AuditEventSummary & {
+          metadata: {
+            method?: string;
+            url?: string;
+            status?: number;
+            route?: Record<string, unknown>;
+          };
+        }
+      >;
+    }>(token, "GET", `/households/${id}/documents/${nodeId}/audit`),
+  listAssets: (id: HouseholdId) =>
+    request<{
+      assets: {
+        property: Array<{ id: string; data: Record<string, unknown> }>;
+        vehicle: Array<{ id: string; data: Record<string, unknown> }>;
+        equipment: Array<{ id: string; data: Record<string, unknown> }>;
+        membership: Array<{ id: string; data: Record<string, unknown> }>;
+        pet: Array<{ id: string; data: Record<string, unknown> }>;
+      };
+    }>(token, "GET", `/households/${id}/assets`),
+  createAsset: (
+    id: HouseholdId,
+    input: {
+      kind: "property" | "vehicle" | "equipment" | "membership" | "pet";
+      data: Record<string, unknown>;
+    },
+  ) =>
+    request<{
+      asset: { id: string; kind: string; data: Record<string, unknown> };
+    }>(token, "POST", `/households/${id}/assets`, input),
+  updateAsset: (
+    id: HouseholdId,
+    nodeId: string,
+    data: Record<string, unknown>,
+  ) =>
+    request<{
+      asset: { id: string; kind: string; data: Record<string, unknown> };
+    }>(token, "PATCH", `/households/${id}/assets/${nodeId}`, { data }),
+  deleteAsset: (id: HouseholdId, nodeId: string) =>
+    request<void>(token, "DELETE", `/households/${id}/assets/${nodeId}`),
+  listPlaybooks: (id: HouseholdId) =>
+    request<{
+      playbooks: Array<{
+        id: string;
+        name: string;
+        description: string;
+        domain: string;
+        schedule: Record<string, unknown>;
+        defaultConfig: Record<string, unknown>;
+        enabled: boolean;
+        registered: boolean;
+        config: Record<string, unknown>;
+        lastFireAt: string | null;
+        nextFireAt: string | null;
+        lastRunId: string | null;
+      }>;
+    }>(token, "GET", `/households/${id}/playbooks`),
+  enablePlaybook: (
+    id: HouseholdId,
+    playbookId: string,
+    config?: Record<string, unknown>,
+  ) =>
+    request<{ playbook: Record<string, unknown> }>(
+      token,
+      "PUT",
+      `/households/${id}/playbooks/${playbookId}`,
+      config ? { config } : {},
+    ),
+  disablePlaybook: (id: HouseholdId, playbookId: string) =>
+    request<void>(token, "DELETE", `/households/${id}/playbooks/${playbookId}`),
+  runPlaybookNow: (id: HouseholdId, playbookId: string) =>
+    request<{
+      fire: {
+        outcome: "fired" | "skipped" | "unknown_playbook" | "error";
+        reason?: string;
+        runId?: string;
+      } | null;
+    }>(token, "POST", `/households/${id}/playbooks/${playbookId}/run`),
+  listVerifications: (id: HouseholdId) =>
+    request<{
+      verifications: Array<{
+        id: string;
+        channel: "sms" | "whatsapp" | "imessage" | "email";
+        code: string;
+        expiresAt: string;
+        consumedAt: string | null;
+        consumedFromAddress: string | null;
+        label: string | null;
+      }>;
+    }>(token, "GET", `/households/${id}/messaging/verifications`),
+  createVerification: (
+    id: HouseholdId,
+    input: {
+      channel: "sms" | "whatsapp" | "imessage" | "email";
+      ttlSeconds?: number;
+      label?: string;
+    },
+  ) =>
+    request<{
+      verification: {
+        id: string;
+        channel: "sms" | "whatsapp" | "imessage" | "email";
+        code: string;
+        expiresAt: string;
+        label: string | null;
+      };
+    }>(token, "POST", `/households/${id}/messaging/verifications`, input),
+  inviteCustomer: (
+    id: HouseholdId,
+    input: {
+      channel: "sms" | "whatsapp";
+      address: string;
+      label?: string;
+      principalId?: string;
+      ttlSeconds?: number;
+      bodyOverride?: string;
+    },
+  ) =>
+    request<{
+      invite: {
+        verificationId: string;
+        code: string;
+        expiresAt: string;
+        senderSource: "household" | "concierge" | "none";
+      };
+      sent: {
+        provider: "twilio" | "mock";
+        externalMessageId: string;
+        from: string;
+        to: string;
+        eventId: string;
+        status?: string;
+        reason?: string;
+      };
+    }>(token, "POST", `/households/${id}/messaging/invite`, input),
+  messagingConfig: () =>
+    request<{
+      conciergeNumber: string | null;
+      conciergeMessagingServiceSid: string | null;
+      sharedLineActive: boolean;
+    }>(token, "GET", "/messaging/config"),
+  sendMessage: (
+    id: HouseholdId,
+    input: { channel: "sms" | "whatsapp"; to: string; body: string },
+  ) =>
+    request<{
+      sent: {
+        provider: "twilio" | "mock";
+        externalMessageId: string;
+        from: string;
+        to: string;
+        eventId: string;
+        status?: string;
+        reason?: string;
+      };
+    }>(token, "POST", `/households/${id}/messaging/send`, input),
+  sendEmail: (
+    id: HouseholdId,
+    input: {
+      toName: string;
+      toAddress: string;
+      subject: string;
+      body: string;
+      inReplyToRef?: string;
+      threadId?: string;
+    },
+  ) =>
+    request<{
+      sent: {
+        provider: "gmail" | "mock";
+        sentMessageId: string;
+        threadId?: string;
+        messageIdHeader?: string;
+        from: string;
+        inboxMessageId: string;
+      };
+    }>(token, "POST", `/households/${id}/messaging/send-email`, input),
+  listMessagingEvents: (id: HouseholdId) =>
+    request<{
+      events: Array<{
+        id: string;
+        direction: "inbound" | "outbound";
+        channel: string;
+        provider: string;
+        fromAddress: string;
+        toAddress: string;
+        body: string;
+        receivedAt: string;
+        plannerRunId: string | null;
+        endpointId: string | null;
+        sessionId: string | null;
+        deliveryStatus: string | null;
+        deliveryStatusAt: string | null;
+        deliveryErrorCode: string | null;
+        authoredByType: "manager" | "agent" | "system" | null;
+        authoredById: string | null;
+        authoredByLabel: string | null;
+      }>;
+    }>(token, "GET", `/households/${id}/messaging/events`),
+  customerActivity: (id: HouseholdId, principalId: string) =>
+    request<{
+      principalId: string;
+      endpoints: Array<{
+        id: string;
+        channel: "sms" | "whatsapp" | "imessage" | "email";
+        address: string;
+        consentStatus: "unknown" | "opted_in" | "opted_out";
+      }>;
+      items: Array<{
+        source: "sms" | "whatsapp" | "imessage" | "email";
+        direction: "inbound" | "outbound";
+        at: string;
+        summary: string;
+        body: string;
+        from: string;
+        to: string;
+        endpointId: string | null;
+        refId: string;
+        refKind: "messaging_event" | "inbox_message";
+        detail: Record<string, unknown>;
+      }>;
+      counts: { sms: number; whatsapp: number; imessage: number; email: number };
+    }>(token, "GET", `/households/${id}/customers/${principalId}/activity`),
+  setAutopilot: (id: HouseholdId, enabled: boolean) =>
+    request<{ household: { id: string; autopilotEnabled: boolean } }>(
+      token,
+      "POST",
+      `/households/${id}/autopilot`,
+      { enabled },
+    ),
+  setInstantAck: (id: HouseholdId, enabled: boolean) =>
+    request<{ household: { id: string; instantAckEnabled: boolean } }>(
+      token,
+      "POST",
+      `/households/${id}/instant-ack`,
+      { enabled },
+    ),
+  setAgentSending: (id: HouseholdId, enabled: boolean) =>
+    request<{ household: { id: string; agentSendingEnabled: boolean } }>(
+      token,
+      "POST",
+      `/households/${id}/agent-sending`,
+      { enabled },
+    ),
+  listCredentials: (id: HouseholdId) =>
+    request<{ credentials: CredentialSummary[] }>(
+      token,
+      "GET",
+      `/households/${id}/credentials`,
+    ),
+  startGoogleOAuth: (id: HouseholdId, body: { returnTo?: string }) =>
+    request<{ authUrl: string }>(
+      token,
+      "POST",
+      `/households/${id}/oauth/google/start`,
+      body,
+    ),
+  oauthConfig: () =>
+    request<{
+      configured: boolean;
+      clientId: boolean;
+      clientSecret: boolean;
+      stateSecret: boolean;
+      redirectUri: string;
+      scopes: string[];
+    }>(token, "GET", "/oauth/google/config"),
+  policySuggestions: (id: HouseholdId) =>
+    request<{
+      suggestions: Array<
+        | {
+            kind: "promote";
+            actionClass: string;
+            domain: string;
+            subjectPrincipalId: string | null;
+            nApprovals: number;
+            windowDays: number;
+            currentRung: string;
+            suggestedRung: "execute";
+            proposedPolicySpec: PolicySpec;
+            basisApprovalIds: string[];
+            basisPolicyId: string;
+            basisPolicyLabel: string;
+          }
+        | {
+            kind: "demote";
+            actionClass: string;
+            domain: string;
+            subjectPrincipalId: string | null;
+            nProblems: number;
+            windowDays: number;
+            currentRung: "execute" | "manage_autonomously";
+            suggestedRung: "draft";
+            proposedPolicySpec: PolicySpec;
+            basisApprovalIds: string[];
+            basisPolicyId: string;
+            basisPolicyLabel: string;
+            summary: string;
+          }
+      >;
+    }>(token, "GET", `/households/${id}/policies/suggestions`),
+  adoptPolicySuggestion: (
+    id: HouseholdId,
+    body: {
+      actionClass: string;
+      subjectPrincipalId: string | null;
+      kind?: "promote" | "demote";
+    },
+  ) =>
+    request<{ policy: PolicySummary }>(
+      token,
+      "POST",
+      `/households/${id}/policies/suggestions/adopt`,
+      body,
+    ),
+  dismissPolicySuggestion: (
+    id: HouseholdId,
+    body: { actionClass: string; subjectPrincipalId: string | null },
+  ) =>
+    request<void>(
+      token,
+      "POST",
+      `/households/${id}/policies/suggestions/dismiss`,
+      body,
+    ),
+  policyLineage: (id: HouseholdId, policyId: string) =>
+    request<{
+      policy: {
+        id: string;
+        label: string;
+        autonomy: string;
+        actionClass: string;
+        domain: string;
+        subject: string;
+        effect: string;
+        createdAt: string;
+        revokedAt: string | null;
+      };
+      lineage: {
+        kind: "promote" | "demote";
+        basisPolicyId: string;
+        basisApprovalIds: string[];
+        suggestedAt: string;
+      } | null;
+      basisPolicy: {
+        id: string;
+        label: string;
+        autonomy: string;
+        actionClass: string;
+        domain: string;
+        subject: string;
+        revokedAt: string | null;
+      } | null;
+      basisApprovals: Array<{
+        id: string;
+        state: string;
+        summary: string;
+        actionClass: string;
+        subjectPrincipalId: string | null;
+        resolvedAt: string | null;
+        resolvedByType: string | null;
+        resolvedById: string | null;
+        amountUsd: number | null;
+      }>;
+    }>(token, "GET", `/households/${id}/policies/${policyId}/lineage`),
+  householdSnapshot: (id: HouseholdId) =>
+    request<{
+      snapshot: {
+        household: {
+          id: string;
+          name: string;
+          tier: string;
+          frozen: boolean;
+          frozenReason: string | null;
+          autopilotEnabled: boolean;
+          instantAckEnabled: boolean;
+          agentSendingEnabled: boolean;
+        };
+        auditChain: {
+          headHash: string | null;
+          eventCount: number;
+          headAt: string | null;
+          valid: boolean;
+          brokenAtEventId: string | null;
+        };
+        approvals: {
+          pending: number;
+          staleWithinDay: number;
+          overdue: number;
+          oldestPendingAt: string | null;
+        };
+        weekActivity: {
+          windowDays: number;
+          totalActions: number;
+          byOutcome: Record<string, number>;
+          topActionClasses: Array<{ actionClass: string; count: number }>;
+          topPolicies: Array<{ policyId: string; label: string; count: number }>;
+        };
+        messaging: {
+          unreadThreads: number;
+          deliveryFailuresLast24h: number;
+          lastInboundAt: string | null;
+          lastOutboundAt: string | null;
+        };
+        obligations: {
+          upcoming14d: number;
+          top: Array<{ title: string; dueAt: string; daysLeft: number }>;
+        };
+        policies: {
+          totalActive: number;
+          executeCount: number;
+        };
+        generatedAt: string;
+        lastActivityAt: string | null;
+      };
+    }>(token, "GET", `/households/${id}/snapshot`),
+  playbookSuggestions: (id: HouseholdId) =>
+    request<{
+      suggestions: Array<{
+        playbookId: string;
+        name: string;
+        description: string;
+        domain: string;
+        reason: string;
+        signal: { count: number; threshold: number; unit: string };
+      }>;
+    }>(token, "GET", `/households/${id}/playbooks/suggestions`),
+});
+
+export interface CredentialSummary {
+  readonly id: string;
+  readonly provider: string;
+  readonly kind: string;
+  readonly label: string;
+  readonly principalRef: string | null;
+  readonly scopes: readonly string[];
+  readonly createdAt: string;
+  readonly expiresAt: string | null;
+  readonly revokedAt: string | null;
+  readonly lastUsedAt: string | null;
+}
+
+export interface InboxMessageSummary {
+  readonly id: string;
+  readonly fromName: string;
+  readonly fromAddress: string;
+  readonly toAddress: string | null;
+  readonly direction: "inbound" | "outbound";
+  readonly subject: string;
+  readonly body: string;
+  readonly receivedAt: string;
+  readonly status: "received" | "triaged" | "replied" | "archived" | "spam";
+  readonly urgency: string | null;
+  readonly recipientClass: string | null;
+  readonly requiresReply: "yes" | "no" | "unknown";
+  readonly draftReply: string | null;
+  readonly triagedAt: string | null;
+}
+
+export interface TaskSummary {
+  readonly id: string;
+  readonly runId: string;
+  readonly agent: string;
+  readonly agentVersion: string;
+  readonly kind: string;
+  readonly state: string;
+  readonly decisionSummary: string | null;
+  readonly errorMessage: string | null;
+  readonly outputs: Record<string, unknown> | null;
+  readonly createdAt: string;
+}
+
+export interface RunResult {
+  readonly runId: string;
+  readonly intentKind: string;
+  readonly state: string;
+  readonly tasks: ReadonlyArray<{
+    readonly id: string;
+    readonly agent: string;
+    readonly kind: string;
+    readonly state: string;
+    readonly decisionSummary?: string;
+    readonly errorMessage?: string;
+  }>;
+}

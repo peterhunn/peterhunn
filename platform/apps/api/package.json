@@ -1,0 +1,39 @@
+{
+  "name": "@atelier/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "test": "vitest run",
+    "clean": "rm -rf dist .turbo *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@atelier/agents": "workspace:*",
+    "@atelier/db": "workspace:*",
+    "@atelier/domain": "workspace:*",
+    "@atelier/policy": "workspace:*",
+    "@atelier/router": "workspace:*",
+    "@fastify/cors": "^10.0.1",
+    "@fastify/helmet": "^12.0.1",
+    "@fastify/rate-limit": "^10.1.1",
+    "@simplewebauthn/server": "^11.0.0",
+    "fastify": "^5.0.0",
+    "google-auth-library": "^9.14.1",
+    "fastify-plugin": "^5.0.0",
+    "tsx": "^4.19.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^2.0.5",
+    "better-sqlite3": "^11.3.0",
+    "drizzle-orm": "^0.36.0",
+    "msw": "^2.6.4",
+    "typescript": "^5.5.4",
+    "vitest": "^2.0.5"
+  }
+}

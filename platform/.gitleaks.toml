@@ -1,0 +1,43 @@
+# gitleaks config for ATELIER. See https://github.com/gitleaks/gitleaks
+#
+# Uses the built-in default rules (which catch common API keys,
+# private keys, JWTs, cloud provider credentials, etc.). Add
+# ATELIER-specific token shapes and allowlist known-safe fixtures.
+
+[extend]
+useDefault = true
+
+# ATELIER bearer tokens are `atl_<24 base64url bytes>` — 32 chars
+# after the prefix.
+[[rules]]
+id = "atelier-bearer-token"
+description = "ATELIER bearer token"
+regex = '''atl_[A-Za-z0-9_-]{32}'''
+tags = ["atelier", "token"]
+
+# ATELIER credential encryption master key: 64 hex chars in an env
+# var named ATELIER_CREDENTIAL_KEY.
+[[rules]]
+id = "atelier-credential-key"
+description = "ATELIER credential encryption master key"
+regex = '''ATELIER_CREDENTIAL_KEY\s*[:=]\s*"?[0-9a-fA-F]{64}"?'''
+tags = ["atelier", "secret"]
+
+[allowlist]
+description = "Known-safe places to ignore"
+paths = [
+  # Test-only deterministic key in vitest.setup.ts — obviously a
+  # zero-filled test value, not a real secret.
+  '''platform/apps/api/vitest.setup.ts''',
+  # Docs that show example commands (openssl rand -hex 32 etc.).
+  '''platform/SECURITY.md''',
+  '''platform/DEPLOY.md''',
+  '''platform/.env.example''',
+]
+# Skip test fixtures that contain intentionally-fake secrets.
+regexes = [
+  '''0{63}1''',  # the test key
+  '''at-abc''',  # test access token strings
+  '''live-token''',
+  '''rt-abc''',
+]
